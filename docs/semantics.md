@@ -249,6 +249,7 @@ Calls not listed here are unmodelled (§4.6).
 | `strings.Builder` (`WriteString Write WriteByte WriteRune String Len Reset`) | exact (a string cell); `Grow` (also `bytes.Buffer`'s) panics for a negative argument and is otherwise a no-op |
 | `strconv.Atoi` | exact for decimal `int64` (sign, range error) |
 | `strconv.Itoa` | exact |
+| `sync.Pool.Get` on a package variable whose initializer sets `New` (`var ppFree = sync.Pool{New: func() any { return new(pp) }}`); `Put` | `Get` calls `New`, which Go may do at any `Get` (an empty pool); `Put` is a no-op. An object `Put` back is never returned: assumption (#105). Another pool's `Get`: unmodelled |
 | `sync/atomic` `Bool Int32 Int64 Uint32 Uint64`: `Load Store Add Swap CompareAndSwap And Or` (#67); the functions `Load Store Add Swap CompareAndSwap` on `*int32 *int64 *uint32 *uint64` | exact: plain reads and writes (a goroutine's instructions between two scheduling points run atomically, §6); `Uintptr`, `Pointer[T]`, `Value`: havoc |
 | `strconv.ParseInt ParseUint` | exact: bases 0 (prefixes `0b 0o 0x 0`, underscores) and 2–36, bit sizes 0–64, syntax, range (the bound, as soon as the value overflows), base and bit size errors; checked against Go by `PKG=testdata/convdiff scripts/json-diff.sh` |
 | `strconv.ParseBool FormatInt FormatUint` | exact (an illegal base panics, as in Go) |

@@ -179,7 +179,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	// Anonymous functions after the rest, so calls through closures can
 	// follow them; their FuncIds come last and move nothing.
 	for k := range units {
-		units[k].fns = withAnon(units[k].fns)
+		units[k].fns = withAnon(withPoolNews(withAnon(units[k].fns)))
 	}
 	// The types modelled code boxes into interfaces: the dynamic types an
 	// interface value the model built can have.
@@ -3585,6 +3585,19 @@ func (t *fnState) call(x *ssa.Call) error {
 			return nil
 		}
 	}
+	if g := poolGet(x.Call); g != nil {
+		if nf := poolNew(g); nf != nil {
+			if id, ok := t.prog.ids[nf]; ok {
+				// An empty pool's Get calls New, which Go may do at any
+				// Get; an object Put back is the behaviour left out (#105).
+				t.assume("sync.Pool.Get of %s returns a new object from its New: objects Put back are not modelled", g.Name())
+				if !slices.Contains(t.out.Calls, id) {
+					t.out.Calls = append(t.out.Calls, id)
+				}
+				return t.emitCallArgs(x, ir.Term{Kind: ir.TermCall, Callee: id}, nf.String(), nil)
+			}
+		}
+	}
 	if done, err := t.concCall(x); done || err != nil {
 		return err
 	}
@@ -5293,6 +5306,99 @@ func holdsSync(t types.Type) bool {
 		return holdsSync(u.Elem())
 	}
 	return false
+}
+
+// poolGet is the package variable a call is (*sync.Pool).Get on, or nil.
+func poolGet(c ssa.CallCommon) *ssa.Global {
+	if fn := c.StaticCallee(); fn == nil || fn.String() != "(*sync.Pool).Get" || len(c.Args) != 1 {
+		return nil
+	}
+	g, _ := c.Args[0].(*ssa.Global)
+	return g
+}
+
+// poolNew is the function the initializer of g, a package variable of
+// type sync.Pool, stores in its New field (var ppFree = sync.Pool{New:
+// func() any { return new(pp) }}), or nil (#105).
+func poolNew(g *ssa.Global) *ssa.Function {
+	if g.Pkg == nil {
+		return nil
+	}
+	initFn := g.Pkg.Func("init")
+	if initFn == nil {
+		return nil
+	}
+	// The literal is either stored field by field into g, or built in a
+	// local (complit) that is then copied into g.
+	bases := map[ssa.Value]bool{g: true}
+	for _, f := range initFuncs(initFn) {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				if st, ok := in.(*ssa.Store); ok && st.Addr == g {
+					if u, ok := st.Val.(*ssa.UnOp); ok && u.Op == token.MUL {
+						if a, ok := u.X.(*ssa.Alloc); ok {
+							bases[a] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	for _, f := range initFuncs(initFn) {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				st, ok := in.(*ssa.Store)
+				if !ok {
+					continue
+				}
+				fa, ok := st.Addr.(*ssa.FieldAddr)
+				if !ok || !bases[fa.X] {
+					continue
+				}
+				if s, ok := fa.X.Type().(*types.Pointer).Elem().Underlying().(*types.Struct); !ok || s.Field(fa.Field).Name() != "New" {
+					continue
+				}
+				switch v := st.Val.(type) {
+				case *ssa.Function:
+					return v
+				case *ssa.MakeClosure:
+					if fn, ok := v.Fn.(*ssa.Function); ok && len(v.Bindings) == 0 {
+						return fn
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// withPoolNews adds to fns the New functions of the pools of their own
+// package that they Get from (#105).
+func withPoolNews(fns []*ssa.Function) []*ssa.Function {
+	seen := map[*ssa.Function]bool{}
+	for _, f := range fns {
+		seen[f] = true
+	}
+	out := fns
+	for _, f := range fns {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				c, ok := in.(ssa.CallInstruction)
+				if !ok {
+					continue
+				}
+				g := poolGet(*c.Common())
+				if g == nil || g.Pkg != f.Pkg {
+					continue
+				}
+				if nf := poolNew(g); nf != nil && !seen[nf] {
+					seen[nf] = true
+					out = append(out, nf)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // loadedInit is the value a package initializer, or an init function on
