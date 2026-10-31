@@ -100,6 +100,9 @@ exhausted conc_timeoutbuffered_nopanic
 exhausted conc_trysend_nopanic
 confirmed conc_withdeadline_nopanic
 confirmed conc_work_nopanic
+exhausted counter_counter_add_new_nopanic
+confirmed counter_counter_first_new_nopanic
+exhausted counter_new_nopanic
 confirmed divzero_avg_nopanic
 proved divzero_ratio_nopanic
 exhausted errs_apierror_error_nopanic
