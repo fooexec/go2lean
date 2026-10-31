@@ -791,19 +791,20 @@ def hasSetupEnd (p : Prog) (fid : FuncId) : Bool :=
     | _ => false
   | none => false
 
-/-- Run `fid`'s setup once, on an empty heap and placeholder arguments (the
+/-- Run `fid`'s setup once, on `heap` (the initializers', or empty) and placeholder arguments (the
 setup reads none), and snapshot the machine at its `setupEnd` (#87). The
 setup's havoc reads, if any, are then the same in every trial (`h`'s, as
 the exhaustive engine draws them anyway), recorded as an assumption. An
 error says why there is no snapshot: the run did not get there with the
 main goroutine alone, or chose between schedules on the way. -/
-def captureSetup (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (fuel : Nat) : Except String Snap :=
+def captureSetup (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (fuel : Nat)
+    (heap : Heap Val := #[]) : Except String Snap :=
   if !hasSetupEnd p fid then .error "no setupEnd" else
   match p.funcs[fid]? with
   | none => .error "no function"
   | some fn =>
     let args := fn.params.map fun _ => Val.unit
-    match scheduleS p or h fuel true #[{ frames := [entryFrame fn args], vc := #[1] }] {} fuel 0 with
+    match scheduleS p or h fuel true #[{ frames := [entryFrame fn args], vc := #[1] }] { heap } fuel 0 with
     | .inl snap =>
       if !snap.s.conc.arity.all (· == 1) then .error "the setup chose between schedules"
       else if let some site := snap.s.stuck then .error s!"the setup got stuck: {site}"

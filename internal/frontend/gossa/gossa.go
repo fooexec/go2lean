@@ -1181,6 +1181,18 @@ func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]cont
 		}
 	}
 
+	initFn, keep := initCells(pkgPath, fns, st.sharedGlobals)
+	if initFn != nil {
+		st.initCells = map[*ssa.Global]bool{}
+		for in := range keep {
+			if s, ok := in.(*ssa.Store); ok {
+				if g, ok := s.Addr.(*ssa.Global); ok {
+					st.initCells[g] = true
+				}
+			}
+		}
+	}
+
 	// Pass 1: assign FuncIds so calls can be resolved.
 	byName := map[string]*ssa.Function{}
 	for _, f := range fns {
@@ -1189,6 +1201,21 @@ func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]cont
 		byName[funcName(f)] = f
 	}
 	st.specFor = func(f *ssa.Function) string { return specTarget(f, byName) }
+	// The initializer's slice first: when it does not translate, its
+	// variables are not cells, for every function.
+	if initFn != nil {
+		id := len(p.Funcs)
+		out := &ir.Func{Name: "init", GoSig: goSig(initFn), Init: true}
+		p.Funcs = append(p.Funcs, out)
+		t := &fnState{prog: st, f: initFn, out: out, vars: map[ssa.Value]ir.Var{}, blockID: map[*ssa.BasicBlock]int{}, keep: keep}
+		if err := t.translate(); err != nil {
+			rejectStub(out, err)
+			st.initCells = nil
+		} else {
+			out.Sync = t.sync
+			p.Inits = []int{id}
+		}
+	}
 	// Pass 2: bodies.
 	for _, f := range fns {
 		out := p.Funcs[st.ids[f]]
@@ -1348,6 +1375,10 @@ type progState struct {
 	// sharedGlobals: the package variables of a package that starts
 	// goroutines that its functions (not its init) write (cellGlobal).
 	sharedGlobals map[*ssa.Global]bool
+	// initCells: the package variables of the package that are cells
+	// starting at their zero value, set by the slice of the package
+	// initializer the model runs before a search (#55).
+	initCells map[*ssa.Global]bool
 	// regexps caches packageRegexps.
 	regexps map[*ssa.Package][]string
 	// tables caches arrayTable; nil until first used.
@@ -1736,7 +1767,10 @@ func rejectStub(out *ir.Func, err error) {
 }
 
 type fnState struct {
-	prog    *progState
+	prog *progState
+	// keep: for the package initializer's slice (#55), the instructions
+	// translated (terminators and phis always are); nil otherwise.
+	keep    map[ssa.Instruction]bool
 	f       *ssa.Function
 	out     *ir.Func
 	vars    map[ssa.Value]ir.Var
@@ -2030,7 +2064,17 @@ func (t *fnState) block(i int, b *ssa.BasicBlock) error {
 		t.syncOp(ir.SyncOp{Kind: "setupEnd"}, t.fresh())
 		instrs = t.setup.rest
 	}
-	for _, in := range instrs {
+	for i, in := range instrs {
+		if t.keep != nil && !t.keep[in] && i < len(instrs)-1 {
+			if _, phi := in.(*ssa.Phi); !phi {
+				continue
+			}
+		}
+		if u, ok := in.(*ssa.UnOp); ok && t.keep != nil && isGuard(u) {
+			// The initializer runs once: its guard reads false.
+			t.emit(ir.Instr{Dst: t.def(u), Op: ir.Const{V: ir.BoolVal(false)}})
+			continue
+		}
 		if err := t.instr(b, in); err != nil {
 			return fmt.Errorf("%s: %w", in, err)
 		}
@@ -5172,11 +5216,11 @@ func compiledPattern(v ssa.Value) (*regexp.Regexp, bool) {
 // are the race detector's (C2).
 func (s *progState) cellGlobal(g *ssa.Global) (uint32, ir.Val, bool) {
 	pt, ok := g.Type().(*types.Pointer)
-	if !ok || g.Pkg == nil || !(holdsSync(pt.Elem()) || s.sharedGlobals[g]) {
+	if !ok || g.Pkg == nil || !(holdsSync(pt.Elem()) || s.sharedGlobals[g] || s.initCells[g]) {
 		return 0, nil, false
 	}
 	var start ir.Val
-	if initFn := g.Pkg.Func("init"); initFn != nil {
+	if initFn := g.Pkg.Func("init"); initFn != nil && !s.initCells[g] {
 		for _, f := range initFuncs(initFn) {
 			for _, b := range f.Blocks {
 				for _, in := range b.Instrs {
@@ -5282,6 +5326,144 @@ func sharedGlobals(fns []*ssa.Function) map[*ssa.Global]bool {
 		return nil
 	}
 	return written
+}
+
+// isGuard says whether u loads the package initializer's init$guard.
+func isGuard(u *ssa.UnOp) bool {
+	g, ok := u.X.(*ssa.Global)
+	return ok && u.Op == token.MUL && g.Name() == "init$guard"
+}
+
+// initCells finds, in a package whose functions start goroutines (shared
+// non-nil), the package variables those functions use that the package
+// initializer sets, once, to a value it builds: a new object, map, slice
+// or channel, made in place or by a call of a function of the package (var
+// reg = &registry{m: map[string]int{}}, var reg = newRegistry()). The
+// goroutines share what the initializer built, so each such variable is a
+// cell that starts at its zero value, and the search runs the part of the
+// package initializer that sets it before the trials (#55). It returns the
+// package initializer and that part, its slice: the stores to those
+// variables, every instruction of the initializer they depend on, the
+// instructions that write into what those build (a field, an element, a
+// map entry, a call that takes it), and the initializer's control flow.
+// Nil when there is no such variable.
+func initCells(pkgPath string, fns []*ssa.Function, shared map[*ssa.Global]bool) (*ssa.Function, map[ssa.Instruction]bool) {
+	if shared == nil {
+		return nil, nil
+	}
+	var spkg *ssa.Package
+	used := map[*ssa.Global]bool{}
+	for _, f := range fns {
+		if f.Pkg == nil || f.Pkg.Pkg.Path() != pkgPath {
+			continue
+		}
+		spkg = f.Pkg
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				for _, op := range in.Operands(nil) {
+					if g, ok := (*op).(*ssa.Global); ok && g.Pkg == spkg {
+						used[g] = true
+					}
+				}
+			}
+		}
+	}
+	if spkg == nil {
+		return nil, nil
+	}
+	initFn := spkg.Func("init")
+	if initFn == nil {
+		return nil, nil
+	}
+	stores := map[*ssa.Global][]*ssa.Store{}
+	for _, f := range initFuncs(initFn) {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				if st, ok := in.(*ssa.Store); ok {
+					if g, ok := st.Addr.(*ssa.Global); ok && used[g] {
+						stores[g] = append(stores[g], st)
+					}
+				}
+			}
+		}
+	}
+	var roots []ssa.Instruction
+	for g, sts := range stores {
+		if _, iface := g.Type().(*types.Pointer).Elem().Underlying().(*types.Interface); iface {
+			continue
+		}
+		if len(sts) == 1 && sts[0].Parent() == initFn && builtValue(sts[0].Val, spkg) {
+			roots = append(roots, sts[0])
+		}
+	}
+	if len(roots) == 0 {
+		return nil, nil
+	}
+	for _, b := range initFn.Blocks {
+		for _, in := range b.Instrs {
+			if _, phi := in.(*ssa.Phi); phi {
+				roots = append(roots, in)
+			}
+		}
+		roots = append(roots, b.Instrs[len(b.Instrs)-1])
+	}
+	keep := map[ssa.Instruction]bool{}
+	var work []ssa.Instruction
+	add := func(in ssa.Instruction) {
+		if in.Parent() == initFn && !keep[in] {
+			keep[in] = true
+			work = append(work, in)
+		}
+	}
+	for _, r := range roots {
+		add(r)
+	}
+	for len(work) > 0 {
+		in := work[len(work)-1]
+		work = work[:len(work)-1]
+		for _, op := range in.Operands(nil) {
+			if d, ok := (*op).(ssa.Instruction); ok {
+				add(d)
+			}
+		}
+		v, ok := in.(ssa.Value)
+		if !ok || v.Referrers() == nil {
+			continue
+		}
+		for _, r := range *v.Referrers() {
+			switch x := r.(type) {
+			case *ssa.FieldAddr, *ssa.IndexAddr, *ssa.Slice, ssa.CallInstruction:
+				add(r)
+			case *ssa.Store:
+				if x.Addr == v {
+					add(r)
+				}
+			case *ssa.MapUpdate:
+				if x.Map == v {
+					add(r)
+				}
+			}
+		}
+	}
+	return initFn, keep
+}
+
+// builtValue says whether v is a value an initializer builds: a new
+// object, map, slice or channel, or the result of a call of a function of
+// package spkg.
+func builtValue(v ssa.Value, spkg *ssa.Package) bool {
+	switch x := v.(type) {
+	case *ssa.Alloc:
+		return x.Heap
+	case *ssa.MakeMap, *ssa.MakeSlice, *ssa.MakeChan:
+		return true
+	case *ssa.Slice:
+		return builtValue(x.X, spkg)
+	case *ssa.Call:
+		fn := x.Call.StaticCallee()
+		return fn != nil && fn.Pkg == spkg && len(fn.Blocks) > 0 && fn.Parent() == nil && !isInit(fn.Name())
+	}
+	return false
 }
 
 // holdsSync says whether a value of type t holds synchronisation state

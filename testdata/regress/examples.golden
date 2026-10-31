@@ -151,6 +151,10 @@ exhausted iface_set_nopanic
 exhausted mut=1/4 iface_set_specsetnonnil
 exhausted iface_sq_area_nopanic
 confirmed iface_unwrap_nopanic
+exhausted initcells_registerboth_nopanic
+confirmed initcells_registerracy_nopanic
+exhausted_havoc initcells_registry_add_nopanic
+exhausted initcells_registry_addunlocked_nopanic
 proved initvars_add_nopanic
 exhausted initvars_apply_nopanic
 exhausted initvars_band_nohang

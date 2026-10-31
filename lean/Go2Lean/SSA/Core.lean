@@ -249,6 +249,10 @@ structure Prog (Op : Type) where
   goroutine moves next, which ready `select` case fires); none for a
   program without concurrency. -/
   schedSite : Option Nat := none
+  /-- The package initializers' slices the search runs, in order, before
+  the trials: they set the package variables that are cells to what the
+  initializers build (#55). -/
+  inits : Array Nat := #[]
   deriving Repr
 
 /-- Havoc oracle: site → iteration → value. -/

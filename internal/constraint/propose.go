@@ -37,7 +37,7 @@ func Propose(ws contract.Workspace, report *contract.ModelReport) ([]*contract.P
 	for _, f := range report.Funcs {
 		// Generic instances (Map[int]) are modelled for their callers; a
 		// harness cannot name them.
-		if f.Status == contract.ModelRejected || f.SpecFor != "" || f.SequenceFor != "" || f.Closure || f.WrappedBy != "" || f.CtorOnly != "" || f.TestFile || strings.Contains(f.Name, "[") {
+		if f.Status == contract.ModelRejected || f.SpecFor != "" || f.SequenceFor != "" || f.Closure || f.WrappedBy != "" || f.CtorOnly != "" || f.TestFile || f.Init || strings.Contains(f.Name, "[") {
 			continue
 		}
 		out = append(out, &contract.Property{

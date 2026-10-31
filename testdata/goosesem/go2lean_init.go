@@ -1,5 +1,7 @@
 package semantics
 
+import "sync"
+
 // go2lean's own tests (#55): package variables set by a call with constant
 // arguments, and an alias of one, as sarama's Kafka versions are.
 
@@ -37,4 +39,28 @@ var pingConst = &pingT{data: [4]byte{2, 4, 16, 9}}
 func testInitSentinelArray() bool {
 	d := pingConst.data
 	return d == pingConst.data && d[2] == 16 && pingConst.data[3] == 9
+}
+
+// A registry its initializer builds, shared with a goroutine (#55): the
+// goroutine writes into the map the initializer made, and the caller sees
+// both the initializer's entry and the goroutine's.
+type semRegistry struct {
+	mu sync.Mutex
+	m  map[string]int
+}
+
+var semReg = &semRegistry{m: map[string]int{"init": 1}}
+
+func testInitCellShared() bool {
+	done := make(chan bool)
+	go func() {
+		semReg.mu.Lock()
+		semReg.m["go"] = 2
+		semReg.mu.Unlock()
+		done <- true
+	}()
+	<-done
+	semReg.mu.Lock()
+	defer semReg.mu.Unlock()
+	return semReg.m["init"] == 1 && semReg.m["go"] == 2
 }
