@@ -307,6 +307,8 @@ exhausted runes_initials_nopanic
 exhausted runes_reverse_nohang
 exhausted runes_reverse_nopanic
 exhausted mut=0/5 runes_reverse_specreverse
+exhausted sharedep_hitinturn_nopanic
+confirmed sharedep_hittwice_nopanic
 none stream_converter_finish_nopanic
 none stream_converter_process_nopanic
 exhausted mut=6/14 stream_seqbounded_sequence

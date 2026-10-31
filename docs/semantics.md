@@ -361,15 +361,16 @@ a pointer its own) are checked against the location's last write and the
 reads since (FastTrack); two accesses, one a write, neither ordered before
 the other, end the run with `data_race`. Within a step the machine is
 sequentially consistent: no weak-memory reorderings. In a package that
-starts goroutines, the package variables its functions write are shared
-cells, so their races are seen. A cell starts at the variable's zero
+starts goroutines, or in a dependency package (`-deps`) of a program whose
+compiled packages do, the package variables that the functions of any
+linked package write are shared cells, so their races are seen. Which
+variables are cells is decided once for the whole program, so every
+package reads and writes a variable the same way (#55). A cell starts at the variable's zero
 value, at the one constant its initializer stores, or, for an interface
 its initializer builds (`var logger Logger = &std{}`, or a call of a
 function that returns one), at an opaque
-non-nil value whose method calls are havoc (#55). In such a package, or
-in a dependency package (`-deps`) of a program whose compiled packages
-start goroutines, a variable the
-package's functions use that the package initializer sets once to a value
+non-nil value whose method calls are havoc (#55). In those packages, a
+variable that linked functions use and that the package initializer sets once to a value
 it builds (a new object, map, slice or channel, made in place or by a call
 of a function of the package: `var reg = &registry{m: map[string]int{}}`)
 is a cell too: the compile stage keeps the slice of the package
