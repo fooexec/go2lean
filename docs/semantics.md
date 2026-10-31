@@ -428,7 +428,7 @@ writes the same value as a Go literal.
 | SDK response types (with JSON metadata) | generated field by field plus a raw JSON object of one or two members keyed by strings the call tree compares with `==`, then written as the JSON document the harness builds for the value and decoded by the JSON model: typed fields, `RawJSON()`, per-member `respjson.Field` and `ExtraFields` agree as decoding makes them; the harness decodes the same document |
 | documented enums (`// Any of ...`) | one of the values three times in four; the values the call tree compares make half of the choices |
 | pointers to another package's struct with an unexported field, whose package exports a function returning one (a handle) | opaque non-nil (the PoC passes a zero one: a panic through it is inconclusive); a field read through it is havoc, a store into it ignored; a struct of exported fields is generated field by field |
-| receiver of a method whose type has a constructor (`NewT`, `newT`; for an unexported `t` also `NewT`/`newT` with its first letter capitalised) | built by it (`T.M~NewT`); when no wrapper can be built (a variadic constructor, parameters the model cannot generate), the method of an unexported type is no target: only its constructor makes one |
+| receiver of a method whose type has a constructor (`NewT`, `newT`; for an unexported `t` also `NewT`/`newT` with its first letter capitalised; `New`/`new` for the type named like its package, as `retrier.New` makes a `*Retrier`) | built by it (`T.M~NewT`); when no wrapper can be built (a variadic constructor, parameters the model cannot generate), the method of an unexported type is no target: only its constructor makes one |
 
 ## 8. Not modelled (rejected functions)
 

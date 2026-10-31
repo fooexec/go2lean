@@ -874,13 +874,18 @@ func ctorOf(f *ssa.Function) (*types.TypeName, bool) {
 		return nil, false
 	}
 	// NewT or newT for T; for an unexported t also NewT and newT with its
-	// first letter capitalised (newAnthropicBetaToResponsesConverter).
+	// first letter capitalised (newAnthropicBetaToResponsesConverter); and
+	// New or new for the type named like its package (retrier.New makes a
+	// *retrier.Retrier, #15).
 	n := named.Obj().Name()
 	upper := strings.ToUpper(n[:1]) + n[1:]
-	if f.Name() != "New"+n && f.Name() != "new"+n && f.Name() != "New"+upper && f.Name() != "new"+upper {
-		return nil, false
+	if f.Name() == "New"+n || f.Name() == "new"+n || f.Name() == "New"+upper || f.Name() == "new"+upper {
+		return named.Obj(), true
 	}
-	return named.Obj(), true
+	if (f.Name() == "New" || f.Name() == "new") && strings.EqualFold(n, f.Pkg.Pkg.Name()) {
+		return named.Obj(), true
+	}
+	return nil, false
 }
 
 // ctorWrapper builds T.M~NewT: call the constructor on the first
