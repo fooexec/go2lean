@@ -176,10 +176,19 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			units = append(units, unit{path, fns})
 		}
 	}
+	// A program whose compiled packages start goroutines: the dependency
+	// packages they call run in those goroutines too (#55).
+	concurrent := false
+	for _, u := range units {
+		if mainPaths[u.path] && sharedGlobals(u.fns) != nil {
+			concurrent = true
+		}
+	}
 	// Anonymous functions after the rest, so calls through closures can
 	// follow them; their FuncIds come last and move nothing.
 	for k := range units {
-		units[k].fns = withAnon(withPoolNews(withAnon(units[k].fns)))
+		fns := withAnon(withPoolNews(withAnon(units[k].fns)))
+		units[k].fns = withAnon(withInitCallees(units[k].path, fns, sharedGlobals(fns) != nil || concurrent && !mainPaths[units[k].path]))
 	}
 	// The types modelled code boxes into interfaces: the dynamic types an
 	// interface value the model built can have.
@@ -206,7 +215,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	}
 	var progs []*ir.Prog
 	for _, u := range units {
-		p, err := translatePackage(u.path, u.fns, xrefs, zeros, sprog, boxed)
+		p, err := translatePackage(u.path, u.fns, xrefs, zeros, sprog, boxed, concurrent && !mainPaths[u.path])
 		if err != nil {
 			return nil, "", err
 		}
@@ -1171,7 +1180,7 @@ func candidates(spkg *ssa.Package, tests bool) []*ssa.Function {
 	return fns
 }
 
-func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type) (*ir.Prog, error) {
+func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, concurrentDep bool) (*ir.Prog, error) {
 	p := &ir.Prog{Package: pkgPath, Frontend: Frontend}
 	st := &progState{prog: p, ids: map[*ssa.Function]int{}, xrefs: xrefs, zeros: zeros, sprog: sprog, boxed: boxed, json: newJSONTable(sprog)}
 	st.sharedGlobals = sharedGlobals(fns)
@@ -1181,7 +1190,7 @@ func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]cont
 		}
 	}
 
-	initFn, keep := initCells(pkgPath, fns, st.sharedGlobals)
+	initFn, keep := initCells(pkgPath, fns, st.sharedGlobals != nil || concurrentDep)
 	if initFn != nil {
 		st.initCells = map[*ssa.Global]bool{}
 		for in := range keep {
@@ -5334,8 +5343,9 @@ func isGuard(u *ssa.UnOp) bool {
 	return ok && u.Op == token.MUL && g.Name() == "init$guard"
 }
 
-// initCells finds, in a package whose functions start goroutines (shared
-// non-nil), the package variables those functions use that the package
+// initCells finds, in a package whose functions start goroutines, or a
+// dependency of a program whose compiled packages do (concurrent), the
+// package variables its functions use that the package
 // initializer sets, once, to a value it builds: a new object, map, slice
 // or channel, made in place or by a call of a function of the package (var
 // reg = &registry{m: map[string]int{}}, var reg = newRegistry()). The
@@ -5347,8 +5357,8 @@ func isGuard(u *ssa.UnOp) bool {
 // instructions that write into what those build (a field, an element, a
 // map entry, a call that takes it), and the initializer's control flow.
 // Nil when there is no such variable.
-func initCells(pkgPath string, fns []*ssa.Function, shared map[*ssa.Global]bool) (*ssa.Function, map[ssa.Instruction]bool) {
-	if shared == nil {
+func initCells(pkgPath string, fns []*ssa.Function, concurrent bool) (*ssa.Function, map[ssa.Instruction]bool) {
+	if !concurrent {
 		return nil, nil
 	}
 	var spkg *ssa.Package
@@ -5448,9 +5458,41 @@ func initCells(pkgPath string, fns []*ssa.Function, shared map[*ssa.Global]bool)
 	return initFn, keep
 }
 
+// withInitCallees adds to fns the functions of their package that the
+// package initializer's slice (initCells) calls, a generic constructor's
+// instance included, so that the slice runs them.
+func withInitCallees(pkgPath string, fns []*ssa.Function, concurrent bool) []*ssa.Function {
+	initFn, keep := initCells(pkgPath, fns, concurrent)
+	if initFn == nil {
+		return fns
+	}
+	seen := map[*ssa.Function]bool{}
+	for _, f := range fns {
+		seen[f] = true
+	}
+	for _, b := range initFn.Blocks {
+		for _, in := range b.Instrs {
+			c, ok := in.(*ssa.Call)
+			if !ok || !keep[in] {
+				continue
+			}
+			fn := c.Call.StaticCallee()
+			if fn == nil || seen[fn] || len(fn.Blocks) == 0 || isInit(fn.Name()) {
+				continue
+			}
+			if o := fn.Origin(); fn.Pkg != initFn.Pkg && (o == nil || o.Pkg != initFn.Pkg) {
+				continue
+			}
+			seen[fn] = true
+			fns = append(fns, fn)
+		}
+	}
+	return fns
+}
+
 // builtValue says whether v is a value an initializer builds: a new
 // object, map, slice or channel, or the result of a call of a function of
-// package spkg.
+// package spkg (or of an instance of a generic one).
 func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 	switch x := v.(type) {
 	case *ssa.Alloc:
@@ -5461,7 +5503,10 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 		return builtValue(x.X, spkg)
 	case *ssa.Call:
 		fn := x.Call.StaticCallee()
-		return fn != nil && fn.Pkg == spkg && len(fn.Blocks) > 0 && fn.Parent() == nil && !isInit(fn.Name())
+		if fn != nil && fn.Origin() != nil {
+			fn = fn.Origin()
+		}
+		return fn != nil && fn.Pkg == spkg && fn.Parent() == nil && !isInit(fn.Name())
 	}
 	return false
 }
