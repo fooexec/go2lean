@@ -353,13 +353,14 @@ func raceOne(root, pkgDir, pkgName, pkg string, p *prepared, overlay map[string]
 
 // raceReport is the first data race report in a -race run's output whose
 // accesses are both in the program: not in the replay controller
-// (go2lean*) or the harness. An access is placed by the first frame of
-// its stack outside the runtime, reflect and sync (a map access starts in
-// the runtime's map code).
-// helperFrame matches a stack frame of a go2lean helper function
-// (go2leanDeadline, go2leanGate, their closures), not the PoC test itself.
-var helperFrame = regexp.MustCompile(`\.go2lean[A-Z]\w*(\.func\d+)*\(`)
-
+// (go2lean*) or the harness. An access is placed by the first frame of its
+// stack, from the top, outside the standard library (a map access starts
+// in the runtime's map code, a context's cancel in package context): a
+// go2lean helper there (go2leanGate, go2leanDeadline running a cancel, the
+// PoC test) makes it the harness's, since the controller orders it and the
+// detector does not see that; any other frame makes it the program's. The
+// helpers below that frame (go2leanGoAny and go2leanInvoke, which start
+// every goroutine the controller runs) do not count.
 func raceReport(out string) string {
 	for _, block := range strings.Split(out, "==================") {
 		if !strings.Contains(block, "WARNING: DATA RACE") {
@@ -373,26 +374,13 @@ func raceReport(out string) string {
 				continue
 			}
 			accesses++
-			// An access made inside one of the harness's or the replay
-			// controller's helpers (go2leanDeadline running a context's
-			// cancel, go2leanGate): the controller orders it, which the
-			// detector does not see, so the report is not the program's.
-			for _, f := range lines[i+1:] {
-				if strings.TrimSpace(f) == "" {
-					break
-				}
-				if helperFrame.MatchString(f) {
-					ours = true
-				}
-			}
 			for _, f := range lines[i+1:] {
 				f = strings.TrimSpace(f)
 				if f == "" {
 					break
 				}
-				if strings.HasPrefix(f, "/") || strings.HasPrefix(f, "runtime.") || strings.HasPrefix(f, "internal/") ||
-					strings.HasPrefix(f, "reflect.") || strings.HasPrefix(f, "sync.") || strings.HasPrefix(f, "sync/") {
-					continue // a file:line line, or a frame of the runtime
+				if strings.HasPrefix(f, "/") || stdFrame(f) {
+					continue // a file:line line, or a frame of the standard library
 				}
 				if strings.Contains(f, ".go2lean") || strings.Contains(f, "TestGo2LeanPoC_") {
 					ours = true
@@ -410,6 +398,24 @@ func raceReport(out string) string {
 		}
 	}
 	return ""
+}
+
+// stdFrame says whether stack frame f (a function, as a race report
+// prints it) is in the standard library: the first element of its package
+// path has no dot (runtime, internal/..., sync/atomic, context), as a
+// module path's has (github.com/..., example.com/...). Package main is
+// the program's.
+func stdFrame(f string) bool {
+	if strings.HasPrefix(f, "main.") {
+		return false
+	}
+	first := f
+	if i := strings.Index(first, "/"); i >= 0 {
+		first = first[:i]
+	} else if i := strings.Index(first, "."); i >= 0 {
+		first = first[:i]
+	}
+	return !strings.Contains(first, ".")
 }
 
 func reasonOf(v *contract.Verdict) string {

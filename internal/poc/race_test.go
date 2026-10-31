@@ -89,3 +89,37 @@ Previous write at 0x00c00009a060 by goroutine 11:
 		t.Fatalf("program race not reported: %q", got)
 	}
 }
+
+// A goroutine the replay controller starts runs the program's code above
+// go2leanGoAny and go2leanInvoke: a race between two of them is the
+// program's (evaluation 3's TestShutdownSuccess, #15).
+func TestRaceReportControllerStartedGoroutines(t *testing.T) {
+	started := `==================
+WARNING: DATA RACE
+Read at 0x00c00009e018 by goroutine 99:
+  github.com/eapache/go-resiliency/batcher.TestShutdownSuccess.func1()
+      /m/batcher_test.go:55 +0x59
+  github.com/eapache/go-resiliency/batcher.(*Batcher).batch()
+      /m/batcher.go:94 +0x381
+  runtime.call16()
+      /go/src/runtime/asm_amd64.s:775 +0x42
+  reflect.Value.Call()
+      /go/src/reflect/value.go:368 +0xb5
+  github.com/eapache/go-resiliency/batcher.go2leanInvoke()
+      /m/zz_go2lean_replay.go:383 +0x524
+  github.com/eapache/go-resiliency/batcher.go2leanGoAny.func1()
+      /m/zz_go2lean_replay.go:425 +0x136
+
+Previous write at 0x00c00009e018 by goroutine 95:
+  github.com/eapache/go-resiliency/batcher.TestShutdownSuccess.func1()
+      /m/batcher_test.go:55 +0x70
+  github.com/eapache/go-resiliency/batcher.(*Batcher).batch()
+      /m/batcher.go:94 +0x381
+  github.com/eapache/go-resiliency/batcher.go2leanInvoke()
+      /m/zz_go2lean_replay.go:383 +0x5
+==================
+`
+	if got := raceReport(started); !strings.Contains(got, "TestShutdownSuccess.func1") {
+		t.Fatalf("race between controller-started goroutines not reported: %q", got)
+	}
+}
