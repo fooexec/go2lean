@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -43,6 +44,14 @@ type Env struct {
 	Overlay map[string][]byte
 	// Tests makes test functions targets (gossa.Options.Tests).
 	Tests bool
+	// Refine is how many rounds the refinement loop runs under Deps (#85):
+	// after the replay stage, the dependency functions whose unmodelled
+	// calls made a counterexample spurious or inconclusive are translated,
+	// and their properties searched and replayed again. 0 turns it off.
+	Refine int
+	// Translate names dependency functions to translate whatever their
+	// depth (gossa.Options.Translate); the refinement loop adds to it.
+	Translate []string
 	// SpecsOnly searches the packages' specs only, not the no_panic
 	// templates: on a large package the templates otherwise take the
 	// budget first.
@@ -100,7 +109,7 @@ func CompileLinked(w contract.Workspace, env Env, pattern string, out io.Writer)
 	if err := validateCompareOrderOverlay(env); err != nil {
 		return nil, err
 	}
-	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: true, Overlay: env.Overlay, Tests: env.Tests}, pattern)
+	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: true, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate}, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +169,7 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 	if err := validateCompareOrderOverlay(env); err != nil {
 		return nil, err
 	}
-	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: env.Deps, Overlay: env.Overlay, Tests: env.Tests}, patterns...)
+	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: env.Deps, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate}, patterns...)
 	if err != nil {
 		return nil, err
 	}
@@ -484,10 +493,117 @@ func RunAll(w contract.Workspace, env Env, opts constraint.SearchOptions, out io
 		}
 		results = append(results, res)
 	}
+	if env.Deps && env.Refine > 0 && len(results) > 0 {
+		if err := refine(w, env, opts, out, results, patterns); err != nil {
+			fmt.Fprintf(out, "  error: refinement: %v\n", err)
+		}
+	}
 	if len(failed) > 0 {
 		return results, fmt.Errorf("%d of %d packages failed: %s", len(failed), len(failed)+len(results), strings.Join(failed, ", "))
 	}
 	return results, nil
+}
+
+// refine is the refinement loop (#85). A spurious or inconclusive verdict
+// whose counterexample read the result of a dependency function the model
+// left unmodelled (past -deps' depth or limit) names that function; each
+// round translates the new ones, recompiles, and searches and replays
+// those properties again. A counterexample the refined model no longer has
+// is dropped. The loop stops when no verdict names a function not yet
+// translated, or after env.Refine rounds; the verdicts in results are
+// updated in place.
+func refine(w contract.Workspace, env Env, opts constraint.SearchOptions, out io.Writer, results []*Result, patterns []string) error {
+	env.Resume = false
+	for round := 1; round <= env.Refine; round++ {
+		var add []string
+		retry := map[string]*contract.Property{}
+		for _, res := range results {
+			for _, v := range res.Verdicts {
+				if v.Status != contract.VerdictSpurious && v.Status != contract.VerdictInconclusive {
+					continue
+				}
+				cx, err := w.Counterexample(v.Counterexample)
+				if err != nil {
+					return err
+				}
+				var fresh []string
+				for _, c := range poc.RefinableCalls(w, cx) {
+					if !slices.Contains(env.Translate, c) && !slices.Contains(add, c) {
+						fresh = append(fresh, c)
+					}
+				}
+				if len(fresh) == 0 {
+					continue
+				}
+				add = append(add, fresh...)
+				p, err := w.Property(cx.Property)
+				if err != nil {
+					return err
+				}
+				retry[p.ID] = p
+			}
+		}
+		if len(add) == 0 {
+			return nil
+		}
+		fmt.Fprintf(out, "== Refinement round %d: translating %s\n", round, strings.Join(add, ", "))
+		env.Translate = append(env.Translate, add...)
+		if _, err := CompileAll(w, env, io.Discard, patterns...); err != nil {
+			return err
+		}
+		var props []*contract.Property
+		for _, id := range slices.Sorted(maps.Keys(retry)) {
+			props = append(props, retry[id])
+		}
+		// The old counterexamples go: a property the refined model holds
+		// keeps none, and one it still refutes gets a new one.
+		for _, res := range results {
+			kept := res.Verdicts[:0]
+			for _, v := range res.Verdicts {
+				if cx, err := w.Counterexample(v.Counterexample); err == nil && retry[cx.Property] != nil {
+					if err := w.RemoveCounterexample(v.Counterexample); err != nil {
+						return err
+					}
+					continue
+				}
+				kept = append(kept, v)
+			}
+			res.Verdicts = kept
+		}
+		cxs, err := HuntAll(w, env, props, opts, out)
+		if err != nil {
+			return err
+		}
+		if len(cxs) == 0 {
+			continue
+		}
+		var ids []string
+		for _, cx := range cxs {
+			ids = append(ids, cx.ID)
+		}
+		vs, err := VerifyAll(w, env, ids, out)
+		if err != nil {
+			return err
+		}
+		// Each new verdict joins its package's result.
+		for _, v := range vs {
+			cx, err := w.Counterexample(v.Counterexample)
+			if err != nil {
+				return err
+			}
+			p := retry[cx.Property]
+			t, err := w.Target(p.Target)
+			if err != nil {
+				return err
+			}
+			for _, res := range results {
+				if res.Report.Package == t.Package {
+					res.Verdicts = append(res.Verdicts, v)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func runReport(w contract.Workspace, env Env, report *contract.ModelReport, opts constraint.SearchOptions, out io.Writer) (*Result, error) {

@@ -85,6 +85,11 @@ type Options struct {
 	// t is an opaque value in the model and the test's own t in M3. For
 	// kernels written as tests, such as GoKer's.
 	Tests bool
+	// Translate names dependency functions (as ssa prints them:
+	// pkg/path.Func, (*pkg/path.T).Method) to model with Deps even past
+	// the walk's depth and count limits: the refinement loop's callees
+	// whose havoc made a counterexample spurious (#85).
+	Translate []string
 }
 
 // Limits of the dependency walk: how deep it follows calls from the
@@ -149,7 +154,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		roots = append(roots, fns...)
 	}
 	if opts.Deps {
-		deps := depClosure(roots, mainPaths, zeros, invokedNames(sprog))
+		deps := depClosure(roots, mainPaths, zeros, invokedNames(sprog), opts.Translate)
 		var paths []string
 		for path := range deps {
 			paths = append(paths, path)
@@ -223,8 +228,10 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 // helper within a dependency package stays at its caller's depth. Generic functions and
 // wrappers are left out (they stay unmodelled). The walk is breadth-first,
 // so a function's depth is that of its shortest call path from a root
-// and does not depend on which root reached it first.
-func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa.Global]ssa.Value, invoked map[string]bool) map[string][]*ssa.Function {
+// and does not depend on which root reached it first. A function named in
+// force is modelled whatever its depth and the limit, and walked from at
+// its caller's depth.
+func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa.Global]ssa.Value, invoked map[string]bool, force []string) map[string][]*ssa.Function {
 	out := map[string][]*ssa.Function{}
 	seen := map[*ssa.Function]bool{}
 	count := 0
@@ -309,13 +316,14 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 					if _, std := stdlibOp(callee.String()); std {
 						continue
 					}
-					if count >= depLimit {
+					forced := slices.Contains(force, callee.String())
+					if count >= depLimit && !forced {
 						return
 					}
 					seen[callee] = true
 					count++
 					out[path] = append(out[path], callee)
-					if modelledStdlib[path] || (f.Pkg != nil && f.Pkg.Pkg.Path() == path && !mainPaths[path] && smallHelper(callee)) {
+					if forced || modelledStdlib[path] || (f.Pkg != nil && f.Pkg.Pkg.Path() == path && !mainPaths[path] && smallHelper(callee)) {
 						// Within a modelled standard-library package, every
 						// helper is needed (unescape calls ishex calls ...);
 						// within a dependency, its small helpers (xxhash's
@@ -333,6 +341,30 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 		next = nil
 		for _, f := range level {
 			visit(f)
+		}
+		level = next
+	}
+	// Past the depth, only the forced callees: each is modelled, its own
+	// calls stay unmodelled unless forced too.
+	for len(force) > 0 && len(level) > 0 {
+		next = nil
+		for _, f := range level {
+			for _, b := range f.Blocks {
+				for _, in := range b.Instrs {
+					c, ok := in.(ssa.CallInstruction)
+					if !ok {
+						continue
+					}
+					callee := c.Common().StaticCallee()
+					if callee == nil || seen[callee] || callee.Pkg == nil || len(callee.Blocks) == 0 || !slices.Contains(force, callee.String()) {
+						continue
+					}
+					seen[callee] = true
+					path := callee.Pkg.Pkg.Path()
+					out[path] = append(out[path], callee)
+					next = append(next, callee)
+				}
+			}
 		}
 		level = next
 	}

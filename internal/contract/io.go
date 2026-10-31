@@ -184,6 +184,18 @@ func (w Workspace) WriteProofResult(r *ProofResult) error {
 }
 
 // PocDir is where M3 puts the deliverables for one counterexample.
+// RemoveCounterexample deletes counterexample id and its verdict: the
+// refinement loop drops a counterexample its refined model no longer has
+// (#85).
+func (w Workspace) RemoveCounterexample(id string) error {
+	for _, kind := range []string{"counterexamples", "verdicts"} {
+		if err := os.Remove(w.path(kind, id)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 func (w Workspace) PocDir(cxID string) string {
 	return filepath.Join(w.Root, "poc", cxID)
 }

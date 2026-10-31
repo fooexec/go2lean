@@ -199,7 +199,7 @@ memory).
 | Go | model | status |
 |---|---|---|
 | static call in the package | `call` | exact |
-| call into another package compiled together (`-deps`) | `xcall` (the driver links the models) | exact; a dependency's functions are translated up to 4 calls deep from the package under test, except its small helpers (a few blocks: `xxhash`'s `round`, `rol1`), which come with their caller at any depth (#71) |
+| call into another package compiled together (`-deps`) | `xcall` (the driver links the models) | exact; a dependency's functions are translated up to 4 calls deep from the package under test, except its small helpers (a few blocks: `xxhash`'s `round`, `rol1`), which come with their caller at any depth (#71); deeper ones on request of the refinement loop (#85) |
 | closures, function values, method values | `funcRef`/`xfuncRef` + `callv` (captured values first) | exact; nil func call panics; an unknown func takes the fallback |
 | generic functions | modelled per instance (`Must[int]`, concrete types); the generic function itself is not in the model; instances of package `slices` under `-deps` | partial |
 | call into a logging package (logrus, log, slog, zap) | results opaque, calls without results ignored | exact for the code under test |

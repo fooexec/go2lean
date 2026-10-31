@@ -620,6 +620,36 @@ func guessedCalls(ws contract.Workspace, cx *contract.Counterexample) []string {
 	return out
 }
 
+// RefinableCalls lists the dependency functions the refinement loop can
+// translate to remove a counterexample (#85): the callees of its
+// unmodelled-call havoc reads outside the standard library. Only the reads
+// the violation depends on (relevant_havoc) count, unless relevance was not
+// computed.
+func RefinableCalls(ws contract.Workspace, cx *contract.Counterexample) []string {
+	relevant := map[[2]int]bool{}
+	for _, r := range cx.RelevantHavoc {
+		relevant[[2]int{r.Idx, r.Iter}] = true
+	}
+	all := cx.RelevanceSkipped || cx.HavocPerturbed == 0
+	var reads contract.Counterexample
+	reads.Frontend = cx.Frontend
+	for _, h := range cx.Havoc {
+		if all || relevant[[2]int{h.Idx, h.Iter}] {
+			reads.Havoc = append(reads.Havoc, h)
+		}
+	}
+	var out []string
+	for _, site := range havocSites(ws, &reads) {
+		if site.Reason != "unmodeled-call" {
+			continue
+		}
+		if c := calleeOf(site.Site); c != "" && !stdCallee(c) && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // stdCallee says whether a callee named by calleeOf is in the standard
 // library (no dot in the first element of its package path).
 func stdCallee(c string) bool {

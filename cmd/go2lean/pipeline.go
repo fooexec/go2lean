@@ -153,6 +153,7 @@ func cmdRun(args []string) error {
 	specsOnly := fs.Bool("specs-only", false, "search the packages' specs only, not the no_panic templates")
 	runRe := fs.String("run", "", "search only the properties of target functions matching this regexp (as go test -run; methods as T.M)")
 	compareOrder := fs.String("compare-order", "", "explicitly select a pure, deterministic, total func(string,string) int ordering comparator (experimental; one package)")
+	refineRounds := fs.Int("refine", 2, "with -deps, rounds of the refinement loop: translate the dependency functions whose unmodelled calls made a counterexample spurious or inconclusive, then search and replay again (0: off)")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
 		return fmt.Errorf("run: at least one package pattern expected (e.g. ./...)")
@@ -162,6 +163,7 @@ func cmdRun(args []string) error {
 		return err
 	}
 	env.Deps, env.Resume, env.FuzzSpecs, env.Tests, env.SpecsOnly = *deps, *resume, *fuzzSpecs, *tests, *specsOnly
+	env.Refine = *refineRounds
 	if *runRe != "" {
 		re, err := regexp.Compile(*runRe)
 		if err != nil {

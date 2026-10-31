@@ -107,6 +107,31 @@ through an overlay so that each channel, lock and `select` operation waits
 for its turn, and the real runtime then shows the deadlock or leak. The
 PoC carries the overlay ([concurrency.md](concurrency.md)).
 
+### Refinement loop
+
+With `-deps`, a `spurious` or `inconclusive` verdict can name the
+dependency function whose unmodelled call it read, for example one past
+the four calls `-deps` translates. Only the reads the violation depends
+on count (`relevant_havoc`). The loop then translates that function
+(`gossa.Options.Translate`, whatever its depth), recompiles, and searches
+and replays that property again (#85):
+
+```
+== Refinement round 1: translating github.com/andreasfoo/go2lean/testdata/refinedeep.Level5
+  refine_digit_nopanic random: none in 2000 trials (0 out of fuel, 0 moot/stuck); ...
+```
+
+The old counterexample is dropped. A property the refined model still
+refutes gets a new one, which is replayed in turn. The loop stops when no
+verdict names a function not yet translated, or after `-refine` rounds
+(default 2; `-refine 0` turns it off).
+
+Some calls cannot be translated this way: standard-library calls,
+interface methods, sockets, `reflect`. They stay as they are, so their
+verdicts stay. Those sites need a contract (#89) or a stub.
+`examples/refine` is the ground truth: a digit the dependency computes
+five calls deep.
+
 ### Generated support sources
 
 When replay uses package-local generated Go helpers (including imported fuzz
