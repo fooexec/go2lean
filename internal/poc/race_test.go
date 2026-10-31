@@ -123,3 +123,12 @@ Previous write at 0x00c00009e018 by goroutine 95:
 		t.Fatalf("race between controller-started goroutines not reported: %q", got)
 	}
 }
+
+// A crash after a test's result line belongs to the last test that ran:
+// the goroutine its call left behind panicked (#15).
+func TestLastRun(t *testing.T) {
+	out := "=== RUN   TestGo2LeanPoC_cx_a\nGO2LEAN_RESULT {}\n--- PASS: TestGo2LeanPoC_cx_a (0.00s)\n=== RUN   TestGo2LeanPoC_cx_b\nGO2LEAN_RESULT {\"ret\":\"timed out\"}\n"
+	if got := lastRun(out); got != "cx_b" {
+		t.Fatalf("lastRun = %q, want cx_b", got)
+	}
+}
