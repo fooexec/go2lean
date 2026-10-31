@@ -66,7 +66,7 @@ yields UB or poison, Go panics. A run ends in one of:
 | `ok v` | returned | — |
 | `panic k` | runtime panic or `panic(...)` | `index_out_of_range`, `slice_bounds`, `nil_dereference`, `divide_by_zero`, `negative_shift`, `make_slice_len`, `type_assertion`, `nil_map_write`, `explicit` (a `panic` call), `closed_channel` (send on or close of a closed channel, close of nil), `sync_fatal` (unlock of an unlocked mutex: a fatal error in Go), `deadlock`, `goroutine_leak`, `data_race` (§6), `other` |
 | `panic modelStuck` | — | the model cannot continue (stuck); not a Go panic, never reported as one |
-| `outOfFuel` | — | the step budget ran out (loops, recursion), or a slice would exceed the model's size bound (`sliceBound`, 16384 elements); moot |
+| `outOfFuel` | — | the step budget ran out (loops, recursion), a slice would exceed the model's size bound (`sliceBound`, 16384 elements), or a run would start more than 128 goroutines (`goroutineBound`); moot |
 
 `recover` is not modelled: a panic ends the run.
 

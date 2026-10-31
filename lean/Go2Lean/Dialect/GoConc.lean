@@ -459,6 +459,14 @@ def fireArity (heap : Heap Val) (gs : Array Gor) (i : Nat) : Nat :=
     max ready 1
   | _ => 1
 
+/-- The model's bound on the goroutines a run starts (finished ones
+included): one more ends the run out of fuel, as an allocation past
+`GoSSA.sliceBound` does. Every step looks at every goroutine and the race
+detector's clocks have one entry per goroutine, so a mutant or a bug that
+starts goroutines in a loop without end would otherwise slow a run to a
+crawl (#58). -/
+def goroutineBound : Nat := 128
+
 /-- Run goroutine `i` (now able to move) to its next scheduling point. -/
 def stepGor (p : Prog) (or : Oracle) (h : Havoc Val) (gs : Array Gor) (i : Nat) (s : HState Val)
     (fuel : Nat) : Except PanicKind (Array Gor × HState Val) × HState Val :=
@@ -481,6 +489,7 @@ def stepGor (p : Prog) (or : Oracle) (h : Havoc Val) (gs : Array Gor) (i : Nat) 
             | .known fid bound =>
               match p.funcs[fid]? with
               | some callee =>
+                if gs.size ≥ goroutineBound then .error .other else
                 .ok (gs.push { frames := [entryFrame callee (bound ++ args.map (f.env[·]!))], daemon := callee.daemon }, s)
               | none => .error .modelStuck
           | .sync op .. =>
@@ -504,6 +513,9 @@ def stepGor (p : Prog) (or : Oracle) (h : Havoc Val) (gs : Array Gor) (i : Nat) 
       | none => none
     let s := if s.stuck.isNone then { s with panicAt := place <|> s.panicAt } else s
     (.error .modelStuck, { s with stuck := s.stuck <|> some note })
+  | .error .other =>
+    -- Past the bound on goroutines: no behaviour of the program.
+    (.error .other, { s with stuck := s.stuck <|> some s!"more than {goroutineBound} goroutines (the model's bound)" })
   | .error k => (.error k, s)
   | .ok (gs, s) =>
     match gs[i]? with

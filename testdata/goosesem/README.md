@@ -16,5 +16,5 @@ tracks it; CI fails when the outcomes change, so a fix removes its lines
 (`scripts/sem-diff.sh <workspace> -update`).
 
 `go2lean_*.go` are go2lean's own tests in the same form, one file per gap
-closed (`go2lean_atomic.go`: #67; `go2lean_stdlib.go`: #69, #71; `go2lean_init.go`: #55; `go2lean_defer.go`: #62; `go2lean_errors.go`: #69; `go2lean_io.go`: #69, #47). After adding a test, regenerate the
+closed (`go2lean_atomic.go`: #67; `go2lean_stdlib.go`: #69, #71; `go2lean_init.go`: #55; `go2lean_defer.go`: #62; `go2lean_errors.go`: #69; `go2lean_io.go`: #69, #47; `go2lean_chan.go`: #58, channels, `select` and `sync` after Go's runtime tests). After adding a test, regenerate the
 `zz_*` files with `python3 scripts/sem-gen.py`.
