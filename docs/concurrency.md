@@ -31,7 +31,8 @@ projects offer for it (Goose's channel model, Veil, Iris-Lean) is in
   watchdog, a leak is a goroutine of the package blocked on a channel or
   lock after the call returned (not one alive before); a panic in a
   goroutine the call started ends the test binary and is judged from Go's
-  report on stderr.
+  report on stderr, also when the call returned first (`Deadline.Run`
+  timing out before its goroutine panics, #15).
 - Not as planned: there is no separate `no_block` property; `no_panic`
   covers deadlocks and leaks (they end the run like a panic). Fuel counts
   goroutine steps, and the schedule is one havoc site.

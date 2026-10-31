@@ -551,6 +551,11 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 		// recovers only the call's own) and ended the process. This run had
 		// the test binary to itself (VerifyAll reruns such tests alone).
 		res, ok = result{Panicked: true, Panic: strings.TrimSuffix(m[2], " [recovered]"), Stack: stderr}, true
+	} else if ok && !res.Panicked && exit != 0 && m != nil && lastRun(stdout) == p.cx.ID {
+		// The call returned (Deadline.Run timing out), then a goroutine it
+		// started panicked and ended the process before the next test
+		// began: Go's run panicked after all (#15).
+		res.Panicked, res.Panic, res.Stack = true, strings.TrimSuffix(m[2], " [recovered]"), stderr
 	}
 	if !ok {
 		v.Status = contract.VerdictInconclusive
@@ -1058,6 +1063,17 @@ func ClassifyPanic(msg string) contract.PanicKind {
 
 // parseResults maps each test's result line to its counterexample id,
 // using the "=== RUN TestGo2LeanPoC_<id>" line that precedes it.
+// lastRun is the counterexample of the last PoC test a run started.
+func lastRun(stdout string) string {
+	last := ""
+	for _, line := range strings.Split(stdout, "\n") {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "=== RUN   TestGo2LeanPoC_"); ok {
+			last = name
+		}
+	}
+	return last
+}
+
 func parseResults(stdout string) map[string]result {
 	out := map[string]result{}
 	current := ""
