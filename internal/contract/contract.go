@@ -574,6 +574,9 @@ type ModelFunc struct {
 	// TestFile marks a function declared in a _test.go file: modelled for
 	// the specs and tests that call it, never a target itself.
 	TestFile bool `json:"test_file,omitempty"`
+	// Init: the slice of the package initializer the search runs before
+	// the trials (#55); not a target.
+	Init bool `json:"init,omitempty"`
 	// SpecMaxLen is a spec's `go2lean:maxlen N` directive.
 	SpecMaxLen int `json:"spec_max_len,omitempty"`
 	// SequenceFor names the function this `go2lean:sequence` spec drives

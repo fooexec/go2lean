@@ -627,6 +627,9 @@ type Func struct {
 	WrappedBy string
 	CtorOnly  string
 	TestFile  bool
+	// Init: the slice of the package initializer that sets the package's
+	// init-cells (#55); the search runs it once, before the trials.
+	Init bool
 	// Sync: the function can reach a goroutine start or a synchronisation
 	// operation; the concurrent machine gives its calls frames.
 	Sync bool
@@ -662,6 +665,8 @@ type Prog struct {
 	HasSched    bool
 	HavocWidths []int
 	Havoc       []contract.ABIHavoc
+	// Inits are the functions (Func.Init) the search runs before a trial.
+	Inits []int
 	// JSONTable is the Lean term of the module's `jsonTable` (the JSON
 	// descriptions its jsonMarshal / jsonDecode ops index), empty if none.
 	JSONTable string

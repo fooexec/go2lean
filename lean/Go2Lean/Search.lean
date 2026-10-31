@@ -875,14 +875,43 @@ def havocReport (p : GoSSA.Prog) (or : Oracle) (h : Havoc Val) (prop : Property)
   else report or heap gens args trial seed o s ret p.siteOrigin
     (relevantHavoc p or h prop args fuel heap s snap) (perturbable p s)
 
+/-- The heap the package initializers' slices leave (#55), run once, in
+order, for all trials: every trial starts from it. With the report's
+`init` field: how many ran and how many havoc reads they made (the same
+in every trial), or why the trials start from an empty heap instead (its
+cells at their zero values); and the under-approximation either is, for
+the exhaustive engine's certificate. Nothing when the program has none. -/
+def initHeap (p : GoSSA.Prog) (extra : List Nat) (fuel : Nat) :
+    Heap Val × List (String × Json) × Option String :=
+  if p.inits.isEmpty then (#[], [], none) else
+  let or := oracleOf .mixed extra 0
+  let h := havocOf 0 p.havocWidths
+  let step : Except String (Heap Val × Nat) → Nat → Except String (Heap Val × Nat) := fun acc f =>
+    match acc with
+    | .error e => .error e
+    | .ok (heap, reads) =>
+      match GoConc.runAny p or h f [] fuel heap with
+      | (.ok _, s) => .ok (s.heap, reads + s.log.size)
+      | (.panic k, s) => .error s!"panic {repr k}{(s.stuck.map (" at " ++ ·)).getD ""}"
+      | (.outOfFuel, _) => .error "out of fuel"
+  match p.inits.foldl step (.ok (#[], 0)) with
+  | .ok (heap, reads) =>
+    (heap, [("init", Json.mkObj [("ran", p.inits.size), ("havoc_reads", reads)])],
+     if reads == 0 then none
+     else some "the package initializers' havoc reads are the same in every input (they run once, #55)")
+  | .error e =>
+    (#[], [("init", Json.mkObj [("ran", 0), ("error", e)])],
+     some s!"the package initializers did not run ({e}): the variables they build start at zero values (#55)")
+
 /-- A concurrent sequence harness's setup, run once for all trials (#87):
 the snapshot at its `setupEnd`, when the setup depends on nothing a trial
-draws. -/
-def setupSnap (p : GoSSA.Prog) (prop : Property) (extra : List Nat) (fuel : Nat) : Option GoConc.Snap × Json :=
+draws. It starts from `heap`, the initializers' (`initHeap`). -/
+def setupSnap (p : GoSSA.Prog) (prop : Property) (extra : List Nat) (fuel : Nat) (heap : Heap Val := #[]) :
+    Option GoConc.Snap × Json :=
   match prop with
   | .sequence f =>
     if !GoConc.hasSetupEnd p f then (none, false) else
-    match GoConc.captureSetup p (oracleOf .mixed extra 0) (havocOf 0 p.havocWidths) f fuel with
+    match GoConc.captureSetup p (oracleOf .mixed extra 0) (havocOf 0 p.havocWidths) f fuel heap with
     | .ok snap => (some snap, true)
     | .error why => (none, why)
   | _ => (none, false)
@@ -904,8 +933,9 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
   let mut stepFuel : List (String × Nat) := []
   let trace := (← IO.getEnv "GO2LEAN_TRACE").isSome
   let start ← IO.monoMsNow
-  let (snap, snapNote) := setupSnap p prop extra fuel
-  let base := (snap.map (·.s.heap)).getD #[]
+  let (heap0, initNote, initAssumed) := initHeap p extra fuel
+  let (snap, snapNote) := setupSnap p prop extra fuel heap0
+  let base := (snap.map (·.s.heap)).getD heap0
   let mut done := 0
   for trial in [0:trials] do
     -- A wall-clock budget (0: none) bounds a property whose inputs are
@@ -962,7 +992,7 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
     return
   let top := (stuckSites.toArray.qsort (fun a b => a.2 > b.2)).toList.take 5
   IO.println (Json.mkObj (([("found", false), ("trials", done), ("out_of_fuel", fuelOuts),
-    ("moot", moots), ("budget_hit", decide (done < trials)), ("setup_snapshot", snapNote),
+    ("moot", moots), ("budget_hit", decide (done < trials)), ("setup_snapshot", snapNote)] : List (String × Json)) ++ initNote ++ ([
     ("stuck_sites", Json.mkObj (top.map fun (site, n) => (site, (n : Json)))),
     ("spec_exits", Json.mkObj (exits.map fun (b, n) => (b, (n : Json))))] : List (String × Json)) ++
     loopFields lassoChecked loops loopSites ++ stepFuelFields stepFuel)).compress
@@ -1042,6 +1072,7 @@ def mutate (p : GoSSA.Prog) (prop : Property) (fids : List Nat) (gens : List Gen
   let all := mutants p fids
   let chosen := spread all maxMutants
   let per := if chosen.isEmpty then 0 else budgetMs / chosen.length
+  let (base, _, _) := initHeap p extra fuel
   let mut killed : List Json := []
   let mut survived : List String := []
   for m in chosen do
@@ -1057,7 +1088,7 @@ def mutate (p : GoSSA.Prog) (prop : Property) (fids : List Nat) (gens : List Gen
       let tseed := (mixHash (UInt64.ofNat seed) (UInt64.ofNat trial)).toNat
       let or := oracleOf pf extra tseed
       let h := havocOf tseed p.havocWidths
-      let (args, g', heap) := genArgs pf extra g gens pool table allowNil
+      let (args, g', heap) := genArgs pf extra g gens pool table allowNil base
       g := g'
       let (o, _, _) := check pm or h prop args fuel heap
       if o.refutes prop then
@@ -1347,8 +1378,9 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
     return
   let h := havocOf 0 p.havocWidths
   let or := oracleOf .mixed extra 0
-  let (snap, snapNote) := setupSnap p prop extra fuel
-  let base := (snap.map (·.s.heap)).getD #[]
+  let (heap0, initNote, initAssumed) := initHeap p extra fuel
+  let (snap, snapNote) := setupSnap p prop extra fuel heap0
+  let base := (snap.map (·.s.heap)).getD heap0
   let mut fuelOuts := 0
   let mut moots := 0
   let mut havocRuns := 0
@@ -1356,7 +1388,7 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
   let mut schedSampled := 0
   -- The under-approximations any input's run took: a domain that held
   -- through one of them is no certificate for what it left out.
-  let mut assumed : Array String := #[]
+  let mut assumed : Array String := initAssumed.toArray
   let mut i : Nat := 0
   let mut fallback : Option Json := none
   let mut exits : List (String × Nat) := []
@@ -1438,7 +1470,7 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
   IO.println (Json.mkObj (([("found", false), ("exhaustive", fuelOuts == 0 && moots == 0), ("domain", n),
     ("out_of_fuel", fuelOuts), ("moot", moots), ("max_len", maxLen),
     ("havoc_sites", p.havocWidths.size), ("havoc_read", havocRuns),
-    ("schedules", schedRuns), ("schedules_sampled", schedSampled), ("setup_snapshot", snapNote),
+    ("schedules", schedRuns), ("schedules_sampled", schedSampled), ("setup_snapshot", snapNote)] : List (String × Json)) ++ initNote ++ ([
     ("assumptions", Json.arr (assumed.map Json.str)),
     ("spec_exits", Json.mkObj (exits.map fun (b, n) => (b, (n : Json))))] : List (String × Json)) ++
     loopFields lassoChecked loops loopSites ++ stepFuelFields stepFuel)).compress

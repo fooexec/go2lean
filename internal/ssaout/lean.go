@@ -335,6 +335,13 @@ func printProg(b *strings.Builder, p *ir.Prog, module string) {
 	if p.HasSched {
 		sched = fmt.Sprintf(", schedSite := some %d", p.SchedSite)
 	}
+	if len(p.Inits) > 0 {
+		ids := make([]string, len(p.Inits))
+		for i, id := range p.Inits {
+			ids[i] = fmt.Sprint(id)
+		}
+		sched += fmt.Sprintf(", inits := #[%s]", strings.Join(ids, ", "))
+	}
 	fmt.Fprintf(b, "def prog : GoSSA.Prog := { funcs := #[%s], havocWidths := #[%s]%s }\n\n",
 		strings.Join(names, ", "), strings.Join(widths, ", "), sched)
 	fmt.Fprintf(b, "end %s\n", module)
@@ -393,7 +400,7 @@ func Emit(p *ir.Prog, leanDir string, ws contract.Workspace, modulePath string) 
 	}
 	key := contract.FuncKeys(names)
 	for i, f := range p.Funcs {
-		mf := contract.ModelFunc{Name: f.Name, GoSig: f.GoSig, ID: i, Status: f.Status, Issues: f.Issues, SpecFor: f.SpecFor, Closure: f.Closure, WrappedBy: f.WrappedBy, CtorOnly: f.CtorOnly, TestFile: f.TestFile, SpecMaxLen: f.SpecMaxLen, SequenceFor: f.SequenceFor, Consts: f.Consts, StrConsts: f.StrConsts, MapKeys: f.MapKeys, UsesJSON: f.UsesJSON, CmpStrs: f.CmpStrs, Variants: f.Variants, Calls: f.Calls, XCalls: f.XCalls, Exits: f.Exits, LoopHeaders: f.LoopHeaders()}
+		mf := contract.ModelFunc{Name: f.Name, GoSig: f.GoSig, ID: i, Status: f.Status, Issues: f.Issues, SpecFor: f.SpecFor, Closure: f.Closure, WrappedBy: f.WrappedBy, CtorOnly: f.CtorOnly, TestFile: f.TestFile, Init: f.Init, SpecMaxLen: f.SpecMaxLen, SequenceFor: f.SequenceFor, Consts: f.Consts, StrConsts: f.StrConsts, MapKeys: f.MapKeys, UsesJSON: f.UsesJSON, CmpStrs: f.CmpStrs, Variants: f.Variants, Calls: f.Calls, XCalls: f.XCalls, Exits: f.Exits, LoopHeaders: f.LoopHeaders()}
 		if len(mf.LoopHeaders) > 0 {
 			for _, b := range f.Blocks {
 				mf.Succs = append(mf.Succs, b.Term.ProofSuccs())

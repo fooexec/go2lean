@@ -366,9 +366,18 @@ cells, so their races are seen. A cell starts at the variable's zero
 value, at the one constant its initializer stores, or, for an interface
 its initializer builds (`var logger Logger = &std{}`, or a call of a
 function that returns one), at an opaque
-non-nil value whose method calls are havoc (#55). A variable with any
-other initializer is not a cell: its stores are ignored and its loads are
-havoc.
+non-nil value whose method calls are havoc (#55). A variable the
+package's functions use that the package initializer sets once to a value
+it builds (a new object, map, slice or channel, made in place or by a call
+of a function of the package: `var reg = &registry{m: map[string]int{}}`)
+is a cell too: the compile stage keeps the slice of the package
+initializer that builds it (the store, what it depends on, and what writes
+into the object built), and the search runs that slice once, before the
+trials, so every trial starts with the object the initializer built and the
+goroutines share it. Havoc the slice reads is the same in every trial; it,
+or a slice that fails to run, makes an exhaustive certificate one with an
+assumption. A variable with any other initializer, or set in a `func
+init()`, is not a cell: its stores are ignored and its loads are havoc.
 
 The replay stage for `data_race` builds the test with `-race` and runs the
 call 20 times: Go's race detector reports a race whenever both accesses

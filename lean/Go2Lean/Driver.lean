@@ -204,7 +204,13 @@ def link (registry : List (String × GoSSA.Prog)) (main : String) : Option GoSSA
     match registry.lookup pkg, bases.lookup pkg with
     | some p, some (_, hb) => p.schedSite.map (· + hb)
     | _, _ => none
-  return { funcs, havocWidths := widths, siteOrigin := origin, schedSite := sched }
+  -- The initializers: the models `main` reaches first, as Go initializes
+  -- a package's imports before it.
+  let inits := order.reverse.foldl (init := #[]) fun acc pkg =>
+    match registry.lookup pkg, bases.lookup pkg with
+    | some p, some (fb, _) => acc ++ p.inits.map (· + fb)
+    | _, _ => acc
+  return { funcs, havocWidths := widths, siteOrigin := origin, schedSite := sched, inits }
 
 /-- Entry point of the `go2lean-search` executable: `go2lean-search spec.json`,
 with the models in `registry`. -/

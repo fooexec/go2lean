@@ -248,6 +248,9 @@ func SeqTestIncompleteStruct() bool { return testIncompleteStruct() }
 // go2lean:sequence testInitCallVersions
 func SeqTestInitCallVersions() bool { return testInitCallVersions() }
 
+// go2lean:sequence testInitCellShared
+func SeqTestInitCellShared() bool { return testInitCellShared() }
+
 // go2lean:sequence testInitSentinelArray
 func SeqTestInitSentinelArray() bool { return testInitSentinelArray() }
 
