@@ -131,6 +131,8 @@ type searchResult struct {
 	PanicAt     string                     `json:"panic_at"`
 	Assumptions []string                   `json:"assumptions"`
 	Schedule    []contract.SchedStep       `json:"schedule"`
+	// Init: the package initializers' slices run before the trials (#55).
+	Init *initResult `json:"init"`
 
 	// Out-of-fuel runs rerun with their state watched at back edges (#86):
 	// how many, how many came back to a state (they loop forever), and where.
@@ -662,7 +664,7 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 		if res.BudgetHit {
 			note = fmt.Sprintf(" [stopped by the %ds budget]", opts.BudgetSeconds)
 		}
-		summary = append(summary, fmt.Sprintf("random: none in %d trials (%d out of fuel, %d moot/stuck)%s%s%s%s", res.Trials, res.OutOfFuel, res.Moot, loopNote(res), exitNote(specExits, res.SpecExits), note, stuckNote(res.StuckSites, report.Havoc, reportsByKey(ws, report.Frontend, res.StuckSites))))
+		summary = append(summary, fmt.Sprintf("random: none in %d trials (%d out of fuel, %d moot/stuck)%s%s%s%s%s", res.Trials, res.OutOfFuel, res.Moot, loopNote(res), exitNote(specExits, res.SpecExits), note, initNote(res.Init), stuckNote(res.StuckSites, report.Havoc, reportsByKey(ws, report.Frontend, res.StuckSites))))
 	}
 	if opts.Engine == EngineExhaustive || opts.Engine == EngineAll {
 		if prop.Kind == contract.KindSequence {
@@ -930,6 +932,30 @@ func proveWP(root string, ws contract.Workspace, leanDir string, report *contrac
 }
 
 // stuckNote names the most frequent site at which the model got stuck.
+// initResult is the engine's report on the package initializers' slices.
+type initResult struct {
+	Ran        int    `json:"ran"`
+	HavocReads int    `json:"havoc_reads"`
+	Error      string `json:"error"`
+}
+
+// initNote says when package initializers' slices did not run or read
+// havoc (#55): the trials then start without what those build (zero
+// values), or with a fixed choice for what they read.
+func initNote(r *initResult) string {
+	if r == nil {
+		return ""
+	}
+	note := ""
+	if r.Error != "" {
+		note += "; package initializers that did not run: " + r.Error
+	}
+	if r.HavocReads > 0 {
+		note += fmt.Sprintf("; the package initializers read %d havoc values (fixed for every trial)", r.HavocReads)
+	}
+	return note
+}
+
 func stuckNote(sites map[string]int, havoc []contract.ABIHavoc, reports map[string]*contract.ModelReport) string {
 	best, n := "", 0
 	for s, c := range sites {
