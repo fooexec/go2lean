@@ -117,6 +117,7 @@ func TestGoose(t *testing.T) {
 		"testPlusTimes": testPlusTimes,
 		"testPointerAssignment": testPointerAssignment,
 		"testPolymorphismInterface": testPolymorphismInterface,
+		"testPoolGetFromNew": testPoolGetFromNew,
 		"testPrimitiveTypesEqual": testPrimitiveTypesEqual,
 		"testReturnFour": testReturnFour,
 		"testReturnThree": testReturnThree,

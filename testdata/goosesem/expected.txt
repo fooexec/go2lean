@@ -1,0 +1,1 @@
+testpoolgetfromnew exhausted_assuming  # by design: Get gives New, objects Put back are not modelled (#105)

@@ -335,6 +335,9 @@ func SeqTestPointerAssignment() bool { return testPointerAssignment() }
 // go2lean:sequence testPolymorphismInterface
 func SeqTestPolymorphismInterface() bool { return testPolymorphismInterface() }
 
+// go2lean:sequence testPoolGetFromNew
+func SeqTestPoolGetFromNew() bool { return testPoolGetFromNew() }
+
 // go2lean:sequence testPrimitiveTypesEqual
 func SeqTestPrimitiveTypesEqual() bool { return testPrimitiveTypesEqual() }
 
