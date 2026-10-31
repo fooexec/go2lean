@@ -89,6 +89,27 @@ func SeqTestBufioWriterFlush() bool { return testBufioWriterFlush() }
 // go2lean:sequence testByteSliceToString
 func SeqTestByteSliceToString() bool { return testByteSliceToString() }
 
+// go2lean:sequence testChanBufferedFIFO
+func SeqTestChanBufferedFIFO() bool { return testChanBufferedFIFO() }
+
+// go2lean:sequence testChanCloseWakesAll
+func SeqTestChanCloseWakesAll() bool { return testChanCloseWakesAll() }
+
+// go2lean:sequence testChanClosedRecv
+func SeqTestChanClosedRecv() bool { return testChanClosedRecv() }
+
+// go2lean:sequence testChanLenCapZero
+func SeqTestChanLenCapZero() bool { return testChanLenCapZero() }
+
+// go2lean:sequence testChanPingPong
+func SeqTestChanPingPong() bool { return testChanPingPong() }
+
+// go2lean:sequence testChanRangeClosed
+func SeqTestChanRangeClosed() bool { return testChanRangeClosed() }
+
+// go2lean:sequence testChanUnbufferedHandoff
+func SeqTestChanUnbufferedHandoff() bool { return testChanUnbufferedHandoff() }
+
 // go2lean:sequence testClosureBasic
 func SeqTestClosureBasic() bool { return testClosureBasic() }
 
@@ -269,6 +290,9 @@ func SeqTestMultipleFieldsInterface() bool { return testMultipleFieldsInterface(
 // go2lean:sequence testMultipleInterface
 func SeqTestMultipleInterface() bool { return testMultipleInterface() }
 
+// go2lean:sequence testMutexExclusion
+func SeqTestMutexExclusion() bool { return testMutexExclusion() }
+
 // go2lean:sequence testNestedGoStyleLoops
 func SeqTestNestedGoStyleLoops() bool { return testNestedGoStyleLoops() }
 
@@ -286,6 +310,9 @@ func SeqTestNilDefault() bool { return testNilDefault() }
 
 // go2lean:sequence testNilVal
 func SeqTestNilVal() bool { return testNilVal() }
+
+// go2lean:sequence testOnceRunsOnce
+func SeqTestOnceRunsOnce() bool { return testOnceRunsOnce() }
 
 // go2lean:sequence testOrCompare
 func SeqTestOrCompare() bool { return testOrCompare() }
@@ -322,6 +349,21 @@ func SeqTestReturnTwo() bool { return testReturnTwo() }
 
 // go2lean:sequence testReverseAssignOps64
 func SeqTestReverseAssignOps64() bool { return testReverseAssignOps64() }
+
+// go2lean:sequence testSelectDefault
+func SeqTestSelectDefault() bool { return testSelectDefault() }
+
+// go2lean:sequence testSelectNilChan
+func SeqTestSelectNilChan() bool { return testSelectNilChan() }
+
+// go2lean:sequence testSelectOneOfReady
+func SeqTestSelectOneOfReady() bool { return testSelectOneOfReady() }
+
+// go2lean:sequence testSelectReady
+func SeqTestSelectReady() bool { return testSelectReady() }
+
+// go2lean:sequence testSelectSelf
+func SeqTestSelectSelf() bool { return testSelectSelf() }
 
 // go2lean:sequence testSharedFunctionsInterface
 func SeqTestSharedFunctionsInterface() bool { return testSharedFunctionsInterface() }
@@ -415,6 +457,9 @@ func SeqTestU64ToU32() bool { return testU64ToU32() }
 
 // go2lean:sequence testUint32Untyped
 func SeqTestUint32Untyped() bool { return testUint32Untyped() }
+
+// go2lean:sequence testWaitGroupWaits
+func SeqTestWaitGroupWaits() bool { return testWaitGroupWaits() }
 
 // go2lean:sequence testsUseLocks
 func SeqTestsUseLocks() bool { return testsUseLocks() }
