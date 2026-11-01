@@ -545,7 +545,15 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 		Evidence:       contract.Evidence{Cmd: cmd, Exit: exit, StdoutTail: tail(stdout), StderrTail: tail(stderr)},
 	}
 	res, ok := results[p.cx.ID]
-	if m := goCrash.FindStringSubmatch(stderr); !ok && exit != 0 && m != nil && compileErr.FindString(stderr) == "" {
+	if m := goCrash.FindStringSubmatch(stderr); m != nil && exit != 0 && harnessCrash(stderr) {
+		// The goroutine that panicked stopped in go2lean's own code (the
+		// replay controller): the harness failed, which says nothing about
+		// the program.
+		v.Status = contract.VerdictInconclusive
+		v.Diagnosis = &contract.Diagnosis{Reason: "harness_failed", Notes: []string{
+			"go2lean's replay harness panicked (" + strings.TrimSpace(m[2]) + "); see stderr"}}
+		return v
+	} else if !ok && exit != 0 && m != nil && compileErr.FindString(stderr) == "" {
 		// No result line, and Go's own report of an uncaught panic or a
 		// fatal error: a goroutine the call started panicked (the harness
 		// recovers only the call's own) and ended the process. This run had
@@ -1063,6 +1071,27 @@ func ClassifyPanic(msg string) contract.PanicKind {
 
 // parseResults maps each test's result line to its counterexample id,
 // using the "=== RUN TestGo2LeanPoC_<id>" line that precedes it.
+// harnessCrash says whether Go's crash report on stderr is from a
+// goroutine that stopped in go2lean's own code: its innermost frame
+// outside the runtime is a go2lean helper (go2leanGate, the controller).
+func harnessCrash(stderr string) bool {
+	_, rest, ok := strings.Cut(stderr, "[running]:\n")
+	if !ok {
+		return false
+	}
+	for _, l := range strings.Split(rest, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			return false
+		}
+		if strings.HasPrefix(l, "/") || strings.HasPrefix(l, "runtime.") || strings.HasPrefix(l, "panic(") {
+			continue
+		}
+		return strings.Contains(l, ".go2lean")
+	}
+	return false
+}
+
 // lastRun is the counterexample of the last PoC test a run started.
 func lastRun(stdout string) string {
 	last := ""

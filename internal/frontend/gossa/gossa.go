@@ -315,7 +315,7 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 					// except instances of its generic functions.
 					// The generic helpers of package slices (ContainsFunc,
 					// IndexFunc) are plain loops over func values: modelled.
-					if (mainPaths[path] && !instance) || (isStdlib(path) && !(instance && path == "slices") && !modelledStdlib[path]) {
+					if (mainPaths[path] && !instance) || (isStdlib(path) && !(instance && path == "slices") && !modelledStdlib[path] && !modelledTime[callee.String()]) {
 						continue
 					}
 					if _, std := stdlibOp(callee.String()); std {
@@ -328,7 +328,7 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 					seen[callee] = true
 					count++
 					out[path] = append(out[path], callee)
-					if forced || modelledStdlib[path] || (f.Pkg != nil && f.Pkg.Pkg.Path() == path && !mainPaths[path] && smallHelper(callee)) {
+					if forced || modelledStdlib[path] || modelledTime[callee.String()] || (f.Pkg != nil && f.Pkg.Pkg.Path() == path && !mainPaths[path] && smallHelper(callee)) {
 						// Within a modelled standard-library package, every
 						// helper is needed (unescape calls ishex calls ...);
 						// within a dependency, its small helpers (xxhash's
@@ -1143,6 +1143,18 @@ var modelledStdlib = map[string]bool{
 	"container/list": true,
 	"bufio":          true,
 	"io":             true,
+}
+
+// modelledTime are the functions of package time translated from source
+// (#59): the clock readings (Now, Since, Until), whose runtime hooks read
+// the model's monotone clock (clockCall), and the comparisons and
+// arithmetic on Time, which then compute what Go computes.
+var modelledTime = map[string]bool{
+	"time.Now": true, "time.Since": true, "time.Until": true, "time.subMono": true,
+	"(time.Time).After": true, "(time.Time).Before": true, "(time.Time).Compare": true,
+	"(time.Time).Equal": true, "(time.Time).Add": true, "(time.Time).Sub": true,
+	"(time.Time).IsZero": true, "(*time.Time).sec": true, "(*time.Time).nsec": true,
+	"(*time.Time).addSec": true, "(*time.Time).stripMono": true,
 }
 
 func isStdlib(path string) bool {
@@ -3063,6 +3075,19 @@ func hasStr(v ir.Val) bool {
 func (t *fnState) unop(x *ssa.UnOp) error {
 	switch x.Op {
 	case token.MUL: // load through a pointer
+		if g, ok := x.X.(*ssa.Global); ok && g.Pkg != nil && g.Pkg.Pkg.Path() == "time" {
+			// The clock's origin (#59): readings count from it, so it is
+			// 0; and the Local zone Now stores, which no modelled Time
+			// method reads.
+			switch g.Name() {
+			case "startNano":
+				t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.IntVal{Width: 64, Bits: "0"}}})
+				return nil
+			case "Local":
+				t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.OpaqueNonNil{}}})
+				return nil
+			}
+		}
 		if g, ok := x.X.(*ssa.Global); ok {
 			if _, _, cell := t.prog.cellGlobal(g); cell {
 				p, err := t.val(g)
@@ -3591,6 +3616,9 @@ func (t *fnState) call(x *ssa.Call) error {
 		}
 	}
 	if callee != nil {
+		if done := t.clockCall(x, callee); done {
+			return nil
+		}
 		if re, ok := compiledPattern(x); ok {
 			// regexp.MustCompile of a valid constant pattern: no panic, and
 			// a value only the modelled methods look into.
@@ -6155,6 +6183,63 @@ func sameRepr(a, b types.Type) bool {
 // the 64-bit and unsigned ones). The model runs a goroutine's instructions
 // between two synchronisation terms atomically, so these are plain
 // accesses.
+// clockKey is the cell of the model's clock (#59).
+var clockKey = func() uint32 {
+	h := fnv.New32a()
+	h.Write([]byte("go2lean.clock"))
+	return h.Sum32()
+}()
+
+// clockCall lowers package time's runtime hooks, which have no Go body,
+// onto the model's clock (#59): one cell per run, which every goroutine
+// reads and writes atomically (the race detector does not report it).
+// Each reading adds a havoc delta of zero or more nanoseconds (below
+// 2^40, about 18 minutes) to the last, so readings never go back within a
+// run. runtimeNano returns the reading (from 1); runtimeNow returns
+// (sec, nsec, mono), a wall clock that moves with it from a fixed start.
+// With these, Now, Since and the Time methods are translated from source
+// (modelledTime) and agree with each other as Go's do.
+func (t *fnState) clockCall(x *ssa.Call, callee *ssa.Function) bool {
+	name := callee.String()
+	if name == "time.runtimeIsBubbled" {
+		// Not inside a testing/synctest bubble.
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.BoolVal(false)}})
+		return true
+	}
+	if name != "time.runtimeNano" && name != "time.runtimeNow" {
+		return false
+	}
+	c := func(bits string, w int) ir.Var {
+		v := t.fresh()
+		t.emit(ir.Instr{Dst: v, Op: ir.Const{V: ir.IntVal{Width: w, Bits: bits}}})
+		return v
+	}
+	op := func(name string, args ...ir.Var) ir.Var {
+		v := t.fresh()
+		t.emit(ir.Instr{Dst: v, Op: ir.Simple(name), Args: args})
+		return v
+	}
+	clk := t.fresh()
+	t.emit(ir.Instr{Dst: clk, Op: ir.GlobalAddr{Key: clockKey, Zero: ir.IntVal{Width: 64, Bits: "0"}}})
+	old := t.fresh()
+	t.emit(ir.Instr{Dst: old, Op: ir.Conc("atomicLoad"), Args: []ir.Var{clk}})
+	raw := t.fresh()
+	t.emit(ir.Instr{Dst: raw, HavocSite: t.prog.newHavoc(64, t.f.Name()+": clock reading", "clock", "")})
+	now := op("add", old, op("urem", raw, c("1099511627776", 64)))
+	t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{clk, now}})
+	mono := op("add", now, c("1", 64))
+	if name == "time.runtimeNano" {
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("add"), Args: []ir.Var{now, c("1", 64)}})
+		return true
+	}
+	// 2023-11-14 22:13:20 UTC, and the reading's seconds after it.
+	sec := op("add", c("1700000000", 64), op("udiv", mono, c("1000000000", 64)))
+	nsec := t.fresh()
+	t.emit(ir.Instr{Dst: nsec, Op: ir.Conv{Width: 32}, Args: []ir.Var{op("urem", mono, c("1000000000", 64))}})
+	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("mkTuple"), Args: []ir.Var{sec, nsec, mono}})
+	return true
+}
+
 func (t *fnState) atomicFuncCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 	if callee.Signature.Recv() != nil || callee.Pkg == nil || callee.Pkg.Pkg.Path() != "sync/atomic" {
 		return false, nil

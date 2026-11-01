@@ -132,3 +132,16 @@ func TestLastRun(t *testing.T) {
 		t.Fatalf("lastRun = %q, want cx_b", got)
 	}
 }
+
+// A crash in go2lean's replay controller is the harness's failure, not
+// the program's panic (#59's breaker replay).
+func TestHarnessCrash(t *testing.T) {
+	ctl := "panic: runtime error: index out of range [4] with length 1\n\ngoroutine 49 [running]:\ngithub.com/eapache/go-resiliency/breaker.go2leanGate({0x59f8dc, 0x5})\n\t/m/zz_go2lean_replay.go:186 +0x1e6\ngithub.com/eapache/go-resiliency/breaker.(*Breaker).timer(0xc0000122d0)\n\t/m/breaker.go:132 +0x2c\n"
+	prog := "panic: runtime error: invalid memory address or nil pointer dereference\n[signal SIGSEGV]\n\ngoroutine 21 [running]:\ngithub.com/eapache/go-resiliency/deadline.(*Deadline).Run.func1()\n\t/m/deadline.go:35 +0x1f\ncreated by github.com/eapache/go-resiliency/deadline.(*Deadline).Run in goroutine 20\n"
+	if !harnessCrash(ctl) {
+		t.Fatal("controller crash not recognised")
+	}
+	if harnessCrash(prog) {
+		t.Fatal("program crash taken for the harness's")
+	}
+}
