@@ -50,3 +50,32 @@ func TestInitCells(t *testing.T) {
 		}
 	}
 }
+
+// A variable whose part of the initializer does not translate (a buffer
+// larger than the model allocates) is not an init cell; the others still
+// are, and the initializer's slice translates without it (#120).
+func TestInitCellsDropUntranslatable(t *testing.T) {
+	progs, _, err := TranslateAllOpts("../../..", Options{}, "./testdata/initbig")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := progs[0]
+	if len(p.Inits) != 1 {
+		t.Fatalf("Inits %v, want one", p.Inits)
+	}
+	init := p.Funcs[p.Inits[0]]
+	if init.Status == "rejected" {
+		t.Fatalf("initializer slice rejected: %v", init.Issues)
+	}
+	stores := 0
+	for _, b := range init.Blocks {
+		for _, in := range b.Instrs {
+			if _, ok := in.Op.(ir.GlobalAddr); ok {
+				stores++
+			}
+		}
+	}
+	if stores != 1 {
+		t.Errorf("the slice addresses %d cells, want 1 (reg)", stores)
+	}
+}

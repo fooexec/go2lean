@@ -9,6 +9,7 @@
 package gossa
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/constant"
@@ -182,7 +183,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	plan := planCells(units, mainPaths)
 	for k := range units {
 		if plan.concurrent[units[k].path] {
-			units[k].fns = withAnon(withInitCallees(units[k].path, units[k].fns, plan.used))
+			units[k].fns = withAnon(withInitCallees(units[k].path, units[k].fns, plan.initUsed()))
 		}
 	}
 	plan.collectInits(units)
@@ -209,6 +210,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			xrefs[f.String()] = contract.XCall{Package: u.path, ID: id}
 		}
 	}
+	plan.dropUntranslatable(units, xrefs, zeros, sprog, boxed)
 	var progs []*ir.Prog
 	for _, u := range units {
 		p, err := translatePackage(u.path, u.fns, xrefs, zeros, sprog, boxed, plan)
@@ -1194,32 +1196,17 @@ func candidates(spkg *ssa.Package, tests bool) []*ssa.Function {
 }
 
 func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan) (*ir.Prog, error) {
-	p := &ir.Prog{Package: pkgPath, Frontend: Frontend}
-	st := &progState{prog: p, ids: map[*ssa.Function]int{}, xrefs: xrefs, zeros: zeros, sprog: sprog, boxed: boxed, json: newJSONTable(sprog)}
-	st.sharedGlobals, st.initCells = plan.shared, plan.init
-	for _, ty := range boxed {
-		if !types.Comparable(ty) && !slices.Contains(st.notComparable, typeTag(ty)) {
-			st.notComparable = append(st.notComparable, typeTag(ty))
-		}
-	}
+	st := newProgState(pkgPath, fns, xrefs, zeros, sprog, boxed, plan)
+	p := st.prog
 
 	var initFn *ssa.Function
 	var keep map[ssa.Instruction]bool
 	if plan.concurrent[pkgPath] {
-		initFn, keep = initCells(pkgPath, fns, plan.used)
+		initFn, keep = initCells(pkgPath, fns, plan.initUsed())
 	}
-
-	// Pass 1: assign FuncIds so calls can be resolved.
-	byName := map[string]*ssa.Function{}
-	for _, f := range fns {
-		st.ids[f] = len(p.Funcs)
-		p.Funcs = append(p.Funcs, &ir.Func{Name: funcName(f), GoSig: goSig(f)})
-		byName[funcName(f)] = f
-	}
-	st.specFor = func(f *ssa.Function) string { return specTarget(f, byName) }
-	// The initializer's slice. When it does not translate, its stub gets
-	// stuck, and the search skips it and says so: its variables stay cells
-	// at their zero values, as every package decided.
+	// The initializer's slice. Its variables whose part of it does not
+	// translate are not cells (dropUntranslatable); should the rest still
+	// fail, its stub gets stuck, and the search skips it and says so.
 	// The variable initializers first, then each func init() the slice is
 	// in, in Go's order.
 	if initFn != nil {
@@ -1785,6 +1772,27 @@ func (s *progState) newHavoc(width int, site, reason, goHint string) int {
 	return idx
 }
 
+// newProgState is the translation state of a package, with FuncIds
+// assigned to fns (pass 1) so calls can be resolved.
+func newProgState(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan) *progState {
+	p := &ir.Prog{Package: pkgPath, Frontend: Frontend}
+	st := &progState{prog: p, ids: map[*ssa.Function]int{}, xrefs: xrefs, zeros: zeros, sprog: sprog, boxed: boxed, json: newJSONTable(sprog)}
+	st.sharedGlobals, st.initCells = plan.shared, plan.init
+	for _, ty := range boxed {
+		if !types.Comparable(ty) && !slices.Contains(st.notComparable, typeTag(ty)) {
+			st.notComparable = append(st.notComparable, typeTag(ty))
+		}
+	}
+	byName := map[string]*ssa.Function{}
+	for _, f := range fns {
+		st.ids[f] = len(p.Funcs)
+		p.Funcs = append(p.Funcs, &ir.Func{Name: funcName(f), GoSig: goSig(f)})
+		byName[funcName(f)] = f
+	}
+	st.specFor = func(f *ssa.Function) string { return specTarget(f, byName) }
+	return st
+}
+
 // rejectStub turns a function into a body that gets stuck, so callers still
 // reference a valid FuncId.
 func rejectStub(out *ir.Func, err error) {
@@ -2088,7 +2096,7 @@ func (t *fnState) block(i int, b *ssa.BasicBlock) error {
 	if i == 0 && t.setup != nil {
 		for _, in := range t.setup.prefix {
 			if err := t.instr(b, in); err != nil {
-				return fmt.Errorf("%s: %w", in, err)
+				return &instrError{in, err}
 			}
 		}
 		t.syncOp(ir.SyncOp{Kind: "setupEnd"}, t.fresh())
@@ -2106,11 +2114,20 @@ func (t *fnState) block(i int, b *ssa.BasicBlock) error {
 			continue
 		}
 		if err := t.instr(b, in); err != nil {
-			return fmt.Errorf("%s: %w", in, err)
+			return &instrError{in, err}
 		}
 	}
 	return nil
 }
+
+// instrError is an instruction the translator could not model.
+type instrError struct {
+	in  ssa.Instruction
+	err error
+}
+
+func (e *instrError) Error() string { return fmt.Sprintf("%s: %v", e.in, e.err) }
+func (e *instrError) Unwrap() error { return e.err }
 
 // setupOrder is a harness's entry block split where its setup ends.
 type setupOrder struct {
@@ -5360,11 +5377,29 @@ type cellPlan struct {
 	// init: the variables of a concurrent package its initializer builds
 	// (initCells).
 	init map[*ssa.Global]bool
+	// noInit: the variables whose part of the initializer's slice does not
+	// translate (dropUntranslatable); they are not init cells.
+	noInit map[*ssa.Global]bool
+}
+
+// initUsed is used without the variables in noInit: the candidates for
+// init cells.
+func (plan *cellPlan) initUsed() map[*ssa.Global]bool {
+	if len(plan.noInit) == 0 {
+		return plan.used
+	}
+	out := map[*ssa.Global]bool{}
+	for g := range plan.used {
+		if !plan.noInit[g] {
+			out[g] = true
+		}
+	}
+	return out
 }
 
 func planCells(units []unit, mainPaths map[string]bool) *cellPlan {
 	plan := &cellPlan{concurrent: map[string]bool{}, used: map[*ssa.Global]bool{},
-		shared: map[*ssa.Global]bool{}, init: map[*ssa.Global]bool{}}
+		shared: map[*ssa.Global]bool{}, init: map[*ssa.Global]bool{}, noInit: map[*ssa.Global]bool{}}
 	mainSpawns := false
 	for _, u := range units {
 		if sharedGlobals(u.fns) != nil {
@@ -5410,11 +5445,12 @@ func planCells(units []unit, mainPaths map[string]bool) *cellPlan {
 // collectInits records the variables each concurrent package's
 // initializer builds, once its functions are final.
 func (plan *cellPlan) collectInits(units []unit) {
+	plan.init = map[*ssa.Global]bool{}
 	for _, u := range units {
 		if !plan.concurrent[u.path] {
 			continue
 		}
-		_, keep := initCells(u.path, u.fns, plan.used)
+		_, keep := initCells(u.path, u.fns, plan.initUsed())
 		for in := range keep {
 			if st, ok := in.(*ssa.Store); ok {
 				if g, ok := st.Addr.(*ssa.Global); ok {
@@ -5423,6 +5459,76 @@ func (plan *cellPlan) collectInits(units []unit) {
 			}
 		}
 	}
+}
+
+// dropUntranslatable translates each package initializer's slice ahead
+// of time. Where an instruction of it does not translate, the variables
+// whose own slice holds that instruction leave the init cells (noInit),
+// all of the package's when none does, and the slice is taken again
+// without them: one variable the model cannot build (a large array)
+// does not leave the package's other cells at their zero values.
+func (plan *cellPlan) dropUntranslatable(units []unit, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type) {
+	changed := false
+	for _, u := range units {
+		if !plan.concurrent[u.path] {
+			continue
+		}
+		for {
+			initFn, keep := initCells(u.path, u.fns, plan.initUsed())
+			if initFn == nil {
+				break
+			}
+			bad, ok := trialInit(u.path, u.fns, initFn, keep, xrefs, zeros, sprog, boxed, plan)
+			if ok {
+				break
+			}
+			var cells []*ssa.Global
+			for in := range keep {
+				if st, ok := in.(*ssa.Store); ok {
+					if g, ok := st.Addr.(*ssa.Global); ok && plan.init[g] && !plan.noInit[g] && !slices.Contains(cells, g) {
+						cells = append(cells, g)
+					}
+				}
+			}
+			dropped := false
+			for _, g := range cells {
+				if _, own := initCells(u.path, u.fns, map[*ssa.Global]bool{g: true}); bad == nil || own[bad] {
+					plan.noInit[g], dropped = true, true
+				}
+			}
+			if !dropped {
+				for _, g := range cells {
+					plan.noInit[g] = true
+				}
+			}
+			changed = true
+			if len(cells) == 0 {
+				break
+			}
+		}
+	}
+	if changed {
+		plan.collectInits(units)
+	}
+}
+
+// trialInit translates a package initializer's slice and says whether it
+// translates; when not, which instruction failed (nil if it cannot say).
+func trialInit(pkgPath string, fns []*ssa.Function, initFn *ssa.Function, keep map[ssa.Instruction]bool, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan) (ssa.Instruction, bool) {
+	st := newProgState(pkgPath, fns, xrefs, zeros, sprog, boxed, plan)
+	for _, f := range initFuncs(initFn) {
+		out := &ir.Func{Name: f.Name(), GoSig: goSig(f), Init: true}
+		st.prog.Funcs = append(st.prog.Funcs, out)
+		t := &fnState{prog: st, f: f, out: out, vars: map[ssa.Value]ir.Var{}, blockID: map[*ssa.BasicBlock]int{}, keep: keep}
+		if err := t.translate(); err != nil {
+			var ie *instrError
+			if errors.As(err, &ie) && keep[ie.in] {
+				return ie.in, false
+			}
+			return nil, false
+		}
+	}
+	return nil, true
 }
 
 // sharedGlobals are the package variables written by fns (and the
