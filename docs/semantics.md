@@ -309,20 +309,21 @@ records its schedule.
 | `sync.RWMutex` `Lock Unlock RLock RUnlock` | readers count and writer flag; writer preference: a blocked `Lock` stops new `RLock`s, as Go does (read–write–read deadlock) |
 | `sync.WaitGroup` `Add Done Wait` | a counter; negative: `explicit` (Go's `sync: negative WaitGroup counter` panic); `Wait` blocks until zero |
 | `sync.Once` `Do` | not started / running / done; a `Do` while another runs blocks; `f` runs once |
-| `time.Sleep`, `runtime.Gosched` | a scheduling point; time is not modelled |
+| `time.Sleep(d)` | virtual time (#59): the goroutine wakes once every other sleeper due before it has; waking moves the other sleepers and the clock on as far. A sleep may end while other code could still run, as on a loaded machine: the run then takes the assumption that this code is slower than the sleep. The engines prefer counterexamples without it, and the replay stage reports a panic that needs it as `needs_slow_code` (inconclusive), never confirmed; a data race on such a schedule is confirmed by Go's race detector as any other |
+| `runtime.Gosched` | a scheduling point |
 | deferred `Unlock`, `RUnlock`, `Done`, `close`, and calls through a func value (`defer cancel()`) | run at the function's returns, as other deferred calls |
 | `go x.M()` on an interface value, `go close(ch)` | the method of the dynamic type (as a call through the interface); a goroutine closing `ch` |
 | `context.Background`, `TODO` | a context that never ends (`Done()` is a nil channel) |
-| `context.WithCancel`, `WithTimeout`, `WithDeadline` | a child context: its own done channel, registered with the parent (cancelling the parent cancels it, a cancelled parent makes it cancelled); the cancel func closes the done channel; for a timeout or deadline a goroutine cancels it at any scheduling point, as the deadline may pass at any time |
+| `context.WithCancel`, `WithTimeout`, `WithDeadline` | a child context: its own done channel, registered with the parent (cancelling the parent cancels it, a cancelled parent makes it cancelled); the cancel func closes the done channel; for a timeout, a goroutine cancels it once the timeout has passed in virtual time (`time.Sleep`); for a deadline, after a havoc duration |
 | `ctx.Done()`, `ctx.Err()` | the done channel; nil, or a non-nil error once cancelled (which of `Canceled` and `DeadlineExceeded` is not modelled); a context the model did not make (an input) never ends, as `context.Background()` the harness passes |
-| `time.After`, `time.NewTimer` | a channel of one buffered value and a goroutine that sends on it at any scheduling point, without blocking when the buffer is full; `Timer.Reset` sends once more, `Timer.Stop` returns any bool and stops nothing (its late send cannot block anyone) |
-| `time.NewTicker` | a daemon goroutine sending forever: a run ends when only daemons can move and two steps each wake nobody; `Stop` changes nothing |
-| `time.AfterFunc(d, f)` | a goroutine running `f` |
+| `time.After(d)`, `time.NewTimer(d)` | a channel of one buffered value and a goroutine that sleeps `d` (virtual time), then sends on it without blocking when the buffer is full; `Timer.Reset(d)` sends once more after `d`, `Timer.Stop` returns any bool and stops nothing (its late send cannot block anyone) |
+| `time.NewTicker(d)` | a daemon goroutine that sends every `d`, forever: a run ends when only daemons can move and two steps each wake nobody; `Stop` changes nothing |
+| `time.AfterFunc(d, f)` | a goroutine that sleeps `d`, then starts `f` |
 | `sync.NewCond`, `Cond.Wait`, `Signal`, `Broadcast` | a ticket queue in the cond's `notify` field: `Wait` takes a ticket, unlocks `L`, blocks until `Signal` (the oldest ticket) or `Broadcast` (all) releases it, then locks `L` again; a `Signal` with no waiter is lost, as in Go |
 | `Lock`, `Unlock` through a `sync.Locker` | the writer side of a `*RWMutex`, else a `*Mutex` (by the boxed value's type) |
-| `time.Now`, `Since`, `Until` | translated from source over the model's clock (#59): one cell per run, read and written atomically, that each reading moves forward by a havoc number of nanoseconds (zero or more, below 2^40), so readings never go back within a run; the wall clock moves with it from a fixed start |
+| `time.Now`, `Since`, `Until` | translated from source over the model's clock (#59): one cell per run, read atomically, that only virtual time moves on (a sleep or a timer that ends); code runs in no time, so readings never go back and two with no sleep between them are equal, as Go's monotonic clock may give; the wall clock moves with it from a fixed start |
 | `Time` `Add`, `Sub`, `After`, `Before`, `Equal`, `Compare`, `IsZero` | translated from source, so they agree with the clock as Go's do |
-| durations (`Sleep(d)` against a timer of another length), `context.WithValue`, `ctx.Deadline`, `ctx.Value` | not ordered by length: a sleep is a scheduling point, so a goroutine that sleeps longer may still wake first; the others havoc |
+| `context.WithValue`, `ctx.Deadline`, `ctx.Value` | havoc |
 
 The end of a run, when no goroutine can move: all goroutines done, the main
 goroutine's result; the main goroutine blocked, `deadlock` (Go's "all

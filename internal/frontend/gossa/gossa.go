@@ -6191,12 +6191,13 @@ var clockKey = func() uint32 {
 }()
 
 // clockCall lowers package time's runtime hooks, which have no Go body,
-// onto the model's clock (#59): one cell per run, which every goroutine
-// reads and writes atomically (the race detector does not report it).
-// Each reading adds a havoc delta of zero or more nanoseconds (below
-// 2^40, about 18 minutes) to the last, so readings never go back within a
-// run. runtimeNano returns the reading (from 1); runtimeNow returns
-// (sec, nsec, mono), a wall clock that moves with it from a fixed start.
+// onto the model's clock (#59): one cell per run, read atomically (the
+// race detector does not report it), that only virtual time moves on: a
+// sleep or a timer that ends (GoConc.advanceClock). Code runs in no time,
+// so two readings with no sleep between them are equal, as Go's monotonic
+// clock may give. runtimeNano returns the reading (from 1); runtimeNow
+// returns (sec, nsec, mono), a wall clock that moves with it from a fixed
+// start.
 // With these, Now, Since and the Time methods are translated from source
 // (modelledTime) and agree with each other as Go's do.
 func (t *fnState) clockCall(x *ssa.Call, callee *ssa.Function) bool {
@@ -6221,12 +6222,8 @@ func (t *fnState) clockCall(x *ssa.Call, callee *ssa.Function) bool {
 	}
 	clk := t.fresh()
 	t.emit(ir.Instr{Dst: clk, Op: ir.GlobalAddr{Key: clockKey, Zero: ir.IntVal{Width: 64, Bits: "0"}}})
-	old := t.fresh()
-	t.emit(ir.Instr{Dst: old, Op: ir.Conc("atomicLoad"), Args: []ir.Var{clk}})
-	raw := t.fresh()
-	t.emit(ir.Instr{Dst: raw, HavocSite: t.prog.newHavoc(64, t.f.Name()+": clock reading", "clock", "")})
-	now := op("add", old, op("urem", raw, c("1099511627776", 64)))
-	t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{clk, now}})
+	now := t.fresh()
+	t.emit(ir.Instr{Dst: now, Op: ir.Conc("atomicLoad"), Args: []ir.Var{clk}})
 	mono := op("add", now, c("1", 64))
 	if name == "time.runtimeNano" {
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("add"), Args: []ir.Var{now, c("1", 64)}})
@@ -7133,6 +7130,16 @@ func (t *fnState) syncCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 		return false, nil
 	}
 	if op == "yield" {
+		if callee.String() == "time.Sleep" {
+			// A sleep of its duration (#59): the goroutine wakes once the
+			// other sleepers with less left have, see GoConc.fire.
+			d, err := t.val(x.Call.Args[0])
+			if err != nil {
+				return true, err
+			}
+			t.syncOp(ir.SyncOp{Kind: "yield"}, t.def(x), d)
+			return true, nil
+		}
 		t.syncOp(ir.SyncOp{Kind: "yield"}, t.def(x))
 		return true, nil
 	}

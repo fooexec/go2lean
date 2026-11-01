@@ -49,6 +49,9 @@ structure Gor where
   daemon : Bool := false
   /-- Its vector clock, for the race detector. -/
   vc : Array Nat := #[]
+  /-- At a `time.Sleep(d)` (a `yield [d]`): the nanoseconds left, once
+  another sleeper's waking moved time on; none: all of `d` (#59). -/
+  sleep : Option Int := none
 
 instance : Inhabited Gor := ⟨{ frames := [] }⟩
 
@@ -159,7 +162,8 @@ def complete (g : Gor) (r : Val) : Gor :=
     | some blk =>
       match blk.term with
       | .sync _ _ dst next =>
-        { g with frames := { f with env := enter f.fn next (f.env.set! dst r) [], bid := next, atTerm := false } :: rest }
+        { g with frames := { f with env := enter f.fn next (f.env.set! dst r) [], bid := next, atTerm := false } :: rest,
+                 sleep := none }
       | .spawn _ _ next =>
         { g with frames := { f with env := enter f.fn next f.env [], bid := next, atTerm := false } :: rest }
       | _ => g
@@ -305,6 +309,49 @@ def lockerTarget (rwTag rTag : Nat) : Val → Nat × Val
   | .boxed t p => (if t == rwTag then 1 else if t == rTag then 2 else 0, p)
   | p => (0, p)
 
+/-- The key of the model's clock cell (`gossa.clockKey`, #59). -/
+def clockKey : Nat := 1775612383
+
+/-- The heap with the clock cell, if the run made one, moved on by `d`
+nanoseconds. -/
+def advanceClock (heap : Heap Val) (d : Int) : Heap Val :=
+  if d ≤ 0 then heap else
+  let dir := match heap[0]? with | some (.arr es) => es | _ => []
+  let cell := dir.findSome? fun e => match e with
+    | .tuple [.int _ k, p] => if k.toNat == clockKey then some p else none
+    | _ => none
+  match cell with
+  | some p =>
+    match heapLoad heap p with
+    | .ok (.int 64 v) =>
+      match heapStore heap p (.int 64 (BitVec.ofInt 64 (v.toInt + d))) with
+      | .ok heap => heap
+      | _ => heap
+    | _ => heap
+  | none => heap
+
+/-- The heap with the clock cell set to 0, so that states that differ only
+in the time compare equal (hang detection, #59). -/
+def withoutClock (heap : Heap Val) : Heap Val :=
+  let dir := match heap[0]? with | some (.arr es) => es | _ => []
+  let cell := dir.findSome? fun e => match e with
+    | .tuple [.int _ k, p] => if k.toNat == clockKey then some p else none
+    | _ => none
+  match cell with
+  | some p =>
+    match heapStore heap p (.int 64 0) with
+    | .ok heap => heap
+    | _ => heap
+  | none => heap
+
+/-- The nanoseconds goroutine `g` still sleeps, when it waits at a
+`time.Sleep` (a `yield [d]`). -/
+def sleepLeft (g : Gor) : Option Int :=
+  if g.done then none else
+  match pendingSync g with
+  | some (.yield, [.int _ d]) => some (g.sleep.getD d.toInt)
+  | _ => none
+
 /-- Try goroutine `i`'s pending operation; `choice` picks among ready
 `select` cases. -/
 def fire (heap : Heap Val) (gs : Array Gor) (i : Nat) (choice : Nat) : Fire :=
@@ -364,6 +411,24 @@ def fire (heap : Heap Val) (gs : Array Gor) (i : Nat) (choice : Nat) : Fire :=
       | 0 => withWord (setWord heap ptr 1) (.bool true)
       | 1 => .blocked
       | _ => done1 (.bool false) heap
+    | .yield, [.int _ d] =>
+      -- A sleep (#59): time moves on to this goroutine's waking only when
+      -- no other sleeper is due before it; it may move on at any
+      -- scheduling point, as time passes while the others run. Waking
+      -- moves every other sleeper and the clock on as far.
+      let mine := (gs[i]? >>= sleepLeft).getD d.toInt
+      let earlier := (List.range gs.size).any fun j =>
+        j != i && match gs[j]? >>= sleepLeft with
+          | some r => r < mine
+          | none => false
+      if mine > 0 && earlier then .blocked else
+      let step := max mine 0
+      let gs := gs.mapIdx fun j g =>
+        if j == i then complete g .unit
+        else match sleepLeft g with
+          | some r => { g with sleep := some (r - step) }
+          | none => g
+      Fire.done gs (advanceClock heap step)
     | .yield, _ => done1 .unit heap
     | .condWait, [c, .int _ t] =>
       if (condState heap c).2.contains t.toNat then .blocked else done1 .unit heap
@@ -406,6 +471,24 @@ def ready (heap : Heap Val) (gs : Array Gor) (i : Nat) : Bool :=
         | _ => false
       | none => false
     | [] => false
+
+/-- The goroutines that can move now (#59). -/
+def movable (heap : Heap Val) (gs : Array Gor) : List Nat :=
+  (List.range gs.size).filter (ready heap gs)
+
+/-- Can goroutine `j` move without time passing? -/
+def movesNow (gs : Array Gor) (j : Nat) : Bool :=
+  match gs[j]? >>= sleepLeft with
+  | some r => r ≤ 0
+  | none => true
+
+/-- The assumption a schedule takes when it wakes a sleeper while another
+goroutine could still run (#59): that code is slower than the sleep. Go's
+`testing/synctest` never does this; a loaded machine can. The engines
+prefer counterexamples without it, and the replay stage does not confirm a
+panic that needs it on the model's schedule alone. -/
+def slowNote : String :=
+  "the schedule lets a sleep end while other code could still run: it needs that code to be slower than the sleep (#59)"
 
 /-- Value `v` holds channel `ch`, itself or in a field (to depth `n`). -/
 def reaches (ch : Val) : Nat → Val → Bool
@@ -736,7 +819,7 @@ def scheduleS (p : Prog) (or : Oracle) (h : Havoc Val) (stepFuel : Nat) (stop : 
   | _, s, 0, _ => .inr (.outOfFuel, s)
   | gs, s, n + 1, idle =>
     if stop && gs.size == 1 && pendingName gs[0]! == "setupEnd" then .inl { gs, s, n := n + 1, idle } else
-    let cands := (List.range gs.size).filter (ready s.heap gs)
+    let cands := movable s.heap gs
     let live := cands.filter fun i => !(gs[i]!.daemon)
     let daemons := cands.length - live.length
     if live.isEmpty && (daemons = 0 || idle ≥ 2 * daemons) then
@@ -753,6 +836,7 @@ def scheduleS (p : Prog) (or : Oracle) (h : Havoc Val) (stepFuel : Nat) (stop : 
       let atSetupEnd := cands.length == 1 && pendingName gs[cands[0]!]! == "setupEnd"
       let (c, s) := if atSetupEnd then (0, s) else schedChoice p h s cands.length
       let i := cands[c % cands.length]!
+      let s := if !movesNow gs i && cands.any (fun j => j != i && movesNow gs j) then s.assume slowNote else s
       -- The case a select takes: stepGor draws the same choice from `s`.
       let name := (selectTaken s.heap gs i (schedChoice p h s 1).1).getD (pendingName gs[i]!)
       let pkg := pendingPkg gs[i]!

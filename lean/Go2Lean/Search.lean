@@ -964,7 +964,7 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
       -- A refutation whose run read a havoc value (an unmodelled call) is
       -- kept as a fallback while the search goes on for one that did not:
       -- M3 refutes most havoc-dependent ones.
-      if s.log.size == 0 then
+      if s.log.size == 0 && !s.assumed.contains GoConc.slowNote then
         IO.println (report or heap gens args trial seed o s ret p.siteOrigin).compress
         return
       else if fallback.isNone then
@@ -1407,7 +1407,7 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
     let alts := [havocOf 1 p.havocWidths, havocOf 2 p.havocWidths]
     let (o, s, ret, slow) ← timedCheck p or h prop args fuel heap alts snap
     if o.refutes prop then
-      if s.log.size == 0 then
+      if s.log.size == 0 && !s.assumed.contains GoConc.slowNote then
         IO.println (report or heap gens args i 0 o s ret p.siteOrigin).compress
         return
       else if fallback.isNone then
@@ -1423,8 +1423,9 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
           loopSites := run.bump loopSites (if l.assumed then l.site ++ " (under assumptions)" else l.site)
     if let some b := specExit prop o s then exits := run.bump exits b
     if o.moot prop then moots := moots + 1
+    -- A schedule that needed slow code covers more, not less (#59).
     for a in s.assumed do
-      if !assumed.contains a && assumed.size < 32 then assumed := assumed.push a
+      if a != GoConc.slowNote && !assumed.contains a && assumed.size < 32 then assumed := assumed.push a
     match p.schedSite with
     | some site =>
       if s.conc.arity.isEmpty || o.refutes prop then
@@ -1445,7 +1446,7 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
           let (o', s', ret', slow') ← timedCheck p or hs prop args fuel heap (alts.map (forceSched · site pf)) snap
           runs := runs + 1
           if o'.refutes prop then
-            if s'.log.all (·.1 == site) then
+            if s'.log.all (·.1 == site) && !s'.assumed.contains GoConc.slowNote then
               IO.println (report or heap gens args i 0 o' s' ret' p.siteOrigin).compress
               return
             else if fallback.isNone then
@@ -1456,7 +1457,7 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
           if o'.moot prop then complete := false
           if s'.log.any (·.1 != site) then other := true
           for a in s'.assumed do
-            if !assumed.contains a && assumed.size < 32 then assumed := assumed.push a
+            if a != GoConc.slowNote && !assumed.contains a && assumed.size < 32 then assumed := assumed.push a
           let choices := (Array.range s'.conc.arity.size).map fun k => pf[k]?.getD 0
           pre := nextSched choices s'.conc.arity
         schedRuns := schedRuns + runs
