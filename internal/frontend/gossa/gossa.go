@@ -137,10 +137,6 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	// Keyed by name: a package compiled as its test variant holds other
 	// function objects than the plain variant its importers call.
 	xrefs := map[string]contract.XCall{}
-	type unit struct {
-		path string
-		fns  []*ssa.Function
-	}
 	var units []unit
 	mainPaths := map[string]bool{}
 	var roots []*ssa.Function
@@ -176,20 +172,20 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			units = append(units, unit{path, fns})
 		}
 	}
-	// A program whose compiled packages start goroutines: the dependency
-	// packages they call run in those goroutines too (#55).
-	concurrent := false
-	for _, u := range units {
-		if mainPaths[u.path] && sharedGlobals(u.fns) != nil {
-			concurrent = true
-		}
-	}
 	// Anonymous functions after the rest, so calls through closures can
 	// follow them; their FuncIds come last and move nothing.
 	for k := range units {
-		fns := withAnon(withPoolNews(withAnon(units[k].fns)))
-		units[k].fns = withAnon(withInitCallees(units[k].path, fns, sharedGlobals(fns) != nil || concurrent && !mainPaths[units[k].path]))
+		units[k].fns = withAnon(withPoolNews(withAnon(units[k].fns)))
 	}
+	// Which package variables are cells: one decision for every linked
+	// package (#55).
+	plan := planCells(units, mainPaths)
+	for k := range units {
+		if plan.concurrent[units[k].path] {
+			units[k].fns = withAnon(withInitCallees(units[k].path, units[k].fns, plan.used))
+		}
+	}
+	plan.collectInits(units)
 	// The types modelled code boxes into interfaces: the dynamic types an
 	// interface value the model built can have.
 	var boxed []types.Type
@@ -215,7 +211,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	}
 	var progs []*ir.Prog
 	for _, u := range units {
-		p, err := translatePackage(u.path, u.fns, xrefs, zeros, sprog, boxed, concurrent && !mainPaths[u.path])
+		p, err := translatePackage(u.path, u.fns, xrefs, zeros, sprog, boxed, plan)
 		if err != nil {
 			return nil, "", err
 		}
@@ -1185,26 +1181,20 @@ func candidates(spkg *ssa.Package, tests bool) []*ssa.Function {
 	return fns
 }
 
-func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, concurrentDep bool) (*ir.Prog, error) {
+func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan) (*ir.Prog, error) {
 	p := &ir.Prog{Package: pkgPath, Frontend: Frontend}
 	st := &progState{prog: p, ids: map[*ssa.Function]int{}, xrefs: xrefs, zeros: zeros, sprog: sprog, boxed: boxed, json: newJSONTable(sprog)}
-	st.sharedGlobals = sharedGlobals(fns)
+	st.sharedGlobals, st.initCells = plan.shared, plan.init
 	for _, ty := range boxed {
 		if !types.Comparable(ty) && !slices.Contains(st.notComparable, typeTag(ty)) {
 			st.notComparable = append(st.notComparable, typeTag(ty))
 		}
 	}
 
-	initFn, keep := initCells(pkgPath, fns, st.sharedGlobals != nil || concurrentDep)
-	if initFn != nil {
-		st.initCells = map[*ssa.Global]bool{}
-		for in := range keep {
-			if s, ok := in.(*ssa.Store); ok {
-				if g, ok := s.Addr.(*ssa.Global); ok {
-					st.initCells[g] = true
-				}
-			}
-		}
+	var initFn *ssa.Function
+	var keep map[ssa.Instruction]bool
+	if plan.concurrent[pkgPath] {
+		initFn, keep = initCells(pkgPath, fns, plan.used)
 	}
 
 	// Pass 1: assign FuncIds so calls can be resolved.
@@ -1215,8 +1205,9 @@ func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]cont
 		byName[funcName(f)] = f
 	}
 	st.specFor = func(f *ssa.Function) string { return specTarget(f, byName) }
-	// The initializer's slice first: when it does not translate, its
-	// variables are not cells, for every function.
+	// The initializer's slice. When it does not translate, its stub gets
+	// stuck, and the search skips it and says so: its variables stay cells
+	// at their zero values, as every package decided.
 	if initFn != nil {
 		id := len(p.Funcs)
 		out := &ir.Func{Name: "init", GoSig: goSig(initFn), Init: true}
@@ -1224,11 +1215,10 @@ func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]cont
 		t := &fnState{prog: st, f: initFn, out: out, vars: map[ssa.Value]ir.Var{}, blockID: map[*ssa.BasicBlock]int{}, keep: keep}
 		if err := t.translate(); err != nil {
 			rejectStub(out, err)
-			st.initCells = nil
 		} else {
 			out.Sync = t.sync
-			p.Inits = []int{id}
 		}
+		p.Inits = []int{id}
 	}
 	// Pass 2: bodies.
 	for _, f := range fns {
@@ -5307,6 +5297,92 @@ func builtIface(v ssa.Value, depth int) bool {
 	return false
 }
 
+// unit is a package the compile stage translates, with its functions.
+type unit struct {
+	path string
+	fns  []*ssa.Function
+}
+
+// cellPlan is which package variables are cells, decided once for every
+// linked package so that they all agree (#55).
+type cellPlan struct {
+	// concurrent: the packages whose code runs in goroutines: the ones
+	// whose functions start one, and, in a program whose compiled
+	// packages start one, every dependency package.
+	concurrent map[string]bool
+	// used: the package variables some linked package's functions use.
+	used map[*ssa.Global]bool
+	// shared: the variables of a concurrent package that some linked
+	// package's functions write.
+	shared map[*ssa.Global]bool
+	// init: the variables of a concurrent package its initializer builds
+	// (initCells).
+	init map[*ssa.Global]bool
+}
+
+func planCells(units []unit, mainPaths map[string]bool) *cellPlan {
+	plan := &cellPlan{concurrent: map[string]bool{}, used: map[*ssa.Global]bool{},
+		shared: map[*ssa.Global]bool{}, init: map[*ssa.Global]bool{}}
+	mainSpawns := false
+	for _, u := range units {
+		if sharedGlobals(u.fns) != nil {
+			plan.concurrent[u.path] = true
+			mainSpawns = mainSpawns || mainPaths[u.path]
+		}
+	}
+	for _, u := range units {
+		if mainSpawns && !mainPaths[u.path] {
+			plan.concurrent[u.path] = true
+		}
+	}
+	written := map[*ssa.Global]bool{}
+	for _, u := range units {
+		for _, f := range u.fns {
+			if isInit(f.Name()) && f.Signature.Recv() == nil {
+				continue
+			}
+			for _, b := range f.Blocks {
+				for _, in := range b.Instrs {
+					if st, ok := in.(*ssa.Store); ok {
+						if g, ok := st.Addr.(*ssa.Global); ok {
+							written[g] = true
+						}
+					}
+					for _, op := range in.Operands(nil) {
+						if g, ok := (*op).(*ssa.Global); ok {
+							plan.used[g] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	for g := range written {
+		if g.Pkg != nil && plan.concurrent[g.Pkg.Pkg.Path()] {
+			plan.shared[g] = true
+		}
+	}
+	return plan
+}
+
+// collectInits records the variables each concurrent package's
+// initializer builds, once its functions are final.
+func (plan *cellPlan) collectInits(units []unit) {
+	for _, u := range units {
+		if !plan.concurrent[u.path] {
+			continue
+		}
+		_, keep := initCells(u.path, u.fns, plan.used)
+		for in := range keep {
+			if st, ok := in.(*ssa.Store); ok {
+				if g, ok := st.Addr.(*ssa.Global); ok {
+					plan.init[g] = true
+				}
+			}
+		}
+	}
+}
+
 // sharedGlobals are the package variables written by fns (and the
 // closures in them) when one of them starts a goroutine; none otherwise.
 func sharedGlobals(fns []*ssa.Function) map[*ssa.Global]bool {
@@ -5362,25 +5438,12 @@ func isGuard(u *ssa.UnOp) bool {
 // instructions that write into what those build (a field, an element, a
 // map entry, a call that takes it), and the initializer's control flow.
 // Nil when there is no such variable.
-func initCells(pkgPath string, fns []*ssa.Function, concurrent bool) (*ssa.Function, map[ssa.Instruction]bool) {
-	if !concurrent {
-		return nil, nil
-	}
+func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (*ssa.Function, map[ssa.Instruction]bool) {
 	var spkg *ssa.Package
-	used := map[*ssa.Global]bool{}
 	for _, f := range fns {
-		if f.Pkg == nil || f.Pkg.Pkg.Path() != pkgPath {
-			continue
-		}
-		spkg = f.Pkg
-		for _, b := range f.Blocks {
-			for _, in := range b.Instrs {
-				for _, op := range in.Operands(nil) {
-					if g, ok := (*op).(*ssa.Global); ok && g.Pkg == spkg {
-						used[g] = true
-					}
-				}
-			}
+		if f.Pkg != nil && f.Pkg.Pkg.Path() == pkgPath {
+			spkg = f.Pkg
+			break
 		}
 	}
 	if spkg == nil {
@@ -5466,8 +5529,8 @@ func initCells(pkgPath string, fns []*ssa.Function, concurrent bool) (*ssa.Funct
 // withInitCallees adds to fns the functions of their package that the
 // package initializer's slice (initCells) calls, a generic constructor's
 // instance included, so that the slice runs them.
-func withInitCallees(pkgPath string, fns []*ssa.Function, concurrent bool) []*ssa.Function {
-	initFn, keep := initCells(pkgPath, fns, concurrent)
+func withInitCallees(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) []*ssa.Function {
+	initFn, keep := initCells(pkgPath, fns, used)
 	if initFn == nil {
 		return fns
 	}
