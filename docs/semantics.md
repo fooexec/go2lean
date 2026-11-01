@@ -382,8 +382,11 @@ generic constructor's instance included, are translated with it). Havoc
 the slice reads is the same in every trial; a slice that panics, gets
 stuck or runs out of fuel is skipped, its variables left at their zero
 values, and the hunt summary names it. Either makes an exhaustive
-certificate one with an assumption. A variable with any other initializer, or set in a `func
-init()`, is not a cell: its stores are ignored and its loads are havoc.
+certificate one with an assumption. A `func init()` that sets such a variable is part of the slice too
+(`reg = make(map[string]int); reg["x"] = 1`), with what it then does with
+the variable, run after the variable initializers in Go's order. A
+variable with any other initializer is not a cell: its stores are ignored
+and its loads are havoc.
 
 The replay stage for `data_race` builds the test with `-race` and runs the
 call 20 times: Go's race detector reports a race whenever both accesses

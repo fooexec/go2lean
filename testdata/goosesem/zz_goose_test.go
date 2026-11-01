@@ -89,6 +89,7 @@ func TestGoose(t *testing.T) {
 		"testIncompleteStruct": testIncompleteStruct,
 		"testInitCallVersions": testInitCallVersions,
 		"testInitCellShared": testInitCellShared,
+		"testInitFuncCellShared": testInitFuncCellShared,
 		"testInitSentinelArray": testInitSentinelArray,
 		"testInterfaceNilWithType": testInterfaceNilWithType,
 		"testIterateMap": testIterateMap,

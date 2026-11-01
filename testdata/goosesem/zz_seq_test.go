@@ -251,6 +251,9 @@ func SeqTestInitCallVersions() bool { return testInitCallVersions() }
 // go2lean:sequence testInitCellShared
 func SeqTestInitCellShared() bool { return testInitCellShared() }
 
+// go2lean:sequence testInitFuncCellShared
+func SeqTestInitFuncCellShared() bool { return testInitFuncCellShared() }
+
 // go2lean:sequence testInitSentinelArray
 func SeqTestInitSentinelArray() bool { return testInitSentinelArray() }
 

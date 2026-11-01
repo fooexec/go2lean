@@ -64,3 +64,21 @@ func testInitCellShared() bool {
 	defer semReg.mu.Unlock()
 	return semReg.m["init"] == 1 && semReg.m["go"] == 2
 }
+
+// A table a func init() makes and fills, shared with a goroutine (#55).
+var semTable map[string]int
+
+func init() {
+	semTable = make(map[string]int)
+	semTable["init"] = 1
+}
+
+func testInitFuncCellShared() bool {
+	done := make(chan bool)
+	go func() {
+		semTable["go"] = 2
+		done <- true
+	}()
+	<-done
+	return semTable["init"] == 1 && semTable["go"] == 2
+}
