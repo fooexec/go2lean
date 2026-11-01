@@ -381,7 +381,11 @@ initializer that builds it (the store, what it depends on, and what writes
 into the object built), and the search runs that slice once, before the
 trials, so every trial starts with the object the initializer built and the
 goroutines share it (the functions of its package the slice calls, a
-generic constructor's instance included, are translated with it). Havoc
+generic constructor's instance included, are translated with it). A
+variable whose part of the slice the model cannot translate (grpc's
+`make([]byte, 131070)`, beyond the slice bound) is not such a cell, and
+the slice is kept without it, so the package's other cells are still
+built (#120). Havoc
 the slice reads is the same in every trial; a slice that panics, gets
 stuck or runs out of fuel is skipped, its variables left at their zero
 values, and the hunt summary names it. Either makes an exhaustive
