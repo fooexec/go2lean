@@ -641,11 +641,12 @@ func runReport(w contract.Workspace, env Env, report *contract.ModelReport, opts
 	return res, nil
 }
 
-// specsOnly drops the no_panic templates.
+// specsOnly drops the spec-free templates (no_panic, no_hang). It goes by
+// kind: properties derived from specs also carry Source "template".
 func specsOnly(props []*contract.Property) []*contract.Property {
 	var out []*contract.Property
 	for _, p := range props {
-		if p.Kind != contract.KindNoPanic {
+		if p.Kind != contract.KindNoPanic && p.Kind != contract.KindNoHang {
 			out = append(out, p)
 		}
 	}
