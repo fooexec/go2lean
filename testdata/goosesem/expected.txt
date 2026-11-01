@@ -1,1 +1,4 @@
 testpoolgetfromnew exhausted_assuming  # by design: Get gives New, objects Put back are not modelled (#105)
+testtimeaddsub exhausted_havoc  # by design: each clock reading moves forward by a havoc amount (#59)
+testtimenowmonotone exhausted_havoc  # by design: each clock reading moves forward by a havoc amount (#59)
+testtimeuntil exhausted_havoc  # by design: each clock reading moves forward by a havoc amount (#59)

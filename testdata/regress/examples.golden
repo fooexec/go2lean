@@ -21,6 +21,10 @@ proved checked_double_nopanic
 confirmed checked_double_specdoublehalves
 proved checked_half_nopanic
 exhausted checked_half_spechalfnoerror
+exhausted_havoc clock_elapsed_nohang
+exhausted_havoc clock_elapsed_nopanic
+confirmed clock_mustpositive_nopanic
+exhausted_havoc clock_notbeforeitself_nopanic
 exhausted closures_anyof_nohang
 confirmed closures_anyof_nopanic
 exhausted closures_hasabove_nopanic

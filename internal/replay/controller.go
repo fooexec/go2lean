@@ -191,7 +191,9 @@ func go2leanGate(op string) bool {
 	go2leanLock()
 	defer go2leanUnlock()
 	id, ok := go2leanMe()
-	if !ok {
+	if !ok || id >= len(c.gs) {
+		// Unsteered, or a goroutine whose model id is not in this run's
+		// table (#59's breaker replay).
 		return false
 	}
 	c.arrivals++

@@ -449,6 +449,15 @@ func SeqTestSwitchMultiple() bool { return testSwitchMultiple() }
 // go2lean:sequence testSwitchVal
 func SeqTestSwitchVal() bool { return testSwitchVal() }
 
+// go2lean:sequence testTimeAddSub
+func SeqTestTimeAddSub() bool { return testTimeAddSub() }
+
+// go2lean:sequence testTimeNowMonotone
+func SeqTestTimeNowMonotone() bool { return testTimeNowMonotone() }
+
+// go2lean:sequence testTimeUntil
+func SeqTestTimeUntil() bool { return testTimeUntil() }
+
 // go2lean:sequence testTypeAssertionInterface
 func SeqTestTypeAssertionInterface() bool { return testTypeAssertionInterface() }
 

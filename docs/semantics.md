@@ -320,7 +320,9 @@ records its schedule.
 | `time.AfterFunc(d, f)` | a goroutine running `f` |
 | `sync.NewCond`, `Cond.Wait`, `Signal`, `Broadcast` | a ticket queue in the cond's `notify` field: `Wait` takes a ticket, unlocks `L`, blocks until `Signal` (the oldest ticket) or `Broadcast` (all) releases it, then locks `L` again; a `Signal` with no waiter is lost, as in Go |
 | `Lock`, `Unlock` through a `sync.Locker` | the writer side of a `*RWMutex`, else a `*Mutex` (by the boxed value's type) |
-| time itself (`time.Now`, durations), `context.WithValue`, `ctx.Deadline`, `ctx.Value` | havoc; deadlines are not compared |
+| `time.Now`, `Since`, `Until` | translated from source over the model's clock (#59): one cell per run, read and written atomically, that each reading moves forward by a havoc number of nanoseconds (zero or more, below 2^40), so readings never go back within a run; the wall clock moves with it from a fixed start |
+| `Time` `Add`, `Sub`, `After`, `Before`, `Equal`, `Compare`, `IsZero` | translated from source, so they agree with the clock as Go's do |
+| durations (`Sleep(d)` against a timer of another length), `context.WithValue`, `ctx.Deadline`, `ctx.Value` | not ordered by length: a sleep is a scheduling point, so a goroutine that sleeps longer may still wake first; the others havoc |
 
 The end of a run, when no goroutine can move: all goroutines done, the main
 goroutine's result; the main goroutine blocked, `deadlock` (Go's "all
