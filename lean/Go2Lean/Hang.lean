@@ -218,7 +218,8 @@ partial def concLoop (p : GoSSA.Prog) (or : Oracle) (h : Havoc Val) (stepFuel : 
       let place := match gs[0]? >>= (·.frames.head?) with
         | some fr => s!"@{fr.fn.name}#{fr.bid}"
         | none => "the main goroutine"
-      some { site := s!"{place} (livelock: {br.moved.length} goroutines cycle)", assumed := !s.assumed.isEmpty }
+      some { site := s!"{place} (livelock: {br.moved.length} goroutines cycle)",
+             assumed := s.assumed.any (· != slowNote) }
     else
     let br := if seen then { br with enabled := [], moved := [] } else br
     let br := if br.lam + 1 == br.power then

@@ -262,6 +262,13 @@ func replayOne(root, pkgDir, pkgName, pkg string, p *prepared, overlay map[strin
 	}
 	v := verdictOf(&q, r, c, e, o, eo, root)
 	res, ok := r[p.cx.ID]
+	if v.Status == contract.VerdictConfirmed && needsSlowCode(p.cx) && (!ok || res.ReplayDiverged == "") {
+		// The schedule only a slow machine takes (#59): Go's scheduler did
+		// not, and forcing it shows the failure is possible under load, not
+		// that the program fails as tested.
+		p.v.Diagnosis.Reason = "needs_slow_code"
+		return note("followed, the model's failure happened; but the schedule needs code slower than a sleep, and Go's own scheduler did not take it in " + strconv.Itoa(concRuns) + " runs")
+	}
 	switch {
 	case !ok && v.Status == contract.VerdictConfirmed:
 		// The model's panic ended the run before it reported how far it
@@ -345,6 +352,10 @@ func raceOne(root, pkgDir, pkgName, pkg string, p *prepared, overlay map[string]
 	}
 	v := verdictOf(&q, r, c, e, o, eo, root)
 	v.Status, v.Diagnosis = contract.VerdictConfirmed, nil
+	if v.Observed == nil {
+		// verdictOf stopped early (the harness crashed after the race).
+		v.Observed = map[string]string{}
+	}
 	v.Observed["race"] = rep
 	v.Observed["replay"] = "the model's schedule replayed (" + res.Replay + " steps); -race reported nothing in " + strconv.Itoa(raceRuns) + " plain runs"
 	p.v, p.fn, p.imps, p.replayed, p.race = v, fn, imps, files, true
@@ -549,7 +560,7 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 		// The goroutine that panicked stopped in go2lean's own code (the
 		// replay controller): the harness failed, which says nothing about
 		// the program.
-		v.Status = contract.VerdictInconclusive
+		v.Status, v.Observed = contract.VerdictInconclusive, map[string]string{}
 		v.Diagnosis = &contract.Diagnosis{Reason: "harness_failed", Notes: []string{
 			"go2lean's replay harness panicked (" + strings.TrimSpace(m[2]) + "); see stderr"}}
 		return v
@@ -619,6 +630,14 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 			note += ". Compiling with -deps models the functions of the dependency packages called, if it was off"
 		}
 		v.Diagnosis.Notes = append(v.Diagnosis.Notes, note)
+	}
+	if v.Status == contract.VerdictSpurious && needsSlowCode(p.cx) && modelPanic(p.cx) != contract.PanicDataRace {
+		// The model's schedule lets a sleep end while other code could
+		// still run (#59): one fast run of Go does not refute it, nor
+		// confirm it.
+		v.Status = contract.VerdictInconclusive
+		v.Diagnosis = &contract.Diagnosis{Reason: "needs_slow_code", Notes: []string{
+			"the model's schedule needs code slower than a sleep (a loaded machine); Go's run was faster"}}
 	}
 	return v
 }
@@ -1088,6 +1107,17 @@ func harnessCrash(stderr string) bool {
 			continue
 		}
 		return strings.Contains(l, ".go2lean")
+	}
+	return false
+}
+
+// needsSlowCode says whether the model's run of cx let a sleep end while
+// other code could still run (GoConc.slowNote, #59).
+func needsSlowCode(cx *contract.Counterexample) bool {
+	for _, a := range cx.Assumptions {
+		if strings.Contains(a, "slower than the sleep") {
+			return true
+		}
 	}
 	return false
 }

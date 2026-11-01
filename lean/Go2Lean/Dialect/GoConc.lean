@@ -472,16 +472,23 @@ def ready (heap : Heap Val) (gs : Array Gor) (i : Nat) : Bool :=
       | none => false
     | [] => false
 
-/-- The goroutines that can move now (#59): time passes only when nothing
-else can move, as in Go's `testing/synctest` (code runs in no time), so a
-sleeper with time left is a candidate only when no goroutine can move
-without it. -/
+/-- The goroutines that can move now (#59). -/
 def movable (heap : Heap Val) (gs : Array Gor) : List Nat :=
-  let cands := (List.range gs.size).filter (ready heap gs)
-  let now := fun (j : Nat) => match gs[j]? >>= sleepLeft with
-    | some r => r ≤ 0
-    | none => true
-  if cands.any now then cands.filter now else cands
+  (List.range gs.size).filter (ready heap gs)
+
+/-- Can goroutine `j` move without time passing? -/
+def movesNow (gs : Array Gor) (j : Nat) : Bool :=
+  match gs[j]? >>= sleepLeft with
+  | some r => r ≤ 0
+  | none => true
+
+/-- The assumption a schedule takes when it wakes a sleeper while another
+goroutine could still run (#59): that code is slower than the sleep. Go's
+`testing/synctest` never does this; a loaded machine can. The engines
+prefer counterexamples without it, and the replay stage does not confirm a
+panic that needs it on the model's schedule alone. -/
+def slowNote : String :=
+  "the schedule lets a sleep end while other code could still run: it needs that code to be slower than the sleep (#59)"
 
 /-- Value `v` holds channel `ch`, itself or in a field (to depth `n`). -/
 def reaches (ch : Val) : Nat → Val → Bool
@@ -829,6 +836,7 @@ def scheduleS (p : Prog) (or : Oracle) (h : Havoc Val) (stepFuel : Nat) (stop : 
       let atSetupEnd := cands.length == 1 && pendingName gs[cands[0]!]! == "setupEnd"
       let (c, s) := if atSetupEnd then (0, s) else schedChoice p h s cands.length
       let i := cands[c % cands.length]!
+      let s := if !movesNow gs i && cands.any (fun j => j != i && movesNow gs j) then s.assume slowNote else s
       -- The case a select takes: stepGor draws the same choice from `s`.
       let name := (selectTaken s.heap gs i (schedChoice p h s 1).1).getD (pendingName gs[i]!)
       let pkg := pendingPkg gs[i]!

@@ -21,10 +21,10 @@ proved checked_double_nopanic
 confirmed checked_double_specdoublehalves
 proved checked_half_nopanic
 exhausted checked_half_spechalfnoerror
-exhausted_havoc clock_elapsed_nohang
-exhausted_havoc clock_elapsed_nopanic
+exhausted clock_elapsed_nohang
+exhausted clock_elapsed_nopanic
 confirmed clock_mustpositive_nopanic
-exhausted_havoc clock_notbeforeitself_nopanic
+exhausted clock_notbeforeitself_nopanic
 exhausted closures_anyof_nohang
 confirmed closures_anyof_nopanic
 exhausted closures_hasabove_nopanic
@@ -77,8 +77,8 @@ exhausted conc_once_nohang
 exhausted conc_once_nopanic
 confirmed conc_peekearly_nopanic
 exhausted conc_pipe_nopanic
-exhausted conc_poll_nohang
-exhausted conc_poll_nopanic
+exhausted_havoc conc_poll_nohang
+exhausted_havoc conc_poll_nopanic
 exhausted conc_prefixsink_log_nopanic
 exhausted conc_publish_nopanic
 exhausted conc_queue_put_newqueue_nopanic
@@ -316,8 +316,8 @@ exhausted mut=0/5 runes_reverse_specreverse
 exhausted sharedep_hitinturn_nopanic
 confirmed sharedep_hittwice_nopanic
 confirmed sleeps_timeoutfirst_nopanic
-exhausted sleeps_timeoutrace_nopanic
-exhausted sleeps_waitlonger_nopanic
+inconclusive sleeps_timeoutrace_nopanic
+inconclusive sleeps_waitlonger_nopanic
 confirmed sleeps_waitshorter_nopanic
 none stream_converter_finish_nopanic
 none stream_converter_process_nopanic
