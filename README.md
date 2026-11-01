@@ -118,7 +118,8 @@ writes Go specs; it does not replace model search or real Go verification.
 Built-in `no_panic` checks need no spec code, and neither does
 `no_hang`. A function with a loop gets a `no_hang` check: a run that
 comes back to a state it was in is a counterexample, replayed under a
-watchdog ([details](docs/semantics.md#3-failure)). For a business rule, write an
+watchdog ([details](docs/semantics.md#3-failure)). `-specs-only` skips both
+templates and searches only your specs. For a business rule, write an
 ordinary Go function in the target package—yourself or with the agent:
 
 ```go

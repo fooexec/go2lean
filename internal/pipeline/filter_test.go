@@ -24,6 +24,7 @@ func TestPropertyFilters(t *testing.T) {
 		{ID: "a", Target: "t1", Kind: contract.KindNoPanic},
 		{ID: "b", Target: "t2", Kind: contract.KindNoPanic},
 		{ID: "c", Target: "t3", Kind: contract.KindPostcondition},
+		{ID: "d", Target: "t2", Kind: contract.KindNoHang},
 	}
 	if got := specsOnly(props); len(got) != 1 || got[0].ID != "c" {
 		t.Errorf("specsOnly: %v", got)
