@@ -7133,6 +7133,16 @@ func (t *fnState) syncCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 		return false, nil
 	}
 	if op == "yield" {
+		if callee.String() == "time.Sleep" {
+			// A sleep of its duration (#59): the goroutine wakes once the
+			// other sleepers with less left have, see GoConc.fire.
+			d, err := t.val(x.Call.Args[0])
+			if err != nil {
+				return true, err
+			}
+			t.syncOp(ir.SyncOp{Kind: "yield"}, t.def(x), d)
+			return true, nil
+		}
 		t.syncOp(ir.SyncOp{Kind: "yield"}, t.def(x))
 		return true, nil
 	}

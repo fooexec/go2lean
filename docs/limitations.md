@@ -265,9 +265,10 @@ generated Lean model.
   finds deadlocks, leaks, misuse panics and data races (C2), with
   `context`, timers and `sync.Cond`; but happens-before is
   over-approximated (some races are missed), the machine is sequentially
-  consistent (no weak-memory reorderings), time is not modelled (a
-  timeout may fire at any point, so a finding may need a deadline to
-  pass early), a certificate
+  consistent (no weak-memory reorderings), time is virtual (#59: sleeps
+  and timers wake in order of their durations, and code runs in no time,
+  as in Go's `testing/synctest`, so a bug that needs slow code between
+  two sleeps is missed), a certificate
   for a concurrent function covers sampled schedules only
   (`exhausted_havoc`), and the replay of the model's schedule needs the
   package rewritten (an overlay), so a bug Go's own scheduler never shows

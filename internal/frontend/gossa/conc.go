@@ -37,33 +37,53 @@ func unitRet(dst ir.Var) ir.Block {
 	return ir.Block{Name: "ret", Instrs: []ir.Instr{{Dst: dst, Op: ir.Const{V: ir.UnitVal{}}}}, Term: ir.Term{Kind: ir.TermRet, V: dst}}
 }
 
-// cancelHelper: func(ctx) ends ctx with code (1 canceled, 2 deadline).
+// sleepFor is a block that sleeps the duration in variable d (a
+// `time.Sleep`, #59), then goes on to block next.
+func sleepFor(d, dst ir.Var, next int) ir.Block {
+	return ir.Block{Name: "sleep", Term: ir.Term{Kind: ir.TermSync, Sync: ir.SyncOp{Kind: "yield"}, CArgs: []ir.Var{d}, Dst: dst, Next: next}}
+}
+
+// cancelHelper: func(ctx) ends ctx with code 1 (canceled); with code 2,
+// func(ctx, d) ends it as its deadline after sleeping d (#59).
 func (s *progState) cancelHelper(code int) int {
-	name := "$context.cancel"
 	if code == 2 {
-		name = "$context.deadline"
+		b := unitRet(4)
+		b.Instrs = append([]ir.Instr{{Dst: 3, Op: ir.Raw("(.conc (.ctxCancel 2))"), Args: []ir.Var{0}}}, b.Instrs...)
+		return s.helper("$context.deadline", true, false, 5, []ir.Var{0, 1}, []ir.Block{sleepFor(1, 2, 1), b})
 	}
 	b := unitRet(2)
 	b.Instrs = append([]ir.Instr{{Dst: 1, Op: ir.Raw(fmt.Sprintf("(.conc (.ctxCancel %d))", code)), Args: []ir.Var{0}}}, b.Instrs...)
-	return s.helper(name, false, false, 3, []ir.Var{0}, []ir.Block{b})
+	return s.helper("$context.cancel", false, false, 3, []ir.Var{0}, []ir.Block{b})
 }
 
-// fireHelper: func(ch) sends on a timer's channel unless its buffer is full
-// (a select with a default), so a timer never blocks.
+// fireHelper: func(ch, d) sleeps d, then sends on a timer's channel unless
+// its buffer is full (a select with a default), so a timer never blocks.
 func (s *progState) fireHelper() int {
-	return s.helper("$time.fire", true, false, 4, []ir.Var{0}, []ir.Block{
-		{Name: "fire", Instrs: []ir.Instr{{Dst: 1, Op: ir.Const{V: ir.UnitVal{}}}},
-			Term: ir.Term{Kind: ir.TermSync, Sync: ir.SyncOp{Kind: "select", Sends: []bool{true}}, CArgs: []ir.Var{0, 1}, Dst: 2, Next: 1}},
-		unitRet(3),
+	return s.helper("$time.fire", true, false, 6, []ir.Var{0, 1}, []ir.Block{
+		sleepFor(1, 2, 1),
+		{Name: "fire", Instrs: []ir.Instr{{Dst: 3, Op: ir.Const{V: ir.UnitVal{}}}},
+			Term: ir.Term{Kind: ir.TermSync, Sync: ir.SyncOp{Kind: "select", Sends: []bool{true}}, CArgs: []ir.Var{0, 3}, Dst: 4, Next: 2}},
+		unitRet(5),
 	})
 }
 
-// tickHelper: func(ch) fires a ticker's channel forever, a daemon.
+// tickHelper: func(ch, d) fires a ticker's channel every d, forever, a
+// daemon.
 func (s *progState) tickHelper() int {
-	return s.helper("$time.tick", true, true, 4, []ir.Var{0}, []ir.Block{
-		{Name: "tick", Instrs: []ir.Instr{{Dst: 1, Op: ir.Const{V: ir.UnitVal{}}}},
-			Term: ir.Term{Kind: ir.TermSync, Sync: ir.SyncOp{Kind: "select", Sends: []bool{true}}, CArgs: []ir.Var{0, 1}, Dst: 2, Next: 1}},
-		{Name: "wait", Term: ir.Term{Kind: ir.TermSync, Sync: ir.SyncOp{Kind: "yield"}, Dst: 3, Next: 0}},
+	return s.helper("$time.tick", true, true, 5, []ir.Var{0, 1}, []ir.Block{
+		sleepFor(1, 2, 1),
+		{Name: "tick", Instrs: []ir.Instr{{Dst: 3, Op: ir.Const{V: ir.UnitVal{}}}},
+			Term: ir.Term{Kind: ir.TermSync, Sync: ir.SyncOp{Kind: "select", Sends: []bool{true}}, CArgs: []ir.Var{0, 3}, Dst: 4, Next: 0}},
+	})
+}
+
+// afterFuncHelper: func(f, d) sleeps d, then starts f in a goroutine of
+// its own (time.AfterFunc).
+func (s *progState) afterFuncHelper() int {
+	return s.helper("$time.afterfunc", true, false, 5, []ir.Var{0, 1}, []ir.Block{
+		sleepFor(1, 2, 1),
+		{Name: "start", Term: ir.Term{Kind: ir.TermSpawn, FV: 0, Dst: 3, Next: 2}},
+		unitRet(4),
 	})
 }
 
@@ -92,6 +112,16 @@ func (s *progState) syncTag(name string) uint32 {
 // lockerOp is Lock or Unlock (kind lockL, unlockL) through a sync.Locker.
 func (s *progState) lockerOp(kind string) ir.SyncOp {
 	return ir.SyncOp{Kind: kind, Tag: s.syncTag("RWMutex"), RTag: s.syncTag("rlocker")}
+}
+
+// havocDuration is a duration of zero or more nanoseconds, below 2^40, the
+// model chooses (#59).
+func (t *fnState) havocDuration(site string) ir.Var {
+	raw, bound, d := t.fresh(), t.fresh(), t.fresh()
+	t.emit(ir.Instr{Dst: raw, HavocSite: t.prog.newHavoc(64, t.f.Name()+": "+site, "clock", "")})
+	t.emit(ir.Instr{Dst: bound, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: "1099511627776"}}})
+	t.emit(ir.Instr{Dst: d, Op: ir.Simple("urem"), Args: []ir.Var{raw, bound}})
+	return d
 }
 
 // spawnHelper starts a goroutine running helper id on args.
@@ -165,15 +195,27 @@ func (t *fnState) concCall(x *ssa.Call) (bool, error) {
 		t.emit(ir.Instr{Dst: ctx, Op: ir.Conc("ctxNew"), Args: as[:1]})
 		t.emit(ir.Instr{Dst: cancel, Op: ir.FuncRef{ID: t.prog.cancelHelper(1)}, Args: []ir.Var{ctx}})
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("mkTuple"), Args: []ir.Var{ctx, cancel}})
-		if callee.Name() != "WithCancel" {
-			// The deadline passes at any scheduling point.
-			t.spawnHelper(t.prog.cancelHelper(2), ctx)
+		switch callee.Name() {
+		case "WithTimeout":
+			// The deadline passes after the timeout (#59).
+			t.spawnHelper(t.prog.cancelHelper(2), ctx, as[1])
+		case "WithDeadline":
+			// A deadline is a time: it passes after a havoc duration.
+			t.spawnHelper(t.prog.cancelHelper(2), ctx, t.havocDuration("context.WithDeadline"))
 		}
 	case "time.After":
+		as, err := args()
+		if err != nil {
+			return true, err
+		}
 		ch := t.timerChan()
 		t.vars[x] = ch
-		t.spawnHelper(t.prog.fireHelper(), ch)
+		t.spawnHelper(t.prog.fireHelper(), ch, as[0])
 	case "time.NewTimer", "time.NewTicker":
+		as, err := args()
+		if err != nil {
+			return true, err
+		}
 		ch := t.timerChan()
 		p, ok := t.timerObj(resType(), ch)
 		if !ok {
@@ -181,9 +223,9 @@ func (t *fnState) concCall(x *ssa.Call) (bool, error) {
 		}
 		t.vars[x] = p
 		if callee.Name() == "NewTimer" {
-			t.spawnHelper(t.prog.fireHelper(), ch)
+			t.spawnHelper(t.prog.fireHelper(), ch, as[0])
 		} else {
-			t.spawnHelper(t.prog.tickHelper(), ch)
+			t.spawnHelper(t.prog.tickHelper(), ch, as[0])
 		}
 	case "time.AfterFunc":
 		as, err := args()
@@ -197,7 +239,7 @@ func (t *fnState) concCall(x *ssa.Call) (bool, error) {
 			return false, nil
 		}
 		t.vars[x] = p
-		t.syncTerm(ir.Term{Kind: ir.TermSpawn, FV: as[1], Dst: t.fresh()})
+		t.spawnHelper(t.prog.afterFuncHelper(), as[1], as[0])
 	case "(*time.Timer).Reset":
 		// Fires again at any point; whether it was active is not modelled.
 		as, err := args()
@@ -210,7 +252,7 @@ func (t *fnState) concCall(x *ssa.Call) (bool, error) {
 		if err := t.havoc(x, "(*time.Timer).Reset", "unmodeled-call", ""); err != nil {
 			return true, err
 		}
-		t.spawnHelper(t.prog.fireHelper(), ch)
+		t.spawnHelper(t.prog.fireHelper(), ch, as[1])
 	case "(*time.Ticker).Stop", "(*time.Ticker).Reset":
 		// The ticker goroutine is a daemon: it does not keep a run alive.
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})

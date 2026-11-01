@@ -544,14 +544,20 @@ func go2leanAfterFunc(d time.Duration, f func()) *time.Timer {
 	if !go2leanReplaying() {
 		return time.AfterFunc(d, f)
 	}
-	go2leanGoCall(f)
+	// The model's helper sleeps, then starts f (#59).
+	go2leanGoCall(func() {
+		go2leanGate("yield")
+		go2leanGoCall(f)
+	})
 	return time.AfterFunc(time.Hour, func() {})
 }
 
 func go2leanDeadline(ctx context.Context, cancel context.CancelFunc) (context.Context, context.CancelFunc) {
 	go2leanGate("spawn")
 	go2leanVirtual(func(op string) {
-		if op == "" {
+		// The model's deadline sleeps until it passes (#59), then
+		// cancels.
+		if op == "yield" {
 			cancel()
 		}
 	})
