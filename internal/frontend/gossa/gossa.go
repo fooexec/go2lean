@@ -1208,17 +1208,31 @@ func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]cont
 	// The initializer's slice. When it does not translate, its stub gets
 	// stuck, and the search skips it and says so: its variables stay cells
 	// at their zero values, as every package decided.
+	// The variable initializers first, then each func init() the slice is
+	// in, in Go's order.
 	if initFn != nil {
-		id := len(p.Funcs)
-		out := &ir.Func{Name: "init", GoSig: goSig(initFn), Init: true}
-		p.Funcs = append(p.Funcs, out)
-		t := &fnState{prog: st, f: initFn, out: out, vars: map[ssa.Value]ir.Var{}, blockID: map[*ssa.BasicBlock]int{}, keep: keep}
-		if err := t.translate(); err != nil {
-			rejectStub(out, err)
-		} else {
-			out.Sync = t.sync
+		for _, f := range initFuncs(initFn) {
+			in := false
+			for k := range keep {
+				if k.Parent() == f {
+					in = true
+					break
+				}
+			}
+			if !in {
+				continue
+			}
+			id := len(p.Funcs)
+			out := &ir.Func{Name: f.Name(), GoSig: goSig(f), Init: true}
+			p.Funcs = append(p.Funcs, out)
+			t := &fnState{prog: st, f: f, out: out, vars: map[ssa.Value]ir.Var{}, blockID: map[*ssa.BasicBlock]int{}, keep: keep}
+			if err := t.translate(); err != nil {
+				rejectStub(out, err)
+			} else {
+				out.Sync = t.sync
+			}
+			p.Inits = append(p.Inits, id)
 		}
-		p.Inits = []int{id}
 	}
 	// Pass 2: bodies.
 	for _, f := range fns {
@@ -5466,29 +5480,37 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 		}
 	}
 	var roots []ssa.Instruction
+	cells := map[*ssa.Global]bool{}
 	for g, sts := range stores {
 		if _, iface := g.Type().(*types.Pointer).Elem().Underlying().(*types.Interface); iface {
 			continue
 		}
-		if len(sts) == 1 && sts[0].Parent() == initFn && builtValue(sts[0].Val, spkg) {
+		if len(sts) == 1 && builtValue(sts[0].Val, spkg) {
 			roots = append(roots, sts[0])
+			cells[g] = true
 		}
 	}
 	if len(roots) == 0 {
 		return nil, nil
 	}
-	for _, b := range initFn.Blocks {
-		for _, in := range b.Instrs {
-			if _, phi := in.(*ssa.Phi); phi {
-				roots = append(roots, in)
+	inits := initFuncs(initFn)
+	// What the init functions do with a variable after setting it
+	// (reg = make(map[string]int); reg["x"] = 1 in a func init()).
+	for _, f := range inits {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				if u, ok := in.(*ssa.UnOp); ok && u.Op == token.MUL {
+					if g, ok := u.X.(*ssa.Global); ok && cells[g] {
+						roots = append(roots, in)
+					}
+				}
 			}
 		}
-		roots = append(roots, b.Instrs[len(b.Instrs)-1])
 	}
 	keep := map[ssa.Instruction]bool{}
 	var work []ssa.Instruction
 	add := func(in ssa.Instruction) {
-		if in.Parent() == initFn && !keep[in] {
+		if slices.Contains(inits, in.Parent()) && !keep[in] {
 			keep[in] = true
 			work = append(work, in)
 		}
@@ -5496,33 +5518,58 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 	for _, r := range roots {
 		add(r)
 	}
-	for len(work) > 0 {
-		in := work[len(work)-1]
-		work = work[:len(work)-1]
-		for _, op := range in.Operands(nil) {
-			if d, ok := (*op).(ssa.Instruction); ok {
-				add(d)
-			}
-		}
-		v, ok := in.(ssa.Value)
-		if !ok || v.Referrers() == nil {
-			continue
-		}
-		for _, r := range *v.Referrers() {
-			switch x := r.(type) {
-			case *ssa.FieldAddr, *ssa.IndexAddr, *ssa.Slice, ssa.CallInstruction:
-				add(r)
-			case *ssa.Store:
-				if x.Addr == v {
-					add(r)
+	closure := func() {
+		for len(work) > 0 {
+			in := work[len(work)-1]
+			work = work[:len(work)-1]
+			for _, op := range in.Operands(nil) {
+				if d, ok := (*op).(ssa.Instruction); ok {
+					add(d)
 				}
-			case *ssa.MapUpdate:
-				if x.Map == v {
+			}
+			v, ok := in.(ssa.Value)
+			if !ok || v.Referrers() == nil {
+				continue
+			}
+			for _, r := range *v.Referrers() {
+				switch x := r.(type) {
+				case *ssa.FieldAddr, *ssa.IndexAddr, *ssa.Slice, ssa.CallInstruction:
 					add(r)
+				case *ssa.Store:
+					if x.Addr == v {
+						add(r)
+					}
+				case *ssa.MapUpdate:
+					if x.Map == v {
+						add(r)
+					}
 				}
 			}
 		}
 	}
+	closure()
+	// The control flow of each init function the slice is in.
+	for _, f := range inits {
+		in := false
+		for k := range keep {
+			if k.Parent() == f {
+				in = true
+				break
+			}
+		}
+		if !in {
+			continue
+		}
+		for _, b := range f.Blocks {
+			for _, i := range b.Instrs {
+				if _, phi := i.(*ssa.Phi); phi {
+					add(i)
+				}
+			}
+			add(b.Instrs[len(b.Instrs)-1])
+		}
+	}
+	closure()
 	return initFn, keep
 }
 
@@ -5538,7 +5585,13 @@ func withInitCallees(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]b
 	for _, f := range fns {
 		seen[f] = true
 	}
-	for _, b := range initFn.Blocks {
+	for _, b := range slices.Concat(func() [][]*ssa.BasicBlock {
+		var bs [][]*ssa.BasicBlock
+		for _, f := range initFuncs(initFn) {
+			bs = append(bs, f.Blocks)
+		}
+		return bs
+	}()...) {
 		for _, in := range b.Instrs {
 			c, ok := in.(*ssa.Call)
 			if !ok || !keep[in] {

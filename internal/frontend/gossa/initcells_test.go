@@ -18,12 +18,17 @@ func TestInitCells(t *testing.T) {
 		t.Fatalf("%d programs, want 1", len(progs))
 	}
 	p := progs[0]
-	if len(p.Inits) != 1 {
-		t.Fatalf("Inits %v, want one", p.Inits)
+	// The variable initializers' slice, then the func init()'s, in Go's
+	// order.
+	if len(p.Inits) != 2 || p.Funcs[p.Inits[0]].Name != "init" || p.Funcs[p.Inits[1]].Name != "init#1" {
+		t.Fatalf("Inits %v, want init then init#1", p.Inits)
 	}
 	init := p.Funcs[p.Inits[0]]
 	if !init.Init || init.Status != "complete" {
 		t.Fatalf("init function: Init %v, status %s, issues %v", init.Init, init.Status, init.Issues)
+	}
+	if !p.Funcs[p.Inits[1]].Init {
+		t.Fatalf("init#1 is not an Init function")
 	}
 	cells := func(f *ir.Func) int {
 		n := 0

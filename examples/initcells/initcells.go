@@ -49,3 +49,38 @@ func RegisterRacy() int {
 	wg.Wait()
 	return len(defaultReg.m)
 }
+
+// handlers is made and filled by a func init(), as a package's default
+// table often is.
+var handlers map[string]int
+
+func init() {
+	handlers = make(map[string]int)
+	handlers["default"] = 0
+}
+
+// AddHandlersRacy adds a handler from each of two goroutines. Bug: a data
+// race on the map the func init() made.
+func AddHandlersRacy() int {
+	done := make(chan bool)
+	go func() {
+		handlers["a"] = 1
+		done <- true
+	}()
+	handlers["b"] = 2
+	<-done
+	return len(handlers)
+}
+
+// AddHandlersInTurn adds one handler in a goroutine, then one after it
+// ended. Race-free.
+func AddHandlersInTurn() int {
+	done := make(chan bool)
+	go func() {
+		handlers["a"] = 1
+		done <- true
+	}()
+	<-done
+	handlers["b"] = 2
+	return len(handlers)
+}

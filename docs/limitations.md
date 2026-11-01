@@ -267,8 +267,7 @@ generated Lean model.
   over-approximated (some races are missed), the machine is sequentially
   consistent (no weak-memory reorderings), time is not modelled (a
   timeout may fire at any point, so a finding may need a deadline to
-  pass early), a package variable set in a `func init()` body is not a
-  shared cell (its stores are ignored, its loads havoc; #55), a certificate
+  pass early), a certificate
   for a concurrent function covers sampled schedules only
   (`exhausted_havoc`), and the replay of the model's schedule needs the
   package rewritten (an overlay), so a bug Go's own scheduler never shows
