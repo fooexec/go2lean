@@ -314,8 +314,20 @@ func SeqTestNestedLoops() bool { return testNestedLoops() }
 // go2lean:sequence testNestedStructUpdates
 func SeqTestNestedStructUpdates() bool { return testNestedStructUpdates() }
 
+// go2lean:sequence testNetAcceptAfterClose
+func SeqTestNetAcceptAfterClose() bool { return testNetAcceptAfterClose() }
+
+// go2lean:sequence testNetDialRefused
+func SeqTestNetDialRefused() bool { return testNetDialRefused() }
+
 // go2lean:sequence testNetJoinHostPort
 func SeqTestNetJoinHostPort() bool { return testNetJoinHostPort() }
+
+// go2lean:sequence testNetListenDialEcho
+func SeqTestNetListenDialEcho() bool { return testNetListenDialEcho() }
+
+// go2lean:sequence testNetListenFreshPorts
+func SeqTestNetListenFreshPorts() bool { return testNetListenFreshPorts() }
 
 // go2lean:sequence testNetPipeAddr
 func SeqTestNetPipeAddr() bool { return testNetPipeAddr() }
