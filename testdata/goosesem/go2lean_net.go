@@ -50,6 +50,17 @@ func testNetPipeDeadline() bool {
 	return errors.Is(err, os.ErrDeadlineExceeded) && a.Close() == nil && b.Close() == nil
 }
 
+// A pipe end closed by a deferred call (#123): the other end then reads
+// io.EOF.
+func testNetPipeDeferClose() bool {
+	a, b := net.Pipe()
+	func() {
+		defer a.Close()
+	}()
+	_, err := b.Read(make([]byte, 1))
+	return err == io.EOF
+}
+
 // The pipe's addresses are "pipe".
 func testNetPipeAddr() bool {
 	a, b := net.Pipe()
