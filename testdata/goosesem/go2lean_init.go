@@ -1,6 +1,9 @@
 package semantics
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // go2lean's own tests (#55): package variables set by a call with constant
 // arguments, and an alias of one, as sarama's Kafka versions are.
@@ -81,4 +84,74 @@ func testInitFuncCellShared() bool {
 	}()
 	<-done
 	return semTable["init"] == 1 && semTable["go"] == 2
+}
+
+// A package variable holding a struct with a mutex, set by its initializer
+// to a literal with a built field, and locked and written by goroutines,
+// as go-metrics' arbiter is (#129).
+type initArbiter struct {
+	sync.Mutex
+	started bool
+	items   map[uint64]bool
+}
+
+var initArb = initArbiter{items: map[uint64]bool{}}
+
+func initArbRegister(k uint64) bool {
+	initArb.Lock()
+	defer initArb.Unlock()
+	initArb.items[k] = true
+	first := !initArb.started
+	initArb.started = true
+	return first
+}
+
+// Two goroutines register: exactly one is first, and both are in the map.
+func testInitStructCellShared() bool {
+	var wg sync.WaitGroup
+	var a, b bool
+	wg.Add(2)
+	go func() { defer wg.Done(); a = initArbRegister(1) }()
+	go func() { defer wg.Done(); b = initArbRegister(2) }()
+	wg.Wait()
+	initArb.Lock()
+	n := len(initArb.items)
+	initArb.Unlock()
+	return a != b && n == 2
+}
+
+// A package variable whose initializer starts a ticker, and a goroutine
+// that then waits on the ticker for good, as go-metrics' arbiter ticks
+// its meters (#129). Not a leak: the ticker feeds it.
+type initTicker struct {
+	sync.Mutex
+	started bool
+	t       *time.Ticker
+	n       uint64
+}
+
+var initTick = initTicker{t: time.NewTicker(time.Hour)}
+
+func initTickStart() {
+	initTick.Lock()
+	defer initTick.Unlock()
+	if !initTick.started {
+		initTick.started = true
+		go func() {
+			for range initTick.t.C {
+				initTick.Lock()
+				initTick.n++
+				initTick.Unlock()
+			}
+		}()
+	}
+}
+
+func testInitTickerDaemon() bool {
+	initTickStart()
+	initTickStart()
+	initTick.Lock()
+	started := initTick.started
+	initTick.Unlock()
+	return started
 }

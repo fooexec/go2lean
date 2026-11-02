@@ -253,6 +253,11 @@ structure Prog (Op : Type) where
   the trials: they set the package variables that are cells to what the
   initializers build (#55). -/
   inits : Array Nat := #[]
+  /-- When a package initializer's slice started goroutines (a ticker),
+  the heap size the slices left: the trials do not keep those goroutines,
+  so a goroutine still waiting at the end on a channel the initializers
+  built is not counted as leaked (#129). 0: none started any. -/
+  initFed : Nat := 0
   deriving Repr
 
 /-- Havoc oracle: site → iteration → value. -/

@@ -883,25 +883,30 @@ many ran, how many havoc reads they made (the same in every trial), and
 the ones that failed; and the under-approximations those are, for the
 exhaustive engine's certificate. Nothing when the program has none. -/
 def initHeap (p : GoSSA.Prog) (extra : List Nat) (fuel : Nat) :
-    Heap Val × List (String × Json) × List String :=
-  if p.inits.isEmpty then (#[], [], []) else
+    Heap Val × List (String × Json) × List String × GoSSA.Prog :=
+  if p.inits.isEmpty then (#[], [], [], p) else
   let or := oracleOf .mixed extra 0
   let h := havocOf 0 p.havocWidths
-  let (heap, ran, reads, errs) := p.inits.foldl (init := ((#[] : Heap Val), (0 : Nat), (0 : Nat), ([] : List String)))
-    fun (heap, ran, reads, errs) f =>
+  let (heap, ran, reads, errs, spawned) := p.inits.foldl (init := ((#[] : Heap Val), (0 : Nat), (0 : Nat), ([] : List String), false))
+    fun (heap, ran, reads, errs, spawned) f =>
       let pkg := (p.funcs[f]?.map (·.pkg)).getD s!"#{f}"
       let at_ := fun (s : HState Val) => ((s.panicAt <|> s.stuck).map (" at " ++ ·)).getD ""
       match GoConc.runAny p or h f [] fuel heap with
-      | (.ok _, s) => (s.heap, ran + 1, reads + s.log.size, errs)
-      | (.panic k, s) => (heap, ran, reads, errs ++ [s!"{pkg}: panic {repr k}{at_ s}"])
-      | (.outOfFuel, _) => (heap, ran, reads, errs ++ [s!"{pkg}: out of fuel"])
+      -- The schedule's draws (a ticker the slice started moving beside
+      -- it) are no data the slice read.
+      | (.ok _, s) => (s.heap, ran + 1, reads + (s.log.toList.filter fun (site, _, _) => some site != p.schedSite).length,
+          errs, spawned || s.conc.sched.any (·.2.1 == "spawn"))
+      | (.panic k, s) => (heap, ran, reads, errs ++ [s!"{pkg}: panic {repr k}{at_ s}"], spawned)
+      | (.outOfFuel, _) => (heap, ran, reads, errs ++ [s!"{pkg}: out of fuel"], spawned)
   let note := Json.mkObj [("ran", (ran : Nat)), ("havoc_reads", (reads : Nat)),
     ("error", ", ".intercalate errs)]
   let assumed :=
     (if reads == 0 then [] else
       ["the package initializers' havoc reads are the same in every input (they run once, #55)"]) ++
     errs.map fun e => s!"a package initializer did not run ({e}): the variables it builds start at zero values (#55)"
-  (heap, [("init", note)], assumed)
+  -- The goroutines the slices started are not kept: the trials see the
+  -- channels they built as ones those goroutines feed (#129).
+  (heap, [("init", note)], assumed, if spawned then { p with initFed := heap.size } else p)
 
 /-- A concurrent sequence harness's setup, run once for all trials (#87):
 the snapshot at its `setupEnd`, when the setup depends on nothing a trial
@@ -933,7 +938,7 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
   let mut stepFuel : List (String × Nat) := []
   let trace := (← IO.getEnv "GO2LEAN_TRACE").isSome
   let start ← IO.monoMsNow
-  let (heap0, initNote, _) := initHeap p extra fuel
+  let (heap0, initNote, _, p) := initHeap p extra fuel
   let (snap, snapNote) := setupSnap p prop extra fuel heap0
   let base := (snap.map (·.s.heap)).getD heap0
   let mut done := 0
@@ -1072,7 +1077,7 @@ def mutate (p : GoSSA.Prog) (prop : Property) (fids : List Nat) (gens : List Gen
   let all := mutants p fids
   let chosen := spread all maxMutants
   let per := if chosen.isEmpty then 0 else budgetMs / chosen.length
-  let (base, _, _) := initHeap p extra fuel
+  let (base, _, _, p) := initHeap p extra fuel
   let mut killed : List Json := []
   let mut survived : List String := []
   for m in chosen do
@@ -1378,7 +1383,7 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
     return
   let h := havocOf 0 p.havocWidths
   let or := oracleOf .mixed extra 0
-  let (heap0, initNote, initAssumed) := initHeap p extra fuel
+  let (heap0, initNote, initAssumed, p) := initHeap p extra fuel
   let (snap, snapNote) := setupSnap p prop extra fuel heap0
   let base := (snap.map (·.s.heap)).getD heap0
   let mut fuelOuts := 0
