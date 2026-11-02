@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/andreasfoo/go2lean/internal/constraint"
@@ -168,7 +169,10 @@ func cmdRun(args []string) error {
 	env.RunBudget = time.Duration(*runBudget) * time.Second
 	env.Refine = *refineRounds
 	if *runRe != "" {
-		re, err := regexp.Compile(*runRe)
+		// As go test -run: the part before the first slash selects the
+		// test; a subtest within it is not selected on its own (#48).
+		top, _, _ := strings.Cut(*runRe, "/")
+		re, err := regexp.Compile(top)
 		if err != nil {
 			return fmt.Errorf("run: -run: %v", err)
 		}

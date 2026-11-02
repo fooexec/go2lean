@@ -146,6 +146,10 @@ go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm clau
                 [-rounds n] [-lean-tools] [-paranoid] [-deps] [-out proofs.json] <package>
 ```
 
+`-run` selects targets as `go test -run` selects tests: `-run 'TestX/sub'`
+selects `TestX` (with every subtest it runs), and a suite's method is a
+target of its own (`-run 'TestY'`) (#48).
+
 `run` searches the properties whose target synchronises (goroutines,
 channels, locks) first, then, in each group, specs, test functions and
 the other templates. With `-run-budget s`, no property starts once the

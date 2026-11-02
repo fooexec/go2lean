@@ -1392,7 +1392,10 @@ func isInit(name string) bool {
 // isTestEntry says whether f is a test function, TestXxx(t *testing.T).
 func isTestEntry(f *ssa.Function) bool {
 	sig := f.Signature
-	return strings.HasPrefix(f.Name(), "Test") && f.Parent() == nil && sig.Recv() == nil &&
+	// A suite's method (func (s) TestY(t *testing.T), grpc-go's
+	// grpctest.RunSubTests finds them by reflection) is a test of its own
+	// (#48).
+	return strings.HasPrefix(f.Name(), "Test") && f.Parent() == nil &&
 		sig.Params().Len() == 1 && sig.Results().Len() == 0 && isTestingType(sig.Params().At(0).Type())
 }
 
@@ -3646,6 +3649,9 @@ func (t *fnState) call(x *ssa.Call) error {
 			return err
 		}
 	}
+	if callee != nil && callee.String() == "(*testing.T).Run" && len(x.Call.Args) == 3 {
+		return t.testingRun(x)
+	}
 	if callee != nil && callee.String() == "(reflect.Value).Call" && len(x.Call.Args) == 2 {
 		if done, err := t.reflectCall(x); done || err != nil {
 			return err
@@ -4198,6 +4204,27 @@ func (t *fnState) errorsAsWalk(x *ssa.Call, p ir.Var, elem types.Type, dst ir.Va
 		t.cur = &t.out.Blocks[cont]
 		return nil
 	}, func() error { return t.errorsAsHavoc(p, elem, dst) })
+}
+
+// testingRun lowers t.Run(name, f): f(t), then true (#48). Go runs the
+// subtest in a goroutine and waits for it (no t.Parallel); the model does
+// not track a test's failure (t.Error is ignored), so Run reports success.
+// A subtest the model gets stuck in has its effects dropped.
+func (t *fnState) testingRun(x *ssa.Call) error {
+	tv, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return err
+	}
+	f, err := t.val(x.Call.Args[2])
+	if err != nil {
+		return err
+	}
+	after := len(t.out.Blocks)
+	t.addBlocks(t.cur.Name + ".subtest-done")
+	t.cur.Term = ir.Term{Kind: ir.TermCallV, FV: f, CArgs: []ir.Var{tv}, Dst: t.fresh(), Next: after, Fallback: after}
+	t.cur = &t.out.Blocks[after]
+	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.BoolVal(true)}})
+	return nil
 }
 
 // reflectCall lowers v.Call(nil) on a reflect.Value, which the model holds
@@ -8247,8 +8274,9 @@ func abiOf(f *ssa.Function, json *jsonTable) (*contract.ABI, error) {
 	pkg := funcPkg(f)
 	ab := &abiBuilder{pkg: pkg, abi: abi, index: map[*types.Named]int{}, fset: f.Prog.Fset, json: json, asserted: assertedTypes(f)}
 	for _, p := range f.Params {
-		if isTestEntry(f) {
-			// The test's t: opaque in the model, the harness's own t in M3.
+		if isTestingType(p.Type()) && (isTestEntry(f) || f.Parent() != nil) {
+			// The test's t: opaque in the model, the harness's own t in M3;
+			// a subtest's closure (t.Run, #48) gets its test's.
 			abi.Params = append(abi.Params, contract.ABIParam{Go: p.Name(), GoType: "*testing.T", Kind: contract.ABIOpaque,
 				Model: []string{p.Name()}, Zero: "go2leanT"})
 			continue
