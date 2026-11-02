@@ -1,2 +1,3 @@
+testnetlistendialecho exhausted_havoc  # sampled: a round trip through Accept and a pipe has more schedules than the exhaustive engine runs (#126)
 testnetpipewriteread exhausted_havoc  # sampled: a pipe's selects give more schedules than the exhaustive engine runs (#122)
 testpoolgetfromnew exhausted_assuming  # by design: Get gives New, objects Put back are not modelled (#105)

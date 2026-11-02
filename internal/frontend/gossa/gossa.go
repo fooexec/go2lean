@@ -126,6 +126,13 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	}
 	sprog, spkgs := build(pkgs, ssa.InstantiateGenerics)
 	sprog.Build()
+	if opts.Deps {
+		// Loopback networking: net.Listen and net.Dial call the model's
+		// listener over net.Pipe pairs (#126).
+		if err := addNetLoop(sprog); err != nil {
+			return nil, "", err
+		}
+	}
 	zeros := zeroGlobals(sprog, spkgs, opts.Deps)
 
 	modPath := ""
@@ -1145,6 +1152,8 @@ var modelledStdlib = map[string]bool{
 	"container/list": true,
 	"bufio":          true,
 	"io":             true,
+	// The loopback model (addNetLoop, #126).
+	netloopPath: true,
 }
 
 // modelledTime are the functions of package time translated from source
@@ -5437,6 +5446,11 @@ func planCells(units []unit, mainPaths map[string]bool) *cellPlan {
 			plan.concurrent[u.path] = true
 			mainSpawns = mainSpawns || mainPaths[u.path]
 		}
+		if u.path == netloopPath {
+			// Its listener table is shared by every caller, with or
+			// without goroutines: cells.
+			plan.concurrent[u.path] = true
+		}
 	}
 	for _, u := range units {
 		if mainSpawns && !mainPaths[u.path] {
@@ -6027,6 +6041,28 @@ func sentinelErr(v ssa.Value) (ir.Val, bool) {
 	// var ErrX error = &T{} of a struct the initializer sets no field of
 	// (poll.ErrDeadlineExceeded): tagged with *T, its payload the identity.
 	if mi, ok := init.(*ssa.MakeInterface); ok && isError(mi.Type()) {
+		// var ErrClosed error = errClosed, errClosed = poll.ErrNetClosing,
+		// ErrNetClosing = errNetClosing{}: a value of a struct type without
+		// fields, which every value of that type equals; its zero value,
+		// tagged with the type.
+		x := mi.X
+		for range 4 {
+			u, ok := x.(*ssa.UnOp)
+			if !ok {
+				break
+			}
+			if x, ok = loadedInit(u); !ok {
+				return nil, false
+			}
+		}
+		if c, ok := x.(*ssa.Const); ok {
+			if st, ok := c.Type().Underlying().(*types.Struct); ok && st.NumFields() == 0 {
+				if zero, ok := zeroVal(c.Type()); ok {
+					return ir.Boxed{Tag: typeTag(c.Type()), V: zero}, true
+				}
+			}
+			return nil, false
+		}
 		a, ok := mi.X.(*ssa.Alloc)
 		if !ok || !a.Heap {
 			return nil, false

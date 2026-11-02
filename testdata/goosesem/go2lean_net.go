@@ -80,3 +80,73 @@ func testNetJoinHostPort() bool {
 	return net.JoinHostPort("127.0.0.1", "9092") == "127.0.0.1:9092" &&
 		net.JoinHostPort("::1", "80") == "[::1]:80"
 }
+
+// Loopback networking (#126): a listener and a dialler meet through
+// net.Listen, net.Dial and Accept.
+
+// One byte sent by the client comes back from the server.
+func testNetListenDialEcho() bool {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return false
+	}
+	done := make(chan bool)
+	go func() {
+		c, err := l.Accept()
+		if err != nil {
+			done <- false
+			return
+		}
+		b := make([]byte, 1)
+		n, err := c.Read(b)
+		if err == nil && n == 1 {
+			_, err = c.Write(b)
+		}
+		done <- err == nil
+	}()
+	c, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		return false
+	}
+	if _, err := c.Write([]byte{7}); err != nil {
+		return false
+	}
+	b := make([]byte, 1)
+	n, err := c.Read(b)
+	return <-done && err == nil && n == 1 && b[0] == 7 && c.Close() == nil && l.Close() == nil
+}
+
+// Nothing listens at a closed listener's address: Dial fails.
+func testNetDialRefused() bool {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return false
+	}
+	addr := l.Addr().String()
+	if l.Close() != nil {
+		return false
+	}
+	_, err = net.Dial("tcp", addr)
+	return err != nil
+}
+
+// Accept on a closed listener fails with net.ErrClosed.
+func testNetAcceptAfterClose() bool {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil || l.Close() != nil {
+		return false
+	}
+	_, err = l.Accept()
+	return errors.Is(err, net.ErrClosed)
+}
+
+// Port 0 gives each listener a port of its own.
+func testNetListenFreshPorts() bool {
+	a, err1 := net.Listen("tcp", "127.0.0.1:0")
+	b, err2 := net.Listen("tcp", "127.0.0.1:0")
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	differ := a.Addr().String() != b.Addr().String()
+	return differ && a.Close() == nil && b.Close() == nil
+}
