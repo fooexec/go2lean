@@ -383,6 +383,12 @@ func SeqTestPoolGetFromNew() bool { return testPoolGetFromNew() }
 // go2lean:sequence testPrimitiveTypesEqual
 func SeqTestPrimitiveTypesEqual() bool { return testPrimitiveTypesEqual() }
 
+// go2lean:sequence testReflectCallIfaceResult
+func SeqTestReflectCallIfaceResult() bool { return testReflectCallIfaceResult() }
+
+// go2lean:sequence testReflectCallNoArgs
+func SeqTestReflectCallNoArgs() bool { return testReflectCallNoArgs() }
+
 // go2lean:sequence testReturnFour
 func SeqTestReturnFour() bool { return testReturnFour() }
 

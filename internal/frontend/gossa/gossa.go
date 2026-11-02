@@ -3646,6 +3646,11 @@ func (t *fnState) call(x *ssa.Call) error {
 			return err
 		}
 	}
+	if callee != nil && callee.String() == "(reflect.Value).Call" && len(x.Call.Args) == 2 {
+		if done, err := t.reflectCall(x); done || err != nil {
+			return err
+		}
+	}
 	if callee != nil && (callee.String() == "(reflect.Value).Kind" || callee.String() == "(reflect.Value).IsNil") && len(x.Call.Args) == 1 {
 		v, err := t.val(x.Call.Args[0])
 		if err != nil {
@@ -4193,6 +4198,113 @@ func (t *fnState) errorsAsWalk(x *ssa.Call, p ir.Var, elem types.Type, dst ir.Va
 		t.cur = &t.out.Blocks[cont]
 		return nil
 	}, func() error { return t.errorsAsHavoc(p, elem, dst) })
+}
+
+// reflectCall lowers v.Call(nil) on a reflect.Value, which the model holds
+// as the boxed value itself (reflect.ValueOf is the identity): the func of
+// v's dynamic type among the boxed func types without parameters, called,
+// and its results in a fresh []reflect.Value, each boxed with its type's
+// tag (one of interface type as it is). go-metrics' GetOrRegister builds a
+// metric this way (#128). Another value is havoc, as before; a call with
+// arguments is not lowered.
+func (t *fnState) reflectCall(x *ssa.Call) (bool, error) {
+	if c, ok := x.Call.Args[1].(*ssa.Const); !ok || !c.IsNil() {
+		return false, nil
+	}
+	var fns []types.Type
+	for _, ty := range t.prog.boxed {
+		sig, ok := ty.Underlying().(*types.Signature)
+		if !ok || sig.Params().Len() != 0 || sig.Variadic() {
+			continue
+		}
+		if _, ok := zeroVal(ty); ok {
+			fns = append(fns, ty)
+		}
+	}
+	anyZero, ok := zeroVal(types.NewInterfaceType(nil, nil))
+	if len(fns) == 0 || !ok {
+		return false, nil
+	}
+	v, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return true, err
+	}
+	cell := t.fresh()
+	t.emit(ir.Instr{Dst: cell, Op: ir.Alloc{Zero: ir.Opaque{}}})
+	unknown, join := len(t.out.Blocks), len(t.out.Blocks)+1
+	name := t.cur.Name
+	t.addBlocks(name+".reflect-call-havoc", name+".reflect-call-done")
+	for _, ty := range fns {
+		sig := ty.Underlying().(*types.Signature)
+		zero, _ := zeroVal(ty)
+		r, f, ok := t.fresh(), t.fresh(), t.fresh()
+		t.emit(ir.Instr{Dst: r, Op: ir.Unbox{Tag: typeTag(ty), CommaOk: true, Zero: zero}, Args: []ir.Var{v}})
+		t.emit(ir.Instr{Dst: f, Op: ir.Extract{I: 0}, Args: []ir.Var{r}})
+		t.emit(ir.Instr{Dst: ok, Op: ir.Extract{I: 1}, Args: []ir.Var{r}})
+		call, after, stuck, next := len(t.out.Blocks), len(t.out.Blocks)+1, len(t.out.Blocks)+2, len(t.out.Blocks)+3
+		t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: ok, T: call, F: next}
+		t.addBlocks(name+".reflect-call", name+".reflect-call-results", name+".reflect-call-stuck", name+".reflect-call-next")
+		t.cur = &t.out.Blocks[call]
+		res := t.fresh()
+		t.cur.Term = ir.Term{Kind: ir.TermCallV, FV: f, Dst: res, Next: after, Fallback: stuck}
+		n := sig.Results().Len()
+		// results stores the slice of n values elem(i) gives into the cell.
+		results := func(elem func(i int) (ir.Var, error)) error {
+			nv, s := t.fresh(), t.fresh()
+			t.emit(ir.Instr{Dst: nv, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: strconv.Itoa(n)}}})
+			t.emit(ir.Instr{Dst: s, Op: ir.MakeSlice{Zero: anyZero}, Args: []ir.Var{nv, nv}})
+			for i := 0; i < n; i++ {
+				e, err := elem(i)
+				if err != nil {
+					return err
+				}
+				k, p := t.fresh(), t.fresh()
+				t.emit(ir.Instr{Dst: k, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: strconv.Itoa(i)}}})
+				t.emit(ir.Instr{Dst: p, Op: ir.Simple("indexAddr"), Args: []ir.Var{s, k}})
+				t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{p, e}})
+			}
+			t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{cell, s}})
+			t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+			return nil
+		}
+		t.cur = &t.out.Blocks[after]
+		if err := results(func(i int) (ir.Var, error) {
+			e := res
+			if n > 1 {
+				e = t.fresh()
+				t.emit(ir.Instr{Dst: e, Op: ir.Extract{I: i}, Args: []ir.Var{res}})
+			}
+			if rt := sig.Results().At(i).Type(); !types.IsInterface(rt) {
+				b := t.fresh()
+				t.emit(ir.Instr{Dst: b, Op: ir.Box{Tag: typeTag(rt)}, Args: []ir.Var{e}})
+				e = b
+			}
+			return e, nil
+		}); err != nil {
+			return true, err
+		}
+		// A func the model gets stuck in: its n results are havoc, but
+		// there are n of them, as Go's Call returns.
+		t.cur = &t.out.Blocks[stuck]
+		if err := results(func(i int) (ir.Var, error) {
+			h := t.fresh()
+			return h, t.havocInto(h, types.NewInterfaceType(nil, nil), fmt.Sprintf("%s: reflect Call of %s #%d", t.f.Name(), ty, i), "unmodeled-call", "")
+		}); err != nil {
+			return true, err
+		}
+		t.cur = &t.out.Blocks[next]
+	}
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: unknown}
+	t.cur = &t.out.Blocks[unknown]
+	h := t.fresh()
+	if err := t.havocResult(h, x, "reflect Call", "unmodeled-call"); err != nil {
+		return true, err
+	}
+	t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{cell, h}})
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[join]
+	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("loadPath"), Args: []ir.Var{cell}})
+	return true, nil
 }
 
 // errorsUnwrap lowers errors.Unwrap(err) on an error the model built: its
