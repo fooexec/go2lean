@@ -400,7 +400,7 @@ func Emit(p *ir.Prog, leanDir string, ws contract.Workspace, modulePath string) 
 	}
 	key := contract.FuncKeys(names)
 	for i, f := range p.Funcs {
-		mf := contract.ModelFunc{Name: f.Name, GoSig: f.GoSig, ID: i, Status: f.Status, Issues: f.Issues, SpecFor: f.SpecFor, Closure: f.Closure, WrappedBy: f.WrappedBy, CtorOnly: f.CtorOnly, TestFile: f.TestFile, Init: f.Init, SpecMaxLen: f.SpecMaxLen, SequenceFor: f.SequenceFor, Consts: f.Consts, StrConsts: f.StrConsts, MapKeys: f.MapKeys, UsesJSON: f.UsesJSON, CmpStrs: f.CmpStrs, Variants: f.Variants, Calls: f.Calls, XCalls: f.XCalls, Exits: f.Exits, LoopHeaders: f.LoopHeaders()}
+		mf := contract.ModelFunc{Name: f.Name, GoSig: f.GoSig, ID: i, Status: f.Status, Issues: f.Issues, SpecFor: f.SpecFor, Closure: f.Closure, WrappedBy: f.WrappedBy, CtorOnly: f.CtorOnly, TestFile: f.TestFile, Init: f.Init, SpecMaxLen: f.SpecMaxLen, SequenceFor: f.SequenceFor, Consts: f.Consts, StrConsts: f.StrConsts, MapKeys: f.MapKeys, UsesJSON: f.UsesJSON, CmpStrs: f.CmpStrs, Variants: f.Variants, Calls: f.Calls, XCalls: f.XCalls, Exits: f.Exits, Sync: f.Sync, LoopHeaders: f.LoopHeaders()}
 		if len(mf.LoopHeaders) > 0 {
 			for _, b := range f.Blocks {
 				mf.Succs = append(mf.Succs, b.Term.ProofSuccs())

@@ -582,6 +582,9 @@ type ModelFunc struct {
 	// SequenceFor names the function this `go2lean:sequence` spec drives
 	// over its input event sequence (the spec itself is the target).
 	SequenceFor string `json:"sequence_for,omitempty"`
+	// Sync: the function can reach a goroutine start or a synchronisation
+	// operation; a run searches such targets first (#45).
+	Sync bool `json:"sync,omitempty"`
 	// LoopHeaders are the blocks of the model's function that loops come
 	// back to: a proof needs an invariant at each (go2lean prove).
 	LoopHeaders []int `json:"loop_headers,omitempty"`

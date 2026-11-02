@@ -11,8 +11,10 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andreasfoo/go2lean/internal/builtin"
 	"github.com/andreasfoo/go2lean/internal/constraint"
@@ -59,6 +61,10 @@ type Env struct {
 	// Run, when set, keeps the properties whose target function (or
 	// method, as T.M) it matches, as go test -run selects tests.
 	Run *regexp.Regexp
+	// RunBudget bounds the hunt stage of a run (#45): properties start in
+	// order (huntOrder) until it is spent, and the ones not started are
+	// listed. 0: no bound.
+	RunBudget time.Duration
 	// CompareOrder requires a static call-graph assessment of the supplied
 	// canonical generated overlay before emitting a model. The field alone
 	// does not activate a property; ConfigureCompareOrder additionally binds
@@ -292,18 +298,44 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		log bytes.Buffer
 	}
 	results := make([]result, len(props))
+	skipped := make([]bool, len(props))
+	start := time.Now()
+	queue := make(chan int, len(props))
+	for _, i := range huntOrder(w, props) {
+		queue <- i
+	}
+	close(queue)
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, jobs)
-	for i, p := range props {
+	for range min(jobs, len(props)) {
 		wg.Add(1)
-		go func(i int, p *contract.Property) {
+		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			results[i].cx, results[i].err = Hunt(w, env, p, opts, &results[i].log)
-		}(i, p)
+			for i := range queue {
+				if env.RunBudget > 0 && time.Since(start) >= env.RunBudget {
+					skipped[i] = true
+					continue
+				}
+				results[i].cx, results[i].err = Hunt(w, env, props[i], opts, &results[i].log)
+			}
+		}()
 	}
 	wg.Wait()
+	var notSearched []string
+	for i, sk := range skipped {
+		if sk {
+			notSearched = append(notSearched, props[i].ID)
+		}
+	}
+	if len(notSearched) > 0 {
+		fmt.Fprintf(out, "  not searched: %d of %d properties, the run budget of %s spent (-resume searches them):\n", len(notSearched), len(props), env.RunBudget)
+		for k, id := range notSearched {
+			if k == 10 {
+				fmt.Fprintf(out, "    ... and %d more\n", len(notSearched)-10)
+				break
+			}
+			fmt.Fprintf(out, "    %s\n", id)
+		}
+	}
 	var cxs []*contract.Counterexample
 	for i := range results {
 		io.Copy(out, &results[i].log)
@@ -315,6 +347,50 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		}
 	}
 	return cxs, nil
+}
+
+// huntOrder is the order a run searches its properties in (#45): those
+// whose target synchronises (goroutines, channels, locks) first; within
+// each, specs, then test functions, then the other templates; else the
+// order given.
+func huntOrder(w contract.Workspace, props []*contract.Property) []int {
+	reports := map[string]*contract.ModelReport{}
+	rank := make([]int, len(props))
+	for i, p := range props {
+		kind := 2
+		switch p.Kind {
+		case contract.KindNoPanic, contract.KindNoHang:
+		default:
+			kind = 0
+		}
+		sync := 1
+		if t, err := w.Target(p.Target); err == nil {
+			if kind == 2 && strings.HasPrefix(t.Func, "Test") && !strings.Contains(t.Func, ".") {
+				kind = 1
+			}
+			key := p.Frontend + " " + t.Package
+			r, ok := reports[key]
+			if !ok {
+				r, _ = w.ModelReport(p.Frontend, t.Package)
+				reports[key] = r
+			}
+			if r != nil {
+				for _, f := range r.Funcs {
+					if f.Name == t.Func && f.Sync {
+						sync = 0
+						break
+					}
+				}
+			}
+		}
+		rank[i] = sync*3 + kind
+	}
+	order := make([]int, len(props))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return rank[order[a]] < rank[order[b]] })
+	return order
 }
 
 // Verify runs M3 on one counterexample and prints the verdict.
