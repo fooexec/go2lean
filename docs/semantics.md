@@ -268,6 +268,7 @@ Calls not listed here are unmodelled (§4.6).
 | `reflect.ValueOf`, `(reflect.Value).IsZero` | §4.5 |
 | `(reflect.Value).Kind`, `IsNil` | exact for the types modelled code boxes and the ones the search and the JSON model put in an `any` (the frontend lists each tag's kind); `IsNil` panics for kinds that cannot be nil, as Go does; any other type: stuck. Checked by `PKG=testdata/miscdiff` |
 | `(reflect.Value).Call(nil)` on a func value | the func of the value's dynamic type among the boxed func types without parameters, called; its results in a fresh `[]reflect.Value`, each boxed with its type's tag (go-metrics' `GetOrRegister`, #128). When the model gets stuck in the func, its results are havoc but as many as the signature has; another value is havoc |
+| `reflect.DeepEqual(x, y)` | deep equality on values the program built, within 32 levels (#46): a nil slice or map is not deeply equal to a non-nil empty one; pointers are equal when the same or pointing to deeply equal values; slices when they share start and length or hold deeply equal elements; maps when they have the same keys with deeply equal values; non-nil funcs never; values of different dynamic types never. On a value the model does not know (an input's opaque value, an opaque error): havoc |
 | `unicode/utf16.Encode` | exact (surrogate pairs; invalid runes and surrogates become U+FFFD); checked by `PKG=testdata/miscdiff` |
 | `strings.Cut`, `strings.LastIndexByte` | exact |
 | `strings.NewReplacer` with literal pairs, `Replace` | exact (first matching old string, left to right) |
