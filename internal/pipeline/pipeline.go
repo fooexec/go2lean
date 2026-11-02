@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -22,6 +23,7 @@ import (
 	"github.com/andreasfoo/go2lean/internal/frontend/gossa"
 	"github.com/andreasfoo/go2lean/internal/fuzzimport"
 	"github.com/andreasfoo/go2lean/internal/ir"
+	"github.com/andreasfoo/go2lean/internal/memgov"
 	"github.com/andreasfoo/go2lean/internal/poc"
 	"github.com/andreasfoo/go2lean/internal/repo"
 	"github.com/andreasfoo/go2lean/internal/ssaout"
@@ -252,9 +254,15 @@ func Hunt(w contract.Workspace, env Env, p *contract.Property, opts constraint.S
 			return w.Counterexample(r.Counterexample)
 		}
 	}
+	memgov.SetLimit(opts.MemLimitMB)
 	cx, summary, err := constraint.Hunt(w, env.Root, p, opts)
 	if err != nil {
 		return nil, fmt.Errorf("hunt %s: %w", p.ID, err)
+	}
+	if cx == nil && constraint.StoppedForMemory(summary) {
+		// Not recorded: -resume searches it again (#45).
+		fmt.Fprintf(out, "  %-28s %s\n", p.ID, summary)
+		return nil, ErrStoppedForMemory
 	}
 	rec := &contract.HuntRecord{Property: p.ID, Summary: summary}
 	if p.Builtin != nil {
@@ -284,6 +292,11 @@ func Hunt(w contract.Workspace, env Env, p *contract.Property, opts constraint.S
 	}
 	return cx, nil
 }
+
+// ErrStoppedForMemory is Hunt's error for a property whose search the
+// memory governor stopped (#45): it is reported in the property's line and
+// not recorded, so -resume searches it again.
+var ErrStoppedForMemory = errors.New("search stopped: out of memory")
 
 // HuntAll runs Hunt on every property, opts.Jobs at a time, printing each
 // property's lines together in the order given.
@@ -320,10 +333,14 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		}()
 	}
 	wg.Wait()
-	var notSearched []string
+	var notSearched, stopped []string
 	for i, sk := range skipped {
 		if sk {
 			notSearched = append(notSearched, props[i].ID)
+		}
+		if errors.Is(results[i].err, ErrStoppedForMemory) {
+			results[i].err = nil
+			stopped = append(stopped, props[i].ID)
 		}
 	}
 	if len(notSearched) > 0 {
@@ -331,6 +348,16 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		for k, id := range notSearched {
 			if k == 10 {
 				fmt.Fprintf(out, "    ... and %d more\n", len(notSearched)-10)
+				break
+			}
+			fmt.Fprintf(out, "    %s\n", id)
+		}
+	}
+	if len(stopped) > 0 {
+		fmt.Fprintf(out, "  stopped for memory: %d of %d properties, their searches over the run's limit of %s (fewer -jobs or a higher -mem-limit; -resume searches them again):\n", len(stopped), len(props), memgov.MB(memgov.Limit()))
+		for k, id := range stopped {
+			if k == 10 {
+				fmt.Fprintf(out, "    ... and %d more\n", len(stopped)-10)
 				break
 			}
 			fmt.Fprintf(out, "    %s\n", id)
