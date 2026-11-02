@@ -63,6 +63,10 @@ type Env struct {
 	// Run, when set, keeps the properties whose target function (or
 	// method, as T.M) it matches, as go test -run selects tests.
 	Run *regexp.Regexp
+	// Changed, when set, is a git revision: a run searches first the
+	// properties whose target reaches a function `git diff Changed` touches
+	// (#45).
+	Changed string
 	// RunBudget bounds the hunt stage of a run (#45): properties start in
 	// order (huntOrder) until it is spent, and the ones not started are
 	// listed. 0: no bound.
@@ -314,7 +318,19 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 	skipped := make([]bool, len(props))
 	start := time.Now()
 	queue := make(chan int, len(props))
-	for _, i := range huntOrder(w, props) {
+	var changed map[string][]lineRange
+	if env.Changed != "" {
+		c, err := changedLines(env.module(), env.Changed)
+		if err != nil {
+			return nil, fmt.Errorf("-changed %s: %w", env.Changed, err)
+		}
+		changed = c
+	}
+	order, n := huntOrder(w, props, changed)
+	if changed != nil {
+		fmt.Fprintf(out, "  changed since %s: %d of %d properties reach a function the diff touches, searched first\n", env.Changed, n, len(props))
+	}
+	for _, i := range order {
 		queue <- i
 	}
 	close(queue)
@@ -376,12 +392,15 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 	return cxs, nil
 }
 
-// huntOrder is the order a run searches its properties in (#45): those
-// whose target synchronises (goroutines, channels, locks) first; within
-// each, specs, then test functions, then the other templates; else the
-// order given.
-func huntOrder(w contract.Workspace, props []*contract.Property) []int {
+// huntOrder is the order a run searches its properties in (#45): with
+// changed lines (-changed), those whose target reaches a function they
+// touch first, with how many there are; within that, those whose target
+// synchronises (goroutines, channels, locks) first; within each, specs,
+// then test functions, then the other templates; else the order given.
+func huntOrder(w contract.Workspace, props []*contract.Property, changed map[string][]lineRange) ([]int, int) {
 	reports := map[string]*contract.ModelReport{}
+	touched := map[string]map[string]bool{}
+	nTouched := 0
 	rank := make([]int, len(props))
 	for i, p := range props {
 		kind := 2
@@ -390,7 +409,7 @@ func huntOrder(w contract.Workspace, props []*contract.Property) []int {
 		default:
 			kind = 0
 		}
-		sync := 1
+		sync, change := 1, 1
 		if t, err := w.Target(p.Target); err == nil {
 			if kind == 2 && strings.HasPrefix(t.Func, "Test") && !strings.Contains(t.Func, ".") {
 				kind = 1
@@ -408,16 +427,29 @@ func huntOrder(w contract.Workspace, props []*contract.Property) []int {
 						break
 					}
 				}
+				if changed != nil {
+					tf, ok := touched[key]
+					if !ok {
+						tf = touchedFuncs(r, changed)
+						touched[key] = tf
+					}
+					if tf[t.Func] {
+						change = 0
+					}
+				}
 			}
 		}
-		rank[i] = sync*3 + kind
+		rank[i] = change*6 + sync*3 + kind
+		if change == 0 {
+			nTouched++
+		}
 	}
 	order := make([]int, len(props))
 	for i := range order {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool { return rank[order[a]] < rank[order[b]] })
-	return order
+	return order, nTouched
 }
 
 // Verify runs M3 on one counterexample and prints the verdict.

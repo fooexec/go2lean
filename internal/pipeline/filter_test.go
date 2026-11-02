@@ -64,10 +64,48 @@ func TestHuntOrder(t *testing.T) {
 		{ID: "d", Target: "conc", Kind: contract.KindNoPanic, Frontend: "gossa"},
 	}
 	var got []string
-	for _, i := range huntOrder(w, props) {
+	order, _ := huntOrder(w, props, nil)
+	for _, i := range order {
 		got = append(got, props[i].ID)
 	}
 	if want := []string{"d", "c", "b", "a"}; !slices.Equal(got, want) {
 		t.Errorf("huntOrder = %v, want %v", got, want)
+	}
+}
+
+// With -changed, the targets that reach a touched function come first,
+// before the synchronising ones.
+func TestHuntOrderChanged(t *testing.T) {
+	w := contract.Workspace{Root: t.TempDir()}
+	if err := w.Init(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tg := range []*contract.Target{{ID: "plain", Func: "Parse"}, {ID: "conc", Func: "Serve"}, {ID: "edit", Func: "Edit"}} {
+		tg.Package, tg.Models = "example.com/p", map[string]string{"gossa": "models/x.json"}
+		if err := w.WriteTarget(tg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := &contract.ModelReport{Package: "example.com/p", Frontend: "gossa", Funcs: []contract.ModelFunc{
+		{ID: 0, Name: "Parse", File: "/r/p.go", Lines: []int{1, 9}},
+		{ID: 1, Name: "Serve", Sync: true, File: "/r/p.go", Lines: []int{11, 19}},
+		{ID: 2, Name: "Edit", File: "/r/p.go", Lines: []int{21, 29}, Calls: []int{3}},
+		{ID: 3, Name: "helper", File: "/r/q.go", Lines: []int{1, 5}},
+	}}
+	if err := w.WriteModelReport(r); err != nil {
+		t.Fatal(err)
+	}
+	props := []*contract.Property{
+		{ID: "a", Target: "plain", Kind: contract.KindNoPanic, Frontend: "gossa"},
+		{ID: "b", Target: "conc", Kind: contract.KindNoPanic, Frontend: "gossa"},
+		{ID: "c", Target: "edit", Kind: contract.KindNoPanic, Frontend: "gossa"},
+	}
+	order, n := huntOrder(w, props, map[string][]lineRange{"/r/q.go": {{2, 2}}})
+	var got []string
+	for _, i := range order {
+		got = append(got, props[i].ID)
+	}
+	if want := []string{"c", "b", "a"}; !slices.Equal(got, want) || n != 1 {
+		t.Errorf("huntOrder = %v (%d touched), want %v (1)", got, n, want)
 	}
 }

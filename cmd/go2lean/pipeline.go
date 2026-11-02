@@ -155,6 +155,7 @@ func cmdRun(args []string) error {
 	tests := fs.Bool("tests", false, "make the packages' test functions (TestXxx(t *testing.T)) targets")
 	specsOnly := fs.Bool("specs-only", false, "search the packages' specs only, not the no_panic and no_hang templates")
 	runBudget := fs.Int("run-budget", 0, "seconds the hunt stage may take in all: properties start in order (synchronising targets, specs, tests first) until it is spent, and the rest are listed (0: unlimited)")
+	changed := fs.String("changed", "", "a git revision: search first the properties whose target reaches a function `git diff REV` touches (the working tree against REV, untracked files included)")
 	runRe := fs.String("run", "", "search only the properties of target functions matching this regexp (as go test -run; methods as T.M)")
 	compareOrder := fs.String("compare-order", "", "explicitly select a pure, deterministic, total func(string,string) int ordering comparator (experimental; one package)")
 	refineRounds := fs.Int("refine", 2, "with -deps, rounds of the refinement loop: translate the dependency functions whose unmodelled calls made a counterexample spurious or inconclusive, then search and replay again (0: off)")
@@ -168,6 +169,7 @@ func cmdRun(args []string) error {
 	}
 	env.Deps, env.Resume, env.FuzzSpecs, env.Tests, env.SpecsOnly = *deps, *resume, *fuzzSpecs, *tests, *specsOnly
 	env.RunBudget = time.Duration(*runBudget) * time.Second
+	env.Changed = *changed
 	env.Refine = *refineRounds
 	if *runRe != "" {
 		// As go test -run: the part before the first slash selects the
