@@ -18,6 +18,7 @@ import (
 
 	"github.com/andreasfoo/go2lean/internal/builtin"
 	"github.com/andreasfoo/go2lean/internal/contract"
+	"github.com/andreasfoo/go2lean/internal/memgov"
 	"github.com/andreasfoo/go2lean/internal/prover"
 	"github.com/andreasfoo/go2lean/internal/repo"
 	"github.com/andreasfoo/go2lean/internal/ssaout"
@@ -66,6 +67,11 @@ type SearchOptions struct {
 	Mutate bool
 	// MaxMutants bounds the mutants tried per property (0: 24).
 	MaxMutants int
+	// MemLimitMB bounds the memory of the run's searches together (#45):
+	// 0 is four fifths of the container's memory, negative none. Over it,
+	// the largest search is stopped and its property reported as out of
+	// memory (internal/memgov).
+	MemLimitMB int
 }
 
 func (o SearchOptions) withDefaults() SearchOptions {
@@ -654,6 +660,10 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 	var summary []string
 	if opts.Engine == EngineRandom || opts.Engine == EngineAll {
 		res, err := runSearch(leanDir, prop.ID+"_random", spec, "random")
+		if oom, ok := memgov.IsOutOfMemory(err); ok {
+			// Degrade, not die (#45): this property is not searched further.
+			return nil, fmt.Sprintf("random: stopped, %s; not searched further", oom), nil
+		}
 		if err != nil {
 			return nil, "", err
 		}
@@ -667,7 +677,16 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 			short := res
 			opts.Fuel *= 4
 			spec["fuel"] = opts.Fuel
-			if res, err = runSearch(leanDir, prop.ID+"_random", spec, "random"); err != nil {
+			res, err = runSearch(leanDir, prop.ID+"_random", spec, "random")
+			if oom, ok := memgov.IsOutOfMemory(err); ok {
+				// Keep the last search that finished, at its fuel.
+				opts.Fuel /= 4
+				spec["fuel"] = opts.Fuel
+				res = short
+				raised += fmt.Sprintf(" [raising the fuel to %d stopped: %s]", opts.Fuel*4, oom)
+				break
+			}
+			if err != nil {
 				return nil, "", err
 			}
 			raised = fmt.Sprintf(" [fuel raised to %d: %d of %d trials ran out at %d]", opts.Fuel, short.OutOfFuel, short.Trials, opts.Fuel/4)
@@ -691,6 +710,10 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 			spec["limit"] = max(opts.ExhaustLimit, seqExhaustLimit)
 		}
 		res, err := runSearch(leanDir, prop.ID+"_exhaustive", spec, "exhaustive")
+		if oom, ok := memgov.IsOutOfMemory(err); ok {
+			summary = append(summary, fmt.Sprintf("exhaustive: stopped, %s; no certificate", oom))
+			return nil, strings.Join(summary, "; "), nil
+		}
 		if err != nil {
 			return nil, "", err
 		}
@@ -814,6 +837,9 @@ func mutationCheck(ws contract.Workspace, leanDir string, report *contract.Model
 	ms["maxMutants"] = opts.MaxMutants
 	ms["trials"] = min(opts.Trials, 500)
 	res, err := runSearch(leanDir, prop.ID+"_mutate", ms, "mutate")
+	if oom, ok := memgov.IsOutOfMemory(err); ok {
+		return fmt.Sprintf("mutation: stopped, %s", oom), nil
+	}
 	if err != nil {
 		return "", err
 	}
@@ -1087,7 +1113,12 @@ func runSearch(leanDir, name string, spec map[string]any, engine string) (*searc
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	if err := cmd.Run(); err != nil {
+	// Under the run's memory limit (#45): a search the governor stops
+	// returns *memgov.OutOfMemory, which Hunt reports as a degraded result.
+	if err := memgov.Run(cmd); err != nil {
+		if _, ok := memgov.IsOutOfMemory(err); ok {
+			return nil, err
+		}
 		return nil, fmt.Errorf("go2lean-search %s: %w\n%s", specFile, err, buf.String())
 	}
 	line := lastLine(buf.String())
@@ -1096,6 +1127,13 @@ func runSearch(leanDir, name string, spec map[string]any, engine string) (*searc
 		return nil, fmt.Errorf("parsing search output %q: %w", line, err)
 	}
 	return &res, nil
+}
+
+// StoppedForMemory says whether a hunt summary reports a search the memory
+// governor stopped (#45): such a hunt is not recorded, so -resume runs it
+// again.
+func StoppedForMemory(summary string) bool {
+	return strings.Contains(summary, "stopped, out of memory") || strings.Contains(summary, "stopped: out of memory")
 }
 
 // maxFuelRaise bounds how far a hunt raises the fuel: 64 times the first

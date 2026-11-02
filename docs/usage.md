@@ -139,7 +139,7 @@ go2lean props   [-workspace out] -package <path>  template properties from the m
 go2lean hunt    [-workspace out] [-property id] [-engine random|exhaustive|all] [-jobs n] [-budget s]
                 [-seed n] [-trials n] [-fuel n] [-maxlen n] [-exhaust-len n] [-exhaust-limit n]
 go2lean poc     [-workspace out] -counterexample id [more ids...]   one go test per package
-go2lean run     [-workspace out] [-nil-inputs] [-deps] [-specs-only] [-run regexp] [-run-budget s] <packages...>   compile, props, hunt, poc (./... allowed)
+go2lean run     [-workspace out] [-nil-inputs] [-deps] [-specs-only] [-run regexp] [-run-budget s] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking]
                 [-repairs n] [-report] <package>
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]
@@ -155,6 +155,15 @@ channels, locks) first, then, in each group, specs, test functions and
 the other templates. With `-run-budget s`, no property starts once the
 hunt stage has taken `s` seconds; the ones not searched are listed, and
 `-resume` searches them later (#45).
+
+The searches a run starts in parallel share a memory limit, `-mem-limit`
+megabytes (default: four fifths of the container's memory, the smaller of
+its cgroup limit and the machine's; negative: none). go2lean samples
+their memory: a new search waits while three quarters of the limit are in
+use, and over the limit the largest one is stopped. Its property reads
+`stopped, out of memory (...)`, is listed at the end of the hunt stage and
+is not recorded, so `-resume` (with fewer `-jobs` or a higher limit)
+searches it again; the rest of the run goes on (#45).
 
 `-fuel` is where a hunt starts: when a quarter of the random trials run
 out of fuel and none of them loops forever (the runs are long, not hung),

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -214,6 +215,9 @@ func runRest(ws contract.Workspace, env pipeline.Env, report *contract.ModelRepo
 	var cxs []*contract.Counterexample
 	for _, p := range props {
 		cx, err := pipeline.Hunt(ws, env, p, so, out)
+		if errors.Is(err, pipeline.ErrStoppedForMemory) {
+			continue // reported in its line; -resume searches it again
+		}
 		if err != nil {
 			return nil, err
 		}

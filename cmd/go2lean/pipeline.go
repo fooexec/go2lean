@@ -46,6 +46,7 @@ func searchFlags(fs *flag.FlagSet, budget int) *engineOptions {
 	fs.BoolVar(&o.Prove, "prove", true, "after an exhaustive pass on integer and bool parameters, try a Lean proof for every input")
 	fs.BoolVar(&o.Mutate, "mutate", true, "for a spec that held, check that mutants of the code under test (a branch negated, a comparison or +/- swapped) fail it")
 	fs.IntVar(&o.MaxMutants, "max-mutants", 24, "mutants tried per spec")
+	fs.IntVar(&o.MemLimitMB, "mem-limit", 0, "megabytes the parallel searches may use together; over it the largest is stopped and its property reported as out of memory (0: 4/5 of the container's memory; negative: no limit)")
 	return &engineOptions{o, engine}
 }
 
