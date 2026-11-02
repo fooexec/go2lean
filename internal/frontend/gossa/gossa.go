@@ -3626,6 +3626,9 @@ func (t *fnState) call(x *ssa.Call) error {
 			return nil
 		}
 	}
+	if callee != nil && callee.String() == "reflect.DeepEqual" && len(x.Call.Args) == 2 {
+		return t.deepEqual(x)
+	}
 	if callee != nil && callee.String() == "fmt.Sprintf" && len(x.Call.Args) == 2 {
 		return t.sprintf(x)
 	}
@@ -4754,6 +4757,38 @@ func (t *fnState) parseFloat(x *ssa.Call) error {
 	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
 	t.cur = &t.out.Blocks[no]
 	if err := t.havocResult(dst, x, t.f.Name()+": call strconv.ParseFloat", "unmodeled-call"); err != nil {
+		return err
+	}
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[join]
+	return nil
+}
+
+// deepEqual lowers reflect.DeepEqual(x, y) (#46): the model's deep
+// equality on values the program built (reflectDeepEq), havoc when it
+// cannot decide (a value the model does not know).
+func (t *fnState) deepEqual(x *ssa.Call) error {
+	a, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return err
+	}
+	b, err := t.val(x.Call.Args[1])
+	if err != nil {
+		return err
+	}
+	dst := t.def(x)
+	ok := t.fresh()
+	t.emit(ir.Instr{Dst: ok, Op: ir.Simple("deepEqualOk"), Args: []ir.Var{a, b}})
+	yes := len(t.out.Blocks)
+	no, join := yes+1, yes+2
+	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: ok, T: yes, F: no}
+	name := t.cur.Name
+	t.addBlocks(name+".deep-equal", name+".deep-equal-unknown", name+".deep-equal-join")
+	t.cur = &t.out.Blocks[yes]
+	t.emit(ir.Instr{Dst: dst, Op: ir.Simple("deepEqual"), Args: []ir.Var{a, b}})
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[no]
+	if err := t.havocInto(dst, types.Typ[types.Bool], t.f.Name()+": call reflect.DeepEqual", "unmodeled-call", ""); err != nil {
 		return err
 	}
 	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}

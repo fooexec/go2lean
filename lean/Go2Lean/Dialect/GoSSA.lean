@@ -391,6 +391,10 @@ inductive Op where
   | sprintf
   /-- Can `sprintf` format these arguments? -/
   | sprintfOk
+  /-- `reflect.DeepEqual(x, y)` on values the program built (#46). -/
+  | deepEqual
+  /-- Can `deepEqual` decide on these values? -/
+  | deepEqualOk
   /-- `reflect.ValueOf(x)`: the interface value itself. -/
   | reflectOf
   /-- `reflect.ValueOf(x).IsZero()` on a value the program boxed. -/
@@ -1012,6 +1016,67 @@ def mapEntries (heap : Heap Val) : Val → Option (Val × List (Val × Val))
 
 def mapObj (entries : List (Val × Val)) : Val :=
   .arr (entries.map fun (k, v) => .tuple [k, v])
+
+/-- How many levels `reflectDeepEq` follows (pointers, elements, fields). -/
+def deepEqLevels : Nat := 32
+
+/-- `reflect.DeepEqual` on values the program built (#46), within `n`
+levels (`none` past them, or on a value the model does not know: an
+input's opaque value, an opaque error). As Go's: a nil slice or map is
+not deeply equal to a non-nil empty one; pointers are equal when they are
+the same or point to deeply equal values; slices when they share their
+start and length or hold deeply equal elements; maps when they have the
+same keys with deeply equal values; non-nil funcs never; interface
+values when their dynamic types are the same and their values deeply
+equal. -/
+def reflectDeepEq (heap : Heap Val) : Nat → Val → Val → Option Bool
+  | 0, _, _ => none
+  | n + 1, a, b =>
+    match a, b with
+    | .str .., .str .. =>
+      match strBytes heap a, strBytes heap b with
+      | some x, some y => some (x == y)
+      | _, _ => none
+    | .slice r o l _, .slice r' o' l' _ =>
+      if r == 0 || r' == 0 then some (r == r')
+      else if l != l' then some false
+      else if r == r' && o == o' then some true
+      else match sliceElems heap a, sliceElems heap b with
+        | some xs, some ys => all n xs ys
+        | _, _ => none
+    | .ptr r p, .ptr r' p' =>
+      if r == r' && p == p' then some true
+      else if r == 0 || r' == 0 then some false
+      else match heapLoad heap a, heapLoad heap b with
+        | .ok x, .ok y => reflectDeepEq heap n x y
+        | _, _ => none
+    | .arr xs, .arr ys | .structv xs, .structv ys => all n xs ys
+    | .boxed 1 _, .boxed 1 _ =>
+      match mapEntries heap a, mapEntries heap b with
+      | some (_, es), some (_, fs) =>
+        if es.length != fs.length then some false
+        else es.foldl (init := some true) fun acc (k, v) =>
+          match acc with
+          | some true =>
+            match fs.find? (fun (k', _) => keyEq heap k k') with
+            | some (_, v') => reflectDeepEq heap n v v'
+            | none => some false
+          | r => r
+      | _, _ => none
+    | .boxed 0 _, .boxed 0 _ => some false -- non-nil funcs: never deeply equal
+    | .boxed t x, .boxed t' y => if t != t' then some false else reflectDeepEq heap n x y
+    | .opaqueNil, .opaqueNil => some true
+    | .opaqueNil, .boxed .. | .boxed .., .opaqueNil => some false
+    | .opaqueNil, .slice r .. | .slice r .., .opaqueNil => some (r == 0)
+    | .int .., .int .. | .bool .., .bool .. | .err false, .err false => eqVal a b
+    | _, _ => none
+where
+  all (n : Nat) : List Val → List Val → Option Bool
+    | [], [] => some true
+    | x :: xs, y :: ys => match reflectDeepEq heap n x y with
+      | some true => all n xs ys
+      | r => r
+    | _, _ => some false
 
 /-- Overwrite `es` from index `i` with `vs`. -/
 def writeAt (es : List Val) (i : Nat) (vs : List Val) : List Val :=
@@ -2903,6 +2968,10 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
     | some r => .ok (.bool r, heap) | none => .panic .modelStuck
   | .neDeep, [a, b] => match eqDeep heap a b with
     | some r => .ok (.bool !r, heap) | none => .panic .modelStuck
+  | .deepEqualOk, [a, b] => .ok (.bool (reflectDeepEq heap deepEqLevels a b).isSome, heap)
+  | .deepEqual, [a, b] => match reflectDeepEq heap deepEqLevels a b with
+    | some r => .ok (.bool r, heap)
+    | none => .panic .modelStuck
   | .sprintfOk, [f, args, .int _ bt, .arr us] =>
     match strBytes heap f, sliceElems heap args with
     | some fb, some xs => .ok (.bool ((sprintfBytes heap bt.toNat (natsOf us) fb xs).isSome), heap)

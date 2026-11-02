@@ -152,6 +152,21 @@ func SeqTestCopyShorterSrc() bool { return testCopyShorterSrc() }
 // go2lean:sequence testCopySimple
 func SeqTestCopySimple() bool { return testCopySimple() }
 
+// go2lean:sequence testDeepEqualMaps
+func SeqTestDeepEqualMaps() bool { return testDeepEqualMaps() }
+
+// go2lean:sequence testDeepEqualNilEmpty
+func SeqTestDeepEqualNilEmpty() bool { return testDeepEqualNilEmpty() }
+
+// go2lean:sequence testDeepEqualPointers
+func SeqTestDeepEqualPointers() bool { return testDeepEqualPointers() }
+
+// go2lean:sequence testDeepEqualSlices
+func SeqTestDeepEqualSlices() bool { return testDeepEqualSlices() }
+
+// go2lean:sequence testDeepEqualTypes
+func SeqTestDeepEqualTypes() bool { return testDeepEqualTypes() }
+
 // go2lean:sequence testDefer
 func SeqTestDefer() bool { return testDefer() }
 
