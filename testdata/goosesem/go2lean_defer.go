@@ -1,6 +1,9 @@
 package semantics
 
-import "sync"
+import (
+	"io"
+	"sync"
+)
 
 // go2lean's own tests (#62): defer statements in loops run last first,
 // with the arguments evaluated at the defer, interleaved with the other
@@ -65,4 +68,25 @@ func testDeferLoopUnlock() bool {
 	ms := []*sync.Mutex{new(sync.Mutex), new(sync.Mutex)}
 	deferUnlockAll(ms)
 	return ms[0].TryLock() && ms[1].TryLock()
+}
+
+// A deferred call through an interface (#123): the method of the value's
+// dynamic type, chosen at the defer, runs at the return, last first with
+// the other defers.
+type closeLog struct {
+	log *deferLog
+	id  uint64
+}
+
+func (c closeLog) Close() error { c.log.add(c.id); return nil }
+
+func testDeferInvoke() bool {
+	l := &deferLog{}
+	func() {
+		var a, b io.Closer = closeLog{l, 1}, &closeLog{l, 2}
+		defer a.Close()
+		defer b.Close()
+		l.add(0)
+	}()
+	return len(l.s) == 3 && l.s[0] == 0 && l.s[1] == 2 && l.s[2] == 1
 }

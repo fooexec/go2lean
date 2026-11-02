@@ -2716,6 +2716,16 @@ func (t *fnState) instr(b *ssa.BasicBlock, in ssa.Instruction) error {
 			if op, ok := lockerOrCtx(x.Call.Value.Type(), x.Call.Method.Name()); ok && (op == "lockL" || op == "unlockL") {
 				return t.deferCall(x, nil, op)
 			}
+			// defer conn.Close(): the method of the receiver's dynamic type,
+			// chosen at the defer statement as Go evaluates it there, then
+			// called at the returns like a deferred func value (#123).
+			fv, ok, err := t.dispatch(&x.Call)
+			if err != nil {
+				return err
+			}
+			if ok {
+				return t.deferCall(x, nil, "dynamic", fv)
+			}
 		} else if x.Call.StaticCallee() == nil {
 			// A call through a func value (`defer cancel()`).
 			return t.deferCall(x, nil, "dynamic")
@@ -6995,7 +7005,7 @@ type deferred struct {
 // arguments are evaluated now and kept, and runDefers makes the call at
 // each return. In a function with a defer statement in a loop, the
 // arguments go onto the frame's defer stack instead (deferStack).
-func (t *fnState) deferCall(x *ssa.Defer, callee *ssa.Function, syncOp string) error {
+func (t *fnState) deferCall(x *ssa.Defer, callee *ssa.Function, syncOp string, fv ...ir.Var) error {
 	name := syncOp
 	if callee != nil {
 		name = callee.String()
@@ -7003,7 +7013,11 @@ func (t *fnState) deferCall(x *ssa.Defer, callee *ssa.Function, syncOp string) e
 	var args []ir.Var
 	callArgs := x.Call.Args
 	dynamic := syncOp == "dynamic"
-	if dynamic || x.Call.IsInvoke() {
+	if len(fv) > 0 {
+		// An interface method already dispatched (fv): the call's own
+		// arguments follow it.
+		args, syncOp = append(args, fv[0]), ""
+	} else if dynamic || x.Call.IsInvoke() {
 		// The func value, or the receiver, comes first.
 		callArgs = append([]ssa.Value{x.Call.Value}, callArgs...)
 		if dynamic {

@@ -158,6 +158,9 @@ func SeqTestDefer() bool { return testDefer() }
 // go2lean:sequence testDeferFuncLit
 func SeqTestDeferFuncLit() bool { return testDeferFuncLit() }
 
+// go2lean:sequence testDeferInvoke
+func SeqTestDeferInvoke() bool { return testDeferInvoke() }
+
 // go2lean:sequence testDeferLoopEarlyReturn
 func SeqTestDeferLoopEarlyReturn() bool { return testDeferLoopEarlyReturn() }
 
@@ -322,6 +325,9 @@ func SeqTestNetPipeClose() bool { return testNetPipeClose() }
 
 // go2lean:sequence testNetPipeDeadline
 func SeqTestNetPipeDeadline() bool { return testNetPipeDeadline() }
+
+// go2lean:sequence testNetPipeDeferClose
+func SeqTestNetPipeDeferClose() bool { return testNetPipeDeferClose() }
 
 // go2lean:sequence testNetPipeWriteRead
 func SeqTestNetPipeWriteRead() bool { return testNetPipeWriteRead() }
