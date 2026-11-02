@@ -63,6 +63,10 @@ take most of its time, a property Lean proves is expected at its
 exhaustive result. The full run, with the proofs, the proof judge's
 red-team corpus and the mutants, is the proofs workflow
 (`.github/workflows/proofs.yml`), started by hand.
+`scripts/recompile-diff.sh out-rc` (run by hand) checks the model's own
+regexp compiler, for patterns built at run time, against Go: which
+patterns Go rejects, and the submatch indices of the rest on a set of
+strings ([`testdata/recompile`](../testdata/recompile/gen.go)).
 
 | package | planted bug | result |
 |---|---|---|

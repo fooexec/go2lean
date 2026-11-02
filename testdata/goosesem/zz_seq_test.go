@@ -425,6 +425,21 @@ func SeqTestReflectCallIfaceResult() bool { return testReflectCallIfaceResult() 
 // go2lean:sequence testReflectCallNoArgs
 func SeqTestReflectCallNoArgs() bool { return testReflectCallNoArgs() }
 
+// go2lean:sequence testRegexpRuntimeAltLazy
+func SeqTestRegexpRuntimeAltLazy() bool { return testRegexpRuntimeAltLazy() }
+
+// go2lean:sequence testRegexpRuntimeClass
+func SeqTestRegexpRuntimeClass() bool { return testRegexpRuntimeClass() }
+
+// go2lean:sequence testRegexpRuntimeEscapes
+func SeqTestRegexpRuntimeEscapes() bool { return testRegexpRuntimeEscapes() }
+
+// go2lean:sequence testRegexpRuntimeGroups
+func SeqTestRegexpRuntimeGroups() bool { return testRegexpRuntimeGroups() }
+
+// go2lean:sequence testRegexpRuntimeRepeat
+func SeqTestRegexpRuntimeRepeat() bool { return testRegexpRuntimeRepeat() }
+
 // go2lean:sequence testReturnFour
 func SeqTestReturnFour() bool { return testReturnFour() }
 

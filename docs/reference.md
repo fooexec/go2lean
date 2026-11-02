@@ -38,7 +38,7 @@ Construct-by-construct detail: [docs/semantics.md](../docs/semantics.md).
 - `strconv`: `Atoi` `Itoa` `ParseInt` `ParseUint` `ParseBool` `ParseFloat` (decimal; inf/NaN/hex 🟡) `FormatInt` `FormatUint`
 - `unicode/utf8`, `unicode/utf16`, `net/url`, `encoding/binary` (the functions a package calls, such as the varints), `container/list`, `bufio`, `io`: translated from their Go source
 - `encoding/json`: `Marshal`, `Unmarshal`, `Valid`, `Encoder` to a `strings.Builder`; `encoding/base64` standard encodings; `encoding/hex.EncodeToString`
-- `regexp` with constant patterns; `fmt.Sprintf` with `%s %d %v %t` 🟡 otherwise; `reflect` `ValueOf` `IsZero` `Kind` `IsNil`
+- `regexp` with constant patterns, and patterns built at run time (common Perl syntax); `fmt.Sprintf` with `%s %d %v %t` 🟡 otherwise; `reflect` `ValueOf` `IsZero` `Kind` `IsNil`
 - `sync/atomic` integer types and functions (`LoadInt32`, `AddInt64`, `CompareAndSwapUint32`, ...)
 - anthropic-sdk-go and openai-go JSON unions, `Message.Accumulate` (under `-deps`)
 - 🟡 `math/rand` (any value in range), clocks, environment, I/O, network (havoc)
