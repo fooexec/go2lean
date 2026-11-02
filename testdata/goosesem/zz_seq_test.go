@@ -218,6 +218,21 @@ func SeqTestExplicitBlockStmt() bool { return testExplicitBlockStmt() }
 // go2lean:sequence testFirstClassFunction
 func SeqTestFirstClassFunction() bool { return testFirstClassFunction() }
 
+// go2lean:sequence testFmtHexByte
+func SeqTestFmtHexByte() bool { return testFmtHexByte() }
+
+// go2lean:sequence testFmtWidthNarrow
+func SeqTestFmtWidthNarrow() bool { return testFmtWidthNarrow() }
+
+// go2lean:sequence testFmtWidthSpaces
+func SeqTestFmtWidthSpaces() bool { return testFmtWidthSpaces() }
+
+// go2lean:sequence testFmtWidthZeroHex
+func SeqTestFmtWidthZeroHex() bool { return testFmtWidthZeroHex() }
+
+// go2lean:sequence testFmtZeroNegative
+func SeqTestFmtZeroNegative() bool { return testFmtZeroNegative() }
+
 // go2lean:sequence testFooBarMutation
 func SeqTestFooBarMutation() bool { return testFooBarMutation() }
 

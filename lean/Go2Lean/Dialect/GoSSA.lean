@@ -916,20 +916,33 @@ def hexDigits (x : List Nat) : List Nat :=
   let digit (d : Nat) := if d < 10 then 48 + d else 87 + d
   x.flatMap fun b => [digit (b / 16), digit (b % 16)]
 
-/-- The bytes `%v` (and `%s`, `%d`, `%t`, and `%x` of a string or a byte
-slice, whose boxed type tag is `bytesTag`) prints for a value the program
-boxed, or `none`. An integer whose type tag is in `unsigned` (the frontend
-lists the unsigned integer types the program boxes) prints unsigned, any
-other signed. -/
+/-- Upper-case a hex digit (`%X`). -/
+def upperHex (c : Nat) : Nat := if 97 ≤ c && c ≤ 102 then c - 32 else c
+
+/-- An integer in hex, lower-case, as `%x` prints it: `-` and the digits of
+its magnitude when negative (#46). -/
+def intHex (i : Int) : List Nat :=
+  let digits := (Nat.toDigits 16 i.natAbs).map Char.toNat
+  if i < 0 then 45 :: digits else digits
+
+/-- The bytes `%v` (and `%s`, `%d`, `%t`, `%x`/`%X` of an integer, a string
+or a byte slice, whose boxed type tag is `bytesTag`) prints for a value the
+program boxed, or `none`. An integer whose type tag is in `unsigned` (the
+frontend lists the unsigned integer types the program boxes) prints
+unsigned, any other signed. -/
 def fmtArg (heap : Heap Val) (bytesTag verb : Nat) (unsigned : List Nat := []) : Val → Option (List Nat)
   | .boxed _ (.str r o l) =>
     if verb == 115 || verb == 118 then strBytes heap (.str r o l)
-    else if verb == 120 then hexDigits <$> strBytes heap (.str r o l) else none
+    else if verb == 120 then hexDigits <$> strBytes heap (.str r o l)
+    else if verb == 88 then (·.map upperHex) <$> hexDigits <$> strBytes heap (.str r o l) else none
   | .boxed t (.slice r o l _) =>
-    if verb == 120 && t == bytesTag then hexDigits <$> strBytes heap (.str r o l) else none
+    if verb == 120 && t == bytesTag then hexDigits <$> strBytes heap (.str r o l)
+    else if verb == 88 && t == bytesTag then (·.map upperHex) <$> hexDigits <$> strBytes heap (.str r o l) else none
   | .boxed t (.int _ v) =>
-    if verb == 100 || verb == 118 then
-      some (itoaBytes (if unsigned.contains t then (v.toNat : Int) else v.toInt))
+    let i : Int := if unsigned.contains t then (v.toNat : Int) else v.toInt
+    if verb == 100 || verb == 118 then some (itoaBytes i)
+    else if verb == 120 then some (intHex i)
+    else if verb == 88 then some ((intHex i).map upperHex)
     else none
   | .boxed _ (.bool b) =>
     if verb == 116 || verb == 118 then some (if b then [116, 114, 117, 101] else [102, 97, 108, 115, 101]) else none
@@ -938,17 +951,50 @@ def fmtArg (heap : Heap Val) (bytesTag verb : Nat) (unsigned : List Nat := []) :
 /-- The naturals of a constant array of integers (type tags). -/
 def natsOf (vs : List Val) : List Nat := vs.filterMap fun | .int _ v => some v.toNat | _ => none
 
-/-- Format `fmt` with `args` (see `Op.sprintf`). -/
-def sprintfBytes (heap : Heap Val) (bytesTag : Nat) (unsigned : List Nat := []) : List Nat → List Val → Option (List Nat)
+/-- `x` padded to `width` (#46): with spaces on the left, or on the right
+for the `-` flag; with zeros for the `0` flag on an integer, after its
+sign. The `0` flag on another value is not modelled (`none`). -/
+def fmtPad (zero minus : Bool) (width : Nat) (isInt : Bool) (x : List Nat) : Option (List Nat) :=
+  if x.length ≥ width then some x
+  else
+    let n := width - x.length
+    if minus then some (x ++ List.replicate n 32)
+    else if zero then
+      if !isInt then none
+      else match x with
+        | 45 :: digits => some (45 :: List.replicate n 48 ++ digits)
+        | _ => some (List.replicate n 48 ++ x)
+    else some (List.replicate n 32 ++ x)
+
+mutual
+/-- Format `fmt` with `args` (see `Op.sprintf`): the verbs `%v %s %d %t %x
+%X %%`, with the flags `0` and `-` and a decimal width (#46). -/
+def sprintfBytes (heap : Heap Val) (bytesTag : Nat) (unsigned : List Nat) : List Nat → List Val → Option (List Nat)
   | [], [] => some []
   | [], _ :: _ => none -- Go appends %!(EXTRA ...): not modelled
-  | 37 :: 37 :: rest, args => (37 :: ·) <$> sprintfBytes heap bytesTag unsigned rest args
-  | 37 :: verb :: rest, a :: args =>
-    match fmtArg heap bytesTag verb unsigned a, sprintfBytes heap bytesTag unsigned rest args with
-    | some x, some y => some (x ++ y)
-    | _, _ => none
-  | 37 :: _, _ => none -- a missing argument or a bare % at the end
+  | 37 :: rest, args => sprintfVerb heap bytesTag unsigned false false 0 rest args
   | c :: rest, args => (c :: ·) <$> sprintfBytes heap bytesTag unsigned rest args
+
+/-- After a `%`: the flags and width so far, then the verb. -/
+def sprintfVerb (heap : Heap Val) (bytesTag : Nat) (unsigned : List Nat) (zero minus : Bool) (width : Nat) :
+    List Nat → List Val → Option (List Nat)
+  | [], _ => none -- a bare % at the end
+  | 37 :: rest, args =>
+    if zero || minus || width > 0 then none
+    else (37 :: ·) <$> sprintfBytes heap bytesTag unsigned rest args
+  | 45 :: rest, args => sprintfVerb heap bytesTag unsigned zero true width rest args
+  | d :: rest, args =>
+    if d == 48 && width == 0 then sprintfVerb heap bytesTag unsigned true minus 0 rest args
+    else if 48 ≤ d && d ≤ 57 then sprintfVerb heap bytesTag unsigned zero minus (width * 10 + (d - 48)) rest args
+    else match args with
+      | [] => none -- a missing argument
+      | a :: args =>
+        let isInt := match a with | .boxed _ (.int ..) => true | _ => false
+        match fmtArg heap bytesTag d unsigned a >>= fmtPad zero minus width isInt,
+            sprintfBytes heap bytesTag unsigned rest args with
+        | some x, some y => some (x ++ y)
+        | _, _ => none
+end
 
 /-- Key equality for maps: strings by their bytes, the rest by `eqVal`. -/
 def keyEq (heap : Heap Val) (a b : Val) : Bool :=
