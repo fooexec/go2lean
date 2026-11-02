@@ -585,6 +585,11 @@ type ModelFunc struct {
 	// Sync: the function can reach a goroutine start or a synchronisation
 	// operation; a run searches such targets first (#45).
 	Sync bool `json:"sync,omitempty"`
+	// File and Lines are the function's source file and its first and
+	// last line (absent without source): `run -changed` searches first the
+	// targets that reach a function a diff touches (#45).
+	File  string `json:"file,omitempty"`
+	Lines []int  `json:"lines,omitempty"`
 	// LoopHeaders are the blocks of the model's function that loops come
 	// back to: a proof needs an invariant at each (go2lean prove).
 	LoopHeaders []int `json:"loop_headers,omitempty"`

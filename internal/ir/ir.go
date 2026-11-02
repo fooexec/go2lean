@@ -637,6 +637,11 @@ type Func struct {
 	Sync bool
 	// Daemon: a goroutine running it does not keep a run alive (a ticker).
 	Daemon bool
+	// File and Lines are the function's source file and its first and last
+	// line, when it has source: a run with -changed searches first the
+	// targets that reach a function a diff touches (#45).
+	File  string
+	Lines [2]int
 	// SpecMaxLen is the spec's go2lean:maxlen directive (0: none).
 	SpecMaxLen int
 	// SequenceFor names the function a `go2lean:sequence` spec drives.

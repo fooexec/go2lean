@@ -1819,7 +1819,14 @@ func newProgState(pkgPath string, fns []*ssa.Function, xrefs map[string]contract
 	byName := map[string]*ssa.Function{}
 	for _, f := range fns {
 		st.ids[f] = len(p.Funcs)
-		p.Funcs = append(p.Funcs, &ir.Func{Name: funcName(f), GoSig: goSig(f)})
+		out := &ir.Func{Name: funcName(f), GoSig: goSig(f)}
+		if syn := f.Syntax(); syn != nil && sprog != nil {
+			start, end := sprog.Fset.Position(syn.Pos()), sprog.Fset.Position(syn.End())
+			if start.IsValid() && end.IsValid() {
+				out.File, out.Lines = start.Filename, [2]int{start.Line, end.Line}
+			}
+		}
+		p.Funcs = append(p.Funcs, out)
 		byName[funcName(f)] = f
 	}
 	st.specFor = func(f *ssa.Function) string { return specTarget(f, byName) }
