@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/andreasfoo/go2lean/internal/constraint"
 	"github.com/andreasfoo/go2lean/internal/contract"
@@ -151,6 +152,7 @@ func cmdRun(args []string) error {
 	fuzzSpecs := fs.Bool("fuzz-specs", true, "read the packages' Go fuzz targets (FuzzXxx) as specs")
 	tests := fs.Bool("tests", false, "make the packages' test functions (TestXxx(t *testing.T)) targets")
 	specsOnly := fs.Bool("specs-only", false, "search the packages' specs only, not the no_panic and no_hang templates")
+	runBudget := fs.Int("run-budget", 0, "seconds the hunt stage may take in all: properties start in order (synchronising targets, specs, tests first) until it is spent, and the rest are listed (0: unlimited)")
 	runRe := fs.String("run", "", "search only the properties of target functions matching this regexp (as go test -run; methods as T.M)")
 	compareOrder := fs.String("compare-order", "", "explicitly select a pure, deterministic, total func(string,string) int ordering comparator (experimental; one package)")
 	refineRounds := fs.Int("refine", 2, "with -deps, rounds of the refinement loop: translate the dependency functions whose unmodelled calls made a counterexample spurious or inconclusive, then search and replay again (0: off)")
@@ -163,6 +165,7 @@ func cmdRun(args []string) error {
 		return err
 	}
 	env.Deps, env.Resume, env.FuzzSpecs, env.Tests, env.SpecsOnly = *deps, *resume, *fuzzSpecs, *tests, *specsOnly
+	env.RunBudget = time.Duration(*runBudget) * time.Second
 	env.Refine = *refineRounds
 	if *runRe != "" {
 		re, err := regexp.Compile(*runRe)
