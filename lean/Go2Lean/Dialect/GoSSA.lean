@@ -391,6 +391,10 @@ inductive Op where
   | sprintf
   /-- Can `sprintf` format these arguments? -/
   | sprintfOk
+  /-- `regexp.MustCompile(p)` of a pattern built at run time: 0 when the
+  model compiles it (`reCompile`), 1 when Go rejects it, 2 when the model
+  does not take its syntax (#46). -/
+  | reCompileOk
   /-- `reflect.DeepEqual(x, y)` on values the program built (#46). -/
   | deepEqual
   /-- Can `deepEqual` decide on these values? -/
@@ -1119,6 +1123,320 @@ def encodeRune (r : Nat) : List Nat :=
   else if r < 0x10000 then [0xE0 ||| (r >>> 12), 0x80 ||| ((r >>> 6) % 0x40), 0x80 ||| (r % 0x40)]
   else [0xF0 ||| (r >>> 18), 0x80 ||| ((r >>> 12) % 0x40), 0x80 ||| ((r >>> 6) % 0x40), 0x80 ||| (r % 0x40)]
 
+-- Regexps built at run time (#46) ---------------------------------------------
+
+/-- A parsed regexp, the subset `reCompile` takes. -/
+inductive ReAst where
+  | lit (r : Nat)
+  | cls (ranges : List (Nat × Nat))
+  | any
+  | empty (flag : Nat)
+  | cat (xs : List ReAst)
+  | alt (xs : List ReAst)
+  | star (greedy : Bool) (x : ReAst)
+  | plus (greedy : Bool) (x : ReAst)
+  | quest (greedy : Bool) (x : ReAst)
+  | rep (n : Nat) (m : Option Nat) (greedy : Bool) (x : ReAst)
+  | cap (k : Nat) (x : ReAst)
+  deriving Inhabited
+
+/-- Why a pattern does not compile: Go rejects it (1), or the model does not
+take its syntax (2). -/
+abbrev ReErr := Nat
+
+def reMaxRune : Nat := 0x10FFFF
+
+/-- Sorted, merged ranges. -/
+def reNormRanges (rs : List (Nat × Nat)) : List (Nat × Nat) :=
+  let sorted := (rs.toArray.qsort fun a b => a.1 < b.1).toList
+  sorted.foldl (fun acc (lo, hi) =>
+    match acc.reverse with
+    | (plo, phi) :: rest => if lo ≤ phi + 1 then (rest.reverse ++ [(plo, max phi hi)]) else acc ++ [(lo, hi)]
+    | [] => [(lo, hi)]) []
+
+/-- The runes not in `rs` (sorted, merged). -/
+def reNegate (rs : List (Nat × Nat)) : List (Nat × Nat) :=
+  let (out, next) := (reNormRanges rs).foldl (fun (out, next) (lo, hi) =>
+    (if next < lo then out ++ [(next, lo - 1)] else out, hi + 1)) ([], 0)
+  if next ≤ reMaxRune then out ++ [(next, reMaxRune)] else out
+
+def reDigit : List (Nat × Nat) := [(48, 57)]
+def reWord : List (Nat × Nat) := [(48, 57), (65, 90), (95, 95), (97, 122)]
+def reSpace : List (Nat × Nat) := [(9, 10), (12, 13), (32, 32)]
+
+/-- The class a Perl escape letter names (`\d \w \s` and negations). -/
+def rePerlClass : Nat → Option (List (Nat × Nat))
+  | 100 => some reDigit | 68 => some (reNegate reDigit)
+  | 119 => some reWord | 87 => some (reNegate reWord)
+  | 115 => some reSpace | 83 => some (reNegate reSpace)
+  | _ => none
+
+/-- The rune an escape `\c` stands for, for `c` a punctuation or control
+letter; `none` for any other escape. -/
+def reEscRune (c : Nat) : Option Nat :=
+  if c == 110 then some 10 else if c == 116 then some 9 else if c == 114 then some 13
+  else if c == 102 then some 12 else if c == 118 then some 11
+  else if c < 128 && !(48 ≤ c && c ≤ 57) && !(65 ≤ c && c ≤ 90) && !(97 ≤ c && c ≤ 122) then some c
+  else none
+
+/-- A decimal number at `i`: its value and the position after it. -/
+def reNum (rs : Array Nat) : Nat → Nat → Option (Nat × Nat)
+  | 0, _ => none
+  | fuel + 1, i =>
+    match rs[i]? with
+    | some d =>
+      if 48 ≤ d && d ≤ 57 then
+        match reNum rs fuel (i + 1) with
+        | some (v, j) =>
+          let digits := j - (i + 1)
+          some ((d - 48) * 10 ^ digits + v, j)
+        | none => some (d - 48, i + 1)
+      else none
+    | none => none
+
+/-- `{n}`, `{n,}`, `{n,m}` at `i` (at the `{`): n, m and the position after. -/
+def reRepeatAt (rs : Array Nat) (i : Nat) : Option (Nat × Option Nat × Nat) := do
+  -- A count with a leading zero is no count (Go's parseInt): the brace is
+  -- then a literal.
+  let num (k : Nat) : Option (Nat × Nat) := do
+    let (v, e) ← reNum rs rs.size k
+    if e > k + 1 && rs[k]? == some 48 then none else some (v, e)
+  let (n, j) ← num (i + 1)
+  match rs[j]? with
+  | some 125 => some (n, some n, j + 1)
+  | some 44 =>
+    match rs[j + 1]? with
+    | some 125 => some (n, none, j + 2)
+    | _ =>
+      let (m, k) ← num (j + 1)
+      if rs[k]? == some 125 then some (n, some m, k + 1) else none
+  | _ => none
+
+/-- A bracketed class from after `[`: its ranges and the position after `]`. -/
+def reClass (rs : Array Nat) : Nat → Nat → Bool → List (Nat × Nat) → Except ReErr (List (Nat × Nat) × Nat)
+  | 0, _, _, _ => .error 2
+  | fuel + 1, i, first, acc =>
+    match rs[i]? with
+    | none => .error 1 -- missing ]
+    | some 93 =>
+      if first then reClass rs fuel (i + 1) false (acc ++ [(93, 93)]) else .ok (acc, i + 1)
+    | some 91 => if rs[i + 1]? == some 58 then .error 2 else reClass rs fuel (i + 1) false (acc ++ [(91, 91)]) -- [:alpha:]
+    | some c =>
+      -- one item: a rune, an escape, or a range lo-hi
+      let item : Except ReErr (Sum Nat (List (Nat × Nat)) × Nat) :=
+        if c == 92 then
+          match rs[i + 1]? with
+          | some e =>
+            match rePerlClass e with
+            | some cl => .ok (.inr cl, i + 2)
+            | none => match reEscRune e with
+              | some r => .ok (.inl r, i + 2)
+              | none => .error 2
+          | none => .error 1
+        else .ok (.inl c, i + 1)
+      match item with
+      | .error e => .error e
+      | .ok (.inr cl, j) => reClass rs fuel j false (acc ++ cl)
+      | .ok (.inl lo, j) =>
+        if rs[j]? == some 45 && rs[j + 1]? != some 93 && rs[j + 1]?.isSome then
+          match rs[j + 1]? with
+          | some 92 =>
+            match rs[j + 2]? >>= reEscRune with
+            | some hi => if hi < lo then .error 1 else reClass rs fuel (j + 3) false (acc ++ [(lo, hi)])
+            | none => .error 2
+          | some hi => if hi < lo then .error 1 else reClass rs fuel (j + 2) false (acc ++ [(lo, hi)])
+          | none => .error 1
+        else reClass rs fuel j false (acc ++ [(lo, lo)])
+
+mutual
+/-- Alternation from `i` up to `)` or the end: the tree, the position, and the
+groups numbered so far. -/
+def reAlt (rs : Array Nat) : Nat → Nat → Nat → Except ReErr (ReAst × Nat × Nat)
+  | 0, _, _ => .error 2
+  | fuel + 1, i, g =>
+    match reCat rs fuel i g [] with
+    | .error e => .error e
+    | .ok (x, j, g) =>
+      if rs[j]? == some 124 then
+        match reAlt rs fuel (j + 1) g with
+        | .ok (.alt ys, k, g) => .ok (.alt (x :: ys), k, g)
+        | .ok (y, k, g) => .ok (.alt [x, y], k, g)
+        | .error e => .error e
+      else .ok (x, j, g)
+
+/-- A concatenation from `i` up to `|`, `)` or the end. -/
+def reCat (rs : Array Nat) : Nat → Nat → Nat → List ReAst → Except ReErr (ReAst × Nat × Nat)
+  | 0, _, _, _ => .error 2
+  | fuel + 1, i, g, acc =>
+    match rs[i]? with
+    | none | some 124 | some 41 => .ok (.cat acc, i, g)
+    | some _ =>
+      match reAtom rs fuel i g with
+      | .error e => .error e
+      | .ok (a, j, g) =>
+        match reSuffix rs fuel a j with
+        | .error e => .error e
+        | .ok (b, k) => reCat rs fuel k g (acc ++ [b])
+
+/-- The repetition operators after an atom (one; a second is an error, as
+Go reports `**`). -/
+def reSuffix (rs : Array Nat) : Nat → ReAst → Nat → Except ReErr (ReAst × Nat)
+  | 0, _, _ => .error 2
+  | _ + 1, a, i =>
+    let lazy (j : Nat) : Bool × Nat := if rs[j]? == some 63 then (false, j + 1) else (true, j)
+    let op : Option (ReAst × Nat) :=
+      match rs[i]? with
+      | some 42 => let (gr, j) := lazy (i + 1); some (.star gr a, j)
+      | some 43 => let (gr, j) := lazy (i + 1); some (.plus gr a, j)
+      | some 63 => let (gr, j) := lazy (i + 1); some (.quest gr a, j)
+      | some 123 =>
+        match reRepeatAt rs i with
+        | some (n, m, j) => let (gr, k) := lazy j; some (.rep n m gr a, k)
+        | none => none
+      | _ => none
+    -- Perl does not stack repetition operators: `a**`, `a{2}{3}` are errors.
+    let stacked (j : Nat) : Bool :=
+      [some 42, some 43, some 63].contains rs[j]? || (rs[j]? == some 123 && (reRepeatAt rs j).isSome)
+    match op with
+    | none => .ok (a, i)
+    | some (b, j) =>
+      match b with
+      | .rep n m _ _ =>
+        let tooBig : Bool := match m with | some m => m > 1000 || m < n | none => false
+        if n > 1000 || tooBig then .error 1
+        else if stacked j then .error 1 else .ok (b, j)
+      | _ => if stacked j then .error 1 else .ok (b, j)
+
+/-- One atom at `i`. -/
+def reAtom (rs : Array Nat) : Nat → Nat → Nat → Except ReErr (ReAst × Nat × Nat)
+  | 0, _, _ => .error 2
+  | fuel + 1, i, g =>
+    match rs[i]? with
+    | none => .error 1
+    | some 40 =>
+      if rs[i + 1]? == some 63 then
+        if rs[i + 2]? == some 58 then
+          match reAlt rs fuel (i + 3) g with
+          | .ok (x, j, g) => if rs[j]? == some 41 then .ok (x, j + 1, g) else .error 1
+          | .error e => .error e
+        else .error 2 -- flags, named groups
+      else
+        match reAlt rs fuel (i + 1) (g + 1) with
+        | .ok (x, j, g') => if rs[j]? == some 41 then .ok (.cap (g + 1) x, j + 1, g') else .error 1
+        | .error e => .error e
+    | some 41 => .error 1
+    | some 42 | some 43 | some 63 => .error 1 -- missing argument to repetition
+    | some 46 => .ok (.any, i + 1, g)
+    | some 94 => .ok (.empty 4, i + 1, g)
+    | some 36 => .ok (.empty 8, i + 1, g)
+    | some 91 =>
+      let neg := rs[i + 1]? == some 94
+      match reClass rs rs.size (if neg then i + 2 else i + 1) true [] with
+      | .ok (cl, j) => .ok (.cls (if neg then reNegate cl else reNormRanges cl), j, g)
+      | .error e => .error e
+    | some 92 =>
+      match rs[i + 1]? with
+      | none => .error 1
+      | some e =>
+        if e == 98 then .ok (.empty 16, i + 2, g)
+        else if e == 66 then .ok (.empty 32, i + 2, g)
+        else if e == 65 then .ok (.empty 4, i + 2, g)
+        else if e == 122 then .ok (.empty 8, i + 2, g)
+        else match rePerlClass e with
+          | some cl => .ok (.cls cl, i + 2, g)
+          | none => match reEscRune e with
+            | some r => .ok (.lit r, i + 2, g)
+            | none => .error 2
+    | some c => .ok (.lit c, i + 1, g)
+end
+
+/-- `x{n,m}` as copies, Go's simplification: n copies, then `m - n` nested
+optional ones (`x*` after the copies for `{n,}`). -/
+def reExpand (n : Nat) (m : Option Nat) (greedy : Bool) (x : ReAst) : ReAst :=
+  let copies := List.replicate n x
+  match m with
+  | none => .cat (copies ++ [.star greedy x])
+  | some m =>
+    let rec opt : Nat → ReAst
+      | 0 => .cat []
+      | k + 1 => .quest greedy (.cat [x, opt k])
+    .cat (copies ++ (if m > n then [opt (m - n)] else []))
+
+/-- Whether `x` can match the empty string (Go's `frag.nullable`), within
+`n` levels (`false` past them). -/
+def reNullable : Nat → ReAst → Bool
+  | 0, _ => false
+  | n + 1, x =>
+    match x with
+    | .lit _ | .cls _ | .any => false
+    | .empty _ | .star .. | .quest .. => true
+    | .cat xs => xs.all (reNullable n)
+    | .alt xs => xs.any (reNullable n)
+    | .plus _ y | .cap _ y => reNullable n y
+    | .rep k _ _ y => k == 0 || reNullable n y
+
+/-- Compile `x` to continue at `next`, appending to `p`: the entry (#46).
+Instructions go in as Go's do; a loop's `alt` is placed first and set once
+its body's entry is known. -/
+def reComp : Nat → ReAst → Nat → Array ReInst → Option (Nat × Array ReInst)
+  | 0, _, _, _ => none
+  | fuel + 1, x, next, p =>
+    let push (i : ReInst) (p : Array ReInst) : Nat × Array ReInst := (p.size, p.push i)
+    match x with
+    | .lit r => some (push (.rune [(r, r)] next) p)
+    | .cls rs => some (push (.rune rs next) p)
+    | .any => some (push (.any false next) p)
+    | .empty f => some (push (.empty f next) p)
+    | .cat xs => xs.reverse.foldlM (fun (e, p) y => reComp fuel y e p) (next, p)
+    | .alt [] => some (next, p)
+    | .alt [y] => reComp fuel y next p
+    | .alt (y :: ys) => do
+      let (e1, p) ← reComp fuel y next p
+      let (e2, p) ← reComp fuel (.alt ys) next p
+      some (push (.alt e1 e2) p)
+    | .quest gr y => do
+      let (e, p) ← reComp fuel y next p
+      some (push (if gr then .alt e next else .alt next e) p)
+    | .star gr y =>
+      -- As Go's compiler: a loop whose body can match empty is `(y+)?`, so
+      -- that the body runs once (and sets its captures) on an empty match.
+      if reNullable fuel y then reComp fuel (.quest gr (.plus gr y)) next p else do
+      let (l, p) := push .fail p
+      let (e, p) ← reComp fuel y l p
+      some (l, p.set! l (if gr then .alt e next else .alt next e))
+    | .plus gr y => do
+      let (l, p) := push .fail p
+      let (e, p) ← reComp fuel y l p
+      some (e, p.set! l (if gr then .alt e next else .alt next e))
+    | .cap k y => do
+      let (c1, p) := push (.cap (2 * k + 1) next) p
+      let (e, p) ← reComp fuel y c1 p
+      some (push (.cap (2 * k) e) p)
+    | .rep n m gr y => reComp fuel (reExpand n m gr y) next p
+
+/-- The largest program a pattern built at run time may compile to. -/
+def reMaxInsts : Nat := 4000
+
+/-- Compile a pattern (its bytes) as `regexp.Compile` does (Perl syntax):
+the program, its start and its capture count; error 1 when Go rejects it, 2
+when the model does not take its syntax (flags, Unicode classes, `\p`,
+`\x`, named groups, POSIX classes) or it is too large (#46). -/
+def reCompile (pat : List Nat) : Except ReErr (List ReInst × Nat × Nat) :=
+  let rec runes (fuel i : Nat) : List Nat :=
+    match fuel with
+    | 0 => []
+    | fuel + 1 => if i < pat.length then let (r, w) := decodeRune pat i; r :: runes fuel (i + w) else []
+  let rs := (runes (pat.length + 1) 0).toArray
+  match reAlt rs (4 * rs.size + 8) 0 0 with
+  | .error e => .error e
+  | .ok (ast, j, groups) =>
+    if j < rs.size then .error 1 -- an unmatched )
+    else
+      let p : Array ReInst := #[.fail, .match]
+      match reComp (4 * rs.size + 4096) ast 1 p with
+      | some (start, p) => if p.size > reMaxInsts then .error 2 else .ok (p.toList, start, 2 * (groups + 1))
+      | none => .error 2
+
 /-- All code points of a byte string. -/
 def decodeAll (bs : List Nat) : List Nat := go bs.toArray 0 bs.length
 where
@@ -1216,7 +1534,16 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
     match isZeroVal v with | some b => .ok (.bool b) | none => .panic .modelStuck
   | .nilKnown, [x] => .ok (.bool (match x with | .boxed .. | .opaqueNil | .ptr .. => true | _ => false))
   | .ite, [.bool c, a, b] => .ok (if c then a else b)
-  | .reIn ids, [x] => .ok (.bool (match x with | .boxed _ (.int _ id) => ids.contains id.toNat | _ => false))
+  | .reIn ids, [x] => .ok (.bool (match x with
+    | .boxed _ (.int _ id) => ids.contains id.toNat
+    -- A regexp built at run time holds its pattern (#46).
+    | .boxed _ (.str r o l) => match strBytes heap (.str r o l) >>= fun b => (reCompile b).toOption with
+      | some _ => true
+      | none => false
+    | _ => false))
+  | .reCompileOk, [p] => .ok (.int 64 (BitVec.ofNat 64 (match strBytes heap p with
+    | some b => match reCompile b with | .ok _ => 0 | .error e => e
+    | none => 2)))
   | .errKnown, [x] => .ok (.bool (match x with | .boxed .. | .err false => true | _ => false))
   | .errTagKnown tag, [x] => .ok (.bool (match x with | .boxed t _ => t == tag | .err false => true | _ => false))
   | .isNilOpaque, [x] => .ok (.bool (match x with | .opaqueNil => true | _ => false))
@@ -3169,6 +3496,14 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
       | none => .panic .modelStuck
   | .reFind prog start ncap kind, [s] => reFindRun heap prog start ncap kind s
   | .reFind prog start ncap kind, [s, .int _ n] => reFindAllRun heap prog start ncap kind s n.toInt
+  | .reFindIn _ kind, [.boxed _ (.str r o l), s] =>
+    match strBytes heap (.str r o l) >>= fun b => (reCompile b).toOption with
+    | some (prog, start, ncap) => reFindRun heap prog start ncap kind s
+    | none => .panic .modelStuck
+  | .reFindIn _ kind, [.boxed _ (.str r o l), s, .int _ n] =>
+    match strBytes heap (.str r o l) >>= fun b => (reCompile b).toOption with
+    | some (prog, start, ncap) => reFindAllRun heap prog start ncap kind s n.toInt
+    | none => .panic .modelStuck
   | .reFindIn progs kind, [.boxed _ (.int _ id), s] =>
     match progs.find? (fun (i, _) => i == id.toNat) with
     | some (_, prog, start, ncap) => reFindRun heap prog start ncap kind s

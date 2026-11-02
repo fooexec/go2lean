@@ -3696,6 +3696,9 @@ func (t *fnState) call(x *ssa.Call) error {
 			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: regexpValue(re.String())}})
 			return nil
 		}
+		if callee.String() == "regexp.MustCompile" && len(x.Call.Args) == 1 {
+			return t.regexpRuntime(x)
+		}
 		if done, err := t.randBounded(x, callee); done || err != nil {
 			return err
 		}
@@ -5312,6 +5315,46 @@ func regexpValue(pat string) ir.Val {
 	return ir.Boxed{Tag: regexpTag, V: ir.IntVal{Width: 64, Bits: fmt.Sprint(regexpID(pat))}}
 }
 
+// regexpRuntime lowers regexp.MustCompile(p) of a pattern built at run
+// time (#46): the regexp holds its pattern, boxed as a *regexp.Regexp, and
+// its methods compile it (reCompile in the dialect, reFindIn). A pattern
+// Go rejects panics, as MustCompile does; one the model's compiler does not
+// take is havoc, as before.
+func (t *fnState) regexpRuntime(x *ssa.Call) error {
+	p, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return err
+	}
+	dst := t.def(x)
+	code, zero, ok := t.fresh(), t.fresh(), t.fresh()
+	t.emit(ir.Instr{Dst: code, Op: ir.Simple("reCompileOk"), Args: []ir.Var{p}})
+	t.emit(ir.Instr{Dst: zero, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: "0"}}})
+	t.emit(ir.Instr{Dst: ok, Op: ir.Simple("eq"), Args: []ir.Var{code, zero}})
+	yes := len(t.out.Blocks)
+	notOk, rejected, no, join := yes+1, yes+2, yes+3, yes+4
+	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: ok, T: yes, F: notOk}
+	name := t.cur.Name
+	t.addBlocks(name+".re-compiled", name+".re-error", name+".re-rejected", name+".re-unknown", name+".re-join")
+	t.cur = &t.out.Blocks[yes]
+	t.emit(ir.Instr{Dst: dst, Op: ir.Box{Tag: regexpTag}, Args: []ir.Var{p}})
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	// Code 1: Go rejects the pattern, and MustCompile panics.
+	t.cur = &t.out.Blocks[notOk]
+	one, bad := t.fresh(), t.fresh()
+	t.emit(ir.Instr{Dst: one, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: "1"}}})
+	t.emit(ir.Instr{Dst: bad, Op: ir.Simple("eq"), Args: []ir.Var{code, one}})
+	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: bad, T: rejected, F: no}
+	t.out.Blocks[rejected].Term = ir.Term{Kind: ir.TermPanic, Panic: contract.PanicExplicit}
+	// Code 2: a pattern the model's compiler does not take.
+	t.cur = &t.out.Blocks[no]
+	if err := t.havocResult(dst, x, "call regexp.MustCompile", "unmodeled-call"); err != nil {
+		return err
+	}
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[join]
+	return nil
+}
+
 // maxRegexps bounds the programs a call on an unknown regexp embeds.
 const maxRegexps = 12
 
@@ -5353,8 +5396,10 @@ func (t *fnState) regexpDynamic(x *ssa.Call, callee *ssa.Function, kind int) (bo
 		return false, nil
 	}
 	pats := t.prog.packageRegexps(t.f.Pkg)
-	if len(pats) == 0 || len(pats) > maxRegexps {
-		return false, nil
+	if len(pats) > maxRegexps {
+		// Too many to embed: only a regexp built at run time (which holds
+		// its pattern, #46) is known.
+		pats = nil
 	}
 	op := ir.ReFindIn{Kind: kind}
 	var ids []string
