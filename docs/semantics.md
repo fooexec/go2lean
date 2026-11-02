@@ -192,7 +192,7 @@ memory).
 | `x.(I)` for an interface `I` | `assertIface` (the boxed types implementing `I`) | exact on boxed values |
 | method call on an interface value | `dispatch` over the implementing boxed types (at most 64; for `*T`, a method declared on `T` through a helper that loads the receiver, #61), then `callv` | exact; a nil interface panics; an unknown value takes the call's fallback (havoc) |
 | `==`, `!=` on interface values | `ifaceEqKnown`, then `ifaceEq` on the dynamic types' tags and values (a type alias has the tag of the type it stands for) | exact when both are values the model built, or nil; havoc when either is not (#60) |
-| `reflect.ValueOf(x)`, `.IsZero()` | `reflectOf reflectIsZero` | exact on boxed values; other `reflect` calls havoc |
+| `reflect.ValueOf(x)`, `.IsZero()`, `.Interface()` | `reflectOf reflectIsZero` | exact on boxed values (a `reflect.Value` is the boxed value; `Interface` gives it back); other `reflect` calls havoc, except `Kind`, `IsNil` and `Call(nil)` below |
 
 ### 4.6 Functions and calls
 
@@ -267,6 +267,7 @@ Calls not listed here are unmodelled (§4.6).
 | `encoding/hex.EncodeToString` | exact |
 | `reflect.ValueOf`, `(reflect.Value).IsZero` | §4.5 |
 | `(reflect.Value).Kind`, `IsNil` | exact for the types modelled code boxes and the ones the search and the JSON model put in an `any` (the frontend lists each tag's kind); `IsNil` panics for kinds that cannot be nil, as Go does; any other type: stuck. Checked by `PKG=testdata/miscdiff` |
+| `(reflect.Value).Call(nil)` on a func value | the func of the value's dynamic type among the boxed func types without parameters, called; its results in a fresh `[]reflect.Value`, each boxed with its type's tag (go-metrics' `GetOrRegister`, #128). When the model gets stuck in the func, its results are havoc but as many as the signature has; another value is havoc |
 | `unicode/utf16.Encode` | exact (surrogate pairs; invalid runes and surrogates become U+FFFD); checked by `PKG=testdata/miscdiff` |
 | `strings.Cut`, `strings.LastIndexByte` | exact |
 | `strings.NewReplacer` with literal pairs, `Replace` | exact (first matching old string, left to right) |

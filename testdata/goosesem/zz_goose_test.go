@@ -133,6 +133,8 @@ func TestGoose(t *testing.T) {
 		"testPolymorphismInterface": testPolymorphismInterface,
 		"testPoolGetFromNew": testPoolGetFromNew,
 		"testPrimitiveTypesEqual": testPrimitiveTypesEqual,
+		"testReflectCallIfaceResult": testReflectCallIfaceResult,
+		"testReflectCallNoArgs": testReflectCallNoArgs,
 		"testReturnFour": testReturnFour,
 		"testReturnThree": testReturnThree,
 		"testReturnTwo": testReturnTwo,

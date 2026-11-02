@@ -477,10 +477,12 @@ var StdlibOps = map[string]Op{
 	"strings.Join":                   Simple("strJoin"),
 	"strings.Repeat":                 Simple("strRepeat"),
 	"encoding/hex.EncodeToString":    Simple("hexEncode"),
-	// A reflect.Value is the interface value it reflects; IsZero is the
-	// only method modelled (param.IsOmitted of the OpenAI SDK uses it).
-	"reflect.ValueOf":        Simple("reflectOf"),
-	"(reflect.Value).IsZero": Simple("reflectIsZero"),
+	// A reflect.Value is the interface value it reflects: Interface gives
+	// it back; IsZero is modelled for param.IsOmitted of the OpenAI SDK
+	// (Kind, IsNil and Call(nil) are lowered in the frontend, #128).
+	"reflect.ValueOf":           Simple("reflectOf"),
+	"(reflect.Value).Interface": Simple("reflectOf"),
+	"(reflect.Value).IsZero":    Simple("reflectIsZero"),
 	// A random UUID: a fresh value, distinct from every other one a run
 	// draws (the real values collide with negligible probability).
 	"github.com/google/uuid.New": FreshArr{N: 16},
