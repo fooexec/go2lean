@@ -317,7 +317,7 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 					// except instances of its generic functions.
 					// The generic helpers of package slices (ContainsFunc,
 					// IndexFunc) are plain loops over func values: modelled.
-					if (mainPaths[path] && !instance) || (isStdlib(path) && !(instance && path == "slices") && !modelledStdlib[path] && !modelledTime[callee.String()]) {
+					if (mainPaths[path] && !instance) || (isStdlib(path) && !(instance && path == "slices") && !modelledStdlib[path] && !modelledFunc(callee.String())) {
 						continue
 					}
 					if _, std := stdlibOp(callee.String()); std {
@@ -330,7 +330,7 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 					seen[callee] = true
 					count++
 					out[path] = append(out[path], callee)
-					if forced || modelledStdlib[path] || modelledTime[callee.String()] || (f.Pkg != nil && f.Pkg.Pkg.Path() == path && !mainPaths[path] && smallHelper(callee)) {
+					if forced || modelledStdlib[path] || modelledFunc(callee.String()) || (f.Pkg != nil && f.Pkg.Pkg.Path() == path && !mainPaths[path] && smallHelper(callee)) {
 						// Within a modelled standard-library package, every
 						// helper is needed (unescape calls ishex calls ...);
 						// within a dependency, its small helpers (xxhash's
@@ -1158,6 +1158,27 @@ var modelledTime = map[string]bool{
 	"(time.Time).IsZero": true, "(*time.Time).sec": true, "(*time.Time).nsec": true,
 	"(*time.Time).addSec": true, "(*time.Time).stripMono": true,
 }
+
+// modelledNet are the functions of package net translated from source
+// (#122): net.Pipe, an in-memory connection over channels, a mutex and
+// time.AfterFunc deadlines, and the host:port helpers, which are string
+// code. The rest of net (sockets, the resolver) stays unmodelled.
+var modelledNet = map[string]bool{
+	"net.Pipe": true, "net.makePipeDeadline": true, "net.isClosedChan": true,
+	"(*net.pipeDeadline).set": true, "(*net.pipeDeadline).wait": true,
+	"(net.pipeAddr).Network": true, "(net.pipeAddr).String": true,
+	"(*net.pipe).LocalAddr": true, "(*net.pipe).RemoteAddr": true,
+	"(*net.pipe).Read": true, "(*net.pipe).read": true,
+	"(*net.pipe).Write": true, "(*net.pipe).write": true,
+	"(*net.pipe).SetDeadline": true, "(*net.pipe).SetReadDeadline": true,
+	"(*net.pipe).SetWriteDeadline": true, "(*net.pipe).Close": true,
+	"(*net.OpError).Unwrap": true,
+	"net.SplitHostPort":     true, "net.JoinHostPort": true, "(*net.AddrError).Error": true,
+}
+
+// modelledFunc says whether a function of a standard-library package that
+// is not modelled as a whole is translated from source on its own.
+func modelledFunc(name string) bool { return modelledTime[name] || modelledNet[name] }
 
 func isStdlib(path string) bool {
 	first, _, _ := strings.Cut(path, "/")
@@ -5970,6 +5991,46 @@ func sentinelErr(v ssa.Value) (ir.Val, bool) {
 	if !ok {
 		return nil, false
 	}
+	g := v.(*ssa.UnOp).X.(*ssa.Global)
+	// var B = get() where get only returns package variable A
+	// (os.ErrDeadlineExceeded = errDeadlineExceeded(), which returns
+	// poll.ErrDeadlineExceeded): B is A, with A's identity.
+	for range 4 {
+		c, ok := init.(*ssa.Call)
+		if !ok {
+			break
+		}
+		ld := getterLoad(c)
+		if ld == nil {
+			break
+		}
+		if init, ok = loadedInit(ld); !ok {
+			return nil, false
+		}
+		g = ld.X.(*ssa.Global)
+	}
+	identity := func() ir.Val {
+		h := fnv.New32a()
+		h.Write([]byte(g.String()))
+		return ir.IntVal{Width: 64, Bits: fmt.Sprint(h.Sum32())}
+	}
+	// var ErrX error = &T{} of a struct the initializer sets no field of
+	// (poll.ErrDeadlineExceeded): tagged with *T, its payload the identity.
+	if mi, ok := init.(*ssa.MakeInterface); ok && isError(mi.Type()) {
+		a, ok := mi.X.(*ssa.Alloc)
+		if !ok || !a.Heap {
+			return nil, false
+		}
+		if _, ok := a.Type().(*types.Pointer).Elem().Underlying().(*types.Struct); !ok {
+			return nil, false
+		}
+		for _, r := range *a.Referrers() {
+			if r != ssa.Instruction(mi) {
+				return nil, false
+			}
+		}
+		return ir.Boxed{Tag: typeTag(a.Type()), V: identity()}, true
+	}
 	c, ok := init.(*ssa.Call)
 	if !ok {
 		return nil, false
@@ -5984,9 +6045,32 @@ func sentinelErr(v ssa.Value) (ir.Val, bool) {
 	} else if format, ok := constFormat(c, "fmt.Errorf"); !ok || strings.Contains(format, "%w") {
 		return nil, false
 	}
-	h := fnv.New32a()
-	h.Write([]byte(v.(*ssa.UnOp).X.(*ssa.Global).String()))
-	return ir.Boxed{Tag: sentinelTag, V: ir.IntVal{Width: 64, Bits: fmt.Sprint(h.Sum32())}}, true
+	return ir.Boxed{Tag: sentinelTag, V: identity()}, true
+}
+
+// getterLoad is the load of a package variable that a call's static
+// callee, with no parameters, only returns (func errDeadlineExceeded()
+// error { return poll.ErrDeadlineExceeded }); nil otherwise.
+func getterLoad(c *ssa.Call) *ssa.UnOp {
+	f := c.Call.StaticCallee()
+	if f == nil || len(f.Params) != 0 || len(f.Blocks) != 1 || len(c.Call.Args) != 0 {
+		return nil
+	}
+	ins := f.Blocks[0].Instrs
+	if len(ins) != 2 {
+		return nil
+	}
+	ld, ok := ins[0].(*ssa.UnOp)
+	if !ok || ld.Op != token.MUL {
+		return nil
+	}
+	if _, ok := ld.X.(*ssa.Global); !ok {
+		return nil
+	}
+	if ret, ok := ins[1].(*ssa.Return); !ok || len(ret.Results) != 1 || ret.Results[0] != ld {
+		return nil
+	}
+	return ld
 }
 
 // sentinelObject is the object a pointer sentinel points to: v loads a

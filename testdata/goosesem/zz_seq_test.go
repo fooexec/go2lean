@@ -311,6 +311,24 @@ func SeqTestNestedLoops() bool { return testNestedLoops() }
 // go2lean:sequence testNestedStructUpdates
 func SeqTestNestedStructUpdates() bool { return testNestedStructUpdates() }
 
+// go2lean:sequence testNetJoinHostPort
+func SeqTestNetJoinHostPort() bool { return testNetJoinHostPort() }
+
+// go2lean:sequence testNetPipeAddr
+func SeqTestNetPipeAddr() bool { return testNetPipeAddr() }
+
+// go2lean:sequence testNetPipeClose
+func SeqTestNetPipeClose() bool { return testNetPipeClose() }
+
+// go2lean:sequence testNetPipeDeadline
+func SeqTestNetPipeDeadline() bool { return testNetPipeDeadline() }
+
+// go2lean:sequence testNetPipeWriteRead
+func SeqTestNetPipeWriteRead() bool { return testNetPipeWriteRead() }
+
+// go2lean:sequence testNetSplitHostPort
+func SeqTestNetSplitHostPort() bool { return testNetSplitHostPort() }
+
 // go2lean:sequence testNilDefault
 func SeqTestNilDefault() bool { return testNilDefault() }
 
