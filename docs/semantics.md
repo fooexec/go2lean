@@ -276,7 +276,9 @@ Calls not listed here are unmodelled (§4.6).
 | pointer sentinels: a package variable its initializer sets to `&T{...}` of constants, array fields included (sjson's `errNoChange`; grpc's `bdpPing`, `&ping{data: [8]byte{...}}`, #71) | boxed as an error it compares by identity like `errors.New` sentinels; its fields read as the constants |
 | `net/url` | translated from its Go source under `-deps` (the standard-library packages listed in `modelledStdlib`), like a dependency: `url.Parse`, `Hostname`, `Port`, `Query` and the rest are the library's own code. Not modelled inside it: IPv6 literals (`netip.ParseAddr`) and the `urlstrictcolons` GODEBUG setting (a host with two colons), both havoc. Checked by `DEPS=1 PKG=testdata/urldiff` (90 same, 0 different) |
 | `github.com/google/uuid.New` | a fresh value distinct from every other in the run (real UUIDs collide with negligible probability) |
-| `time.Now` and other clocks, `os.Getenv`, I/O, network | havoc |
+| `net.Pipe`, `net.SplitHostPort`, `net.JoinHostPort` | translated from source under `-deps` (`modelledNet`, #122): a pipe is two unbuffered channels with a mutex per direction, its deadlines `time.AfterFunc` (virtual time); `os.ErrDeadlineExceeded` is `poll.ErrDeadlineExceeded`'s sentinel. Checked by `go2lean_net.go`; a pipe's reads and writes have more schedules than the exhaustive engine runs, so it samples them. `(*time.Timer).Stop` in a deadline reset is havoc |
+| sentinels behind a getter or of an empty struct: `var B = get()` where `get` only returns package variable `A` (`os.ErrDeadlineExceeded`), `var E error = &T{}` (`poll.ErrDeadlineExceeded`) | `B` is `A`, the same identity; `E` is a sentinel tagged with `*T` |
+| `time.Now` and other clocks, `os.Getenv`, I/O, the rest of `net` (sockets, the resolver) | havoc |
 
 On native builds whose `bytealg.CompareString` calls the bodyless
 `internal/bytealg.abigen_runtime_cmpstring` assembly bridge, that bridge is
