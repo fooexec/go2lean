@@ -642,6 +642,7 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 	if err := buildDriver(core, leanDir); err != nil {
 		return nil, "", err
 	}
+	first := opts.Fuel
 	spec := map[string]any{
 		"prog": strings.TrimPrefix(report.LeanModule, "Go2Lean.Generated."), "prop": leanProp,
 		"gens": g, "extra": extra, "strs": strConsts, "table": table, "allowNil": opts.NilInputs,
@@ -656,13 +657,28 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 		if err != nil {
 			return nil, "", err
 		}
+		// Runs longer than the fuel, not hung (#45): a quarter of the
+		// trials out of fuel and none of them a loop. Search again with
+		// four times the fuel, up to maxFuelRaise times the first; the
+		// exhaustive engine, the counterexample and the certificate then
+		// use the raised fuel.
+		raised := ""
+		for !res.Found && fuelShort(res) && opts.Fuel*4 <= first*maxFuelRaise {
+			short := res
+			opts.Fuel *= 4
+			spec["fuel"] = opts.Fuel
+			if res, err = runSearch(leanDir, prop.ID+"_random", spec, "random"); err != nil {
+				return nil, "", err
+			}
+			raised = fmt.Sprintf(" [fuel raised to %d: %d of %d trials ran out at %d]", opts.Fuel, short.OutOfFuel, short.Trials, opts.Fuel/4)
+		}
 		if res.Found {
 			cx, err := writeCx(ws, prop, res, "random", opts)
-			return cx, fmt.Sprintf("random: found at trial %d", res.Trial), err
+			return cx, fmt.Sprintf("random: found at trial %d%s", res.Trial, raised), err
 		}
-		note := ""
+		note := raised
 		if res.BudgetHit {
-			note = fmt.Sprintf(" [stopped by the %ds budget]", opts.BudgetSeconds)
+			note += fmt.Sprintf(" [stopped by the %ds budget]", opts.BudgetSeconds)
 		}
 		summary = append(summary, fmt.Sprintf("random: none in %d trials (%d out of fuel, %d moot/stuck)%s%s%s%s%s", res.Trials, res.OutOfFuel, res.Moot, loopNote(res), exitNote(specExits, res.SpecExits), note, initNote(res.Init), stuckNote(res.StuckSites, report.Havoc, reportsByKey(ws, report.Frontend, res.StuckSites))))
 	}
@@ -1080,6 +1096,18 @@ func runSearch(leanDir, name string, spec map[string]any, engine string) (*searc
 		return nil, fmt.Errorf("parsing search output %q: %w", line, err)
 	}
 	return &res, nil
+}
+
+// maxFuelRaise bounds how far a hunt raises the fuel: 64 times the first
+// (64000 steps at the default 1000).
+const maxFuelRaise = 64
+
+// fuelShort says whether a random search ran out of fuel on a quarter of
+// at least 20 trials, and none of the out-of-fuel runs rerun loops
+// forever: the runs are longer than the fuel, so more fuel can finish
+// them.
+func fuelShort(res *searchResult) bool {
+	return res.Trials >= 20 && res.OutOfFuel*4 >= res.Trials && res.LoopsForever == 0
 }
 
 func writeCx(ws contract.Workspace, prop *contract.Property, res *searchResult, engine string, opts SearchOptions) (*contract.Counterexample, error) {

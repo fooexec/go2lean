@@ -146,6 +146,12 @@ go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm clau
                 [-rounds n] [-lean-tools] [-paranoid] [-deps] [-out proofs.json] <package>
 ```
 
+`-fuel` is where a hunt starts: when a quarter of the random trials run
+out of fuel and none of them loops forever (the runs are long, not hung),
+the hunt searches again with four times the fuel, up to 64 times the
+first, and the exhaustive engine, the counterexample and the certificate
+use the raised fuel; the hunt summary says so (#45).
+
 `prove` states, for each goal, the function's contract as a Lean theorem
 (for every input, every value the model does not know, and every run that
 ends: no panic, no under-approximation, a final state satisfying the
