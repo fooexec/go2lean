@@ -260,6 +260,12 @@ func SeqTestInitFuncCellShared() bool { return testInitFuncCellShared() }
 // go2lean:sequence testInitSentinelArray
 func SeqTestInitSentinelArray() bool { return testInitSentinelArray() }
 
+// go2lean:sequence testInitStructCellShared
+func SeqTestInitStructCellShared() bool { return testInitStructCellShared() }
+
+// go2lean:sequence testInitTickerDaemon
+func SeqTestInitTickerDaemon() bool { return testInitTickerDaemon() }
+
 // go2lean:sequence testInterfaceNilWithType
 func SeqTestInterfaceNilWithType() bool { return testInterfaceNilWithType() }
 

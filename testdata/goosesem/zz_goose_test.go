@@ -92,6 +92,8 @@ func TestGoose(t *testing.T) {
 		"testInitCellShared": testInitCellShared,
 		"testInitFuncCellShared": testInitFuncCellShared,
 		"testInitSentinelArray": testInitSentinelArray,
+		"testInitStructCellShared": testInitStructCellShared,
+		"testInitTickerDaemon": testInitTickerDaemon,
 		"testInterfaceNilWithType": testInterfaceNilWithType,
 		"testIterateMap": testIterateMap,
 		"testListMoveToFront": testListMoveToFront,

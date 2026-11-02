@@ -379,7 +379,9 @@ function that returns one), at an opaque
 non-nil value whose method calls are havoc (#55). In those packages, a
 variable that linked functions use and that the package initializer sets once to a value
 it builds (a new object, map, slice or channel, made in place or by a call
-of a function of the package: `var reg = &registry{m: map[string]int{}}`)
+of a function of the package: `var reg = &registry{m: map[string]int{}}`;
+or a struct literal, whose fields may then be locked and written:
+go-metrics' `var arbiter = meterArbiter{meters: make(...)}`, #129)
 is a cell too: the compile stage keeps the slice of the package
 initializer that builds it (the store, what it depends on, and what writes
 into the object built), and the search runs that slice once, before the
@@ -393,7 +395,11 @@ built (#120). Havoc
 the slice reads is the same in every trial; a slice that panics, gets
 stuck or runs out of fuel is skipped, its variables left at their zero
 values, and the hunt summary names it. Either makes an exhaustive
-certificate one with an assumption. A `func init()` that sets such a variable is part of the slice too
+certificate one with an assumption. Goroutines a slice starts (a ticker:
+go-metrics' `arbiter`) are not kept for the trials; so a goroutine left
+waiting at the end to receive on a channel the initializers built is not
+a leak, under an assumption that names it (#129). The slice runs under
+the machine's first schedule; its schedule draws are not havoc reads. A `func init()` that sets such a variable is part of the slice too
 (`reg = make(map[string]int); reg["x"] = 1`), with what it then does with
 the variable, run after the variable initializers in Go's order. A
 variable with any other initializer is not a cell: its stores are ignored

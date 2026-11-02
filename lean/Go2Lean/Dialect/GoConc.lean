@@ -505,6 +505,21 @@ def waitsOnResult (res : Val) (g : Gor) : Bool :=
   | some (.select ss _, args) => (selectCases ss args).any fun (_, ch, _) => reaches ch 4 res
   | _ => false
 
+/-- Goroutine `g` waits to receive on a channel the package initializers
+built, when one of them started goroutines the trials do not keep
+(`Prog.initFed`, #129): a ticker the initializer started would feed it. -/
+def waitsOnInit (fed : Nat) (g : Gor) : Bool :=
+  let initChan : Val → Bool := fun
+    | .ptr r _ => r < fed
+    | _ => false
+  fed > 0 && match pendingSync g with
+  | some (.recv _, ch :: _) => initChan ch
+  | some (.select ss _, args) => (selectCases ss args).any fun (send, ch, _) => !send && initChan ch
+  | _ => false
+
+def initFedNote : String :=
+  "a goroutine waits on a channel a package initializer built, which a goroutine that initializer started (a ticker) would feed; the trials do not keep those goroutines (#129)"
+
 /-- Where the goroutines that cannot move wait, for a deadlock or leak report. -/
 def describeBlocked (gs : Array Gor) : String :=
   let parts := (gs.toList.zipIdx).filterMap fun (g, i) =>
@@ -826,7 +841,9 @@ def scheduleS (p : Prog) (or : Oracle) (h : Havoc Val) (stepFuel : Nat) (stop : 
       match gs[0]? with
       | some g0 =>
         if g0.done then
-          if gs.all (fun g => g.done || g.daemon || waitsOnResult g0.result g) then .inr (.ok g0.result, s)
+          let quiet := fun g => g.done || g.daemon || waitsOnResult g0.result g
+          if gs.all quiet then .inr (.ok g0.result, s)
+          else if gs.all (fun g => quiet g || waitsOnInit p.initFed g) then .inr (.ok g0.result, s.assume initFedNote)
           else .inr (.panic .goroutineLeak, { s with panicAt := some (describeBlocked gs) })
         else .inr (.panic .deadlock, { s with panicAt := some (describeBlocked gs) })
       | none => .inr (.panic .modelStuck, s)

@@ -5903,12 +5903,22 @@ func withInitCallees(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]b
 }
 
 // builtValue says whether v is a value an initializer builds: a new
-// object, map, slice or channel, or the result of a call of a function of
-// package spkg (or of an instance of a generic one).
+// object, map, slice or channel, a struct literal (var arbiter =
+// meterArbiter{meters: make(map...)}, go-metrics, #129), or the result of
+// a call of a function of package spkg (or of an instance of a generic
+// one).
 func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 	switch x := v.(type) {
 	case *ssa.Alloc:
 		return x.Heap
+	case *ssa.UnOp:
+		// The value of a composite literal built in a local first.
+		a, ok := x.X.(*ssa.Alloc)
+		if !ok || x.Op != token.MUL || a.Comment != "complit" {
+			return false
+		}
+		_, isStruct := a.Type().(*types.Pointer).Elem().Underlying().(*types.Struct)
+		return isStruct
 	case *ssa.MakeMap, *ssa.MakeSlice, *ssa.MakeChan:
 		return true
 	case *ssa.Slice:
