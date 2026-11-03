@@ -1,6 +1,7 @@
 package semantics
 
 import (
+	"bytes"
 	"io"
 	"sync"
 )
@@ -89,4 +90,31 @@ func testDeferInvoke() bool {
 		l.add(0)
 	}()
 	return len(l.s) == 3 && l.s[0] == 0 && l.s[1] == 2 && l.s[2] == 1
+}
+
+// recover outside a panic (#46): a deferred function that runs at a normal
+// return, and a call outside any deferred function, both get nil.
+func deferRecover(l *deferLog) {
+	defer func() {
+		if recover() != nil {
+			l.add(1)
+		}
+	}()
+	l.add(0)
+}
+
+func testDeferRecoverNil() bool {
+	l := &deferLog{}
+	deferRecover(l)
+	return len(l.s) == 1 && l.s[0] == 0 && recover() == nil
+}
+
+// bytes.Buffer grows through bytes.growSlice, whose deferred function
+// panics with ErrTooLarge when recover returns non-nil.
+func testBufferGrowRecover() bool {
+	var b bytes.Buffer
+	for i := 0; i < 5; i++ {
+		b.WriteString("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	}
+	return b.Len() == 320 && b.String()[319] == 'f'
 }

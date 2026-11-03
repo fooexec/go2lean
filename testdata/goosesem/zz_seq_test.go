@@ -80,6 +80,9 @@ func SeqTestBreakFromLoopNoContinueDouble() bool { return testBreakFromLoopNoCon
 // go2lean:sequence testBreakFromLoopWithContinue
 func SeqTestBreakFromLoopWithContinue() bool { return testBreakFromLoopWithContinue() }
 
+// go2lean:sequence testBufferGrowRecover
+func SeqTestBufferGrowRecover() bool { return testBufferGrowRecover() }
+
 // go2lean:sequence testBufioReaderReadString
 func SeqTestBufioReaderReadString() bool { return testBufioReaderReadString() }
 
@@ -187,6 +190,9 @@ func SeqTestDeferLoopOrder() bool { return testDeferLoopOrder() }
 
 // go2lean:sequence testDeferLoopUnlock
 func SeqTestDeferLoopUnlock() bool { return testDeferLoopUnlock() }
+
+// go2lean:sequence testDeferRecoverNil
+func SeqTestDeferRecoverNil() bool { return testDeferRecoverNil() }
 
 // go2lean:sequence testDefinedStrTypesEqual
 func SeqTestDefinedStrTypesEqual() bool { return testDefinedStrTypesEqual() }
@@ -499,6 +505,9 @@ func SeqTestSliceOps() bool { return testSliceOps() }
 
 // go2lean:sequence testSliceRef
 func SeqTestSliceRef() bool { return testSliceRef() }
+
+// go2lean:sequence testSortSearch
+func SeqTestSortSearch() bool { return testSortSearch() }
 
 // go2lean:sequence testStandardForLoop
 func SeqTestStandardForLoop() bool { return testStandardForLoop() }

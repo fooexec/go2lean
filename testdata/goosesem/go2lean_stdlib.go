@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/list"
+	"sort"
 	"strings"
 )
 
@@ -48,4 +49,13 @@ func testBufioReaderReadString() bool {
 	b, err2 := r.ReadString('\n')
 	_, err3 := r.ReadString('\n')
 	return a == "one\n" && b == "two\n" && err1 == nil && err2 == nil && err3 != nil
+}
+
+// sort's binary searches, translated from source (#46).
+func testSortSearch() bool {
+	xs := []int{1, 3, 5, 7, 9}
+	i := sort.Search(len(xs), func(i int) bool { return xs[i] >= 6 })
+	words := []string{"apple", "kiwi", "pear"}
+	return i == 3 && sort.SearchInts(xs, 9) == 4 && sort.SearchInts(xs, 10) == 5 &&
+		sort.SearchStrings(words, "kiwi") == 1 && sort.SearchStrings(words, "a") == 0
 }
