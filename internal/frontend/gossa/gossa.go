@@ -5117,12 +5117,17 @@ func (s *progState) derefMethod(ty types.Type, m *types.Func) (int, bool) {
 
 // regexpCall lowers the methods of a *regexp.Regexp compiled from a
 // constant pattern (MatchString, FindStringSubmatch, FindString,
-// FindStringIndex), and regexp.MatchString of a constant pattern, to the
+// FindStringIndex, the FindAll forms, and Match, FindIndex and
+// FindAllIndex on string(b)), and regexp.MatchString of a constant pattern, to the
 // dialect's matcher, which runs the program regexp/syntax compiles the
 // pattern to (Go's own instructions and leftmost-first semantics).
 func (t *fnState) regexpCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 	kinds := map[string]int{"MatchString": 0, "FindStringSubmatch": 1, "FindString": 2, "FindStringIndex": 3,
-		"FindAllString": 4, "FindAllStringSubmatch": 5, "FindAllStringIndex": 6}
+		"FindAllString": 4, "FindAllStringSubmatch": 5, "FindAllStringIndex": 6,
+		// The []byte methods whose results are indices or a bool: the
+		// string method's on string(b), as Go's give (#46).
+		"Match": 0, "FindIndex": 3, "FindAllIndex": 6}
+	bytesSubject := map[string]bool{"Match": true, "FindIndex": true, "FindAllIndex": true}[callee.Name()]
 	var pat string
 	var subject ssa.Value
 	pkgFunc := false
@@ -5161,6 +5166,11 @@ func (t *fnState) regexpCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 	sv, err := t.val(subject)
 	if err != nil {
 		return true, err
+	}
+	if bytesSubject && !pkgFunc {
+		str := t.fresh()
+		t.emit(ir.Instr{Dst: str, Op: ir.Simple("bytesToStr"), Args: []ir.Var{sv}})
+		sv = str
 	}
 	kind := kinds[callee.Name()]
 	if pkgFunc {
@@ -5491,6 +5501,12 @@ func (t *fnState) regexpDynamic(x *ssa.Call, callee *ssa.Function, kind int) (bo
 	sv, err := t.val(x.Call.Args[1])
 	if err != nil {
 		return true, err
+	}
+	if _, bytes := x.Call.Args[1].Type().Underlying().(*types.Slice); bytes {
+		// Match, FindIndex, FindAllIndex: on string(b).
+		str := t.fresh()
+		t.emit(ir.Instr{Dst: str, Op: ir.Simple("bytesToStr"), Args: []ir.Var{sv}})
+		sv = str
 	}
 	dst := t.def(x)
 	known := t.fresh()
@@ -6576,14 +6592,42 @@ func regexpPattern(v ssa.Value) (string, bool) {
 	if f := c.Call.StaticCallee(); f == nil || f.String() != "regexp.MustCompile" {
 		return "", false
 	}
-	if pat, ok := constSprintf(c.Call.Args[0]); ok {
-		return pat, true
+	return constString(c.Call.Args[0], 4)
+}
+
+// constString evaluates a string built from constants: a constant, a
+// constant fmt.Sprintf, a concatenation of such strings, or a load of a
+// package variable whose initializer stores one (VALID_START_CHAR = "[" +
+// PLUS_CHARS + DIGITS + "]", then regexp.MustCompile(VALID_START_CHAR),
+// phonenumbers, #46). depth bounds the variables followed.
+func constString(v ssa.Value, depth int) (string, bool) {
+	switch x := v.(type) {
+	case *ssa.Const:
+		if x.Value == nil || x.Value.Kind() != constant.String {
+			return "", false
+		}
+		return constant.StringVal(x.Value), true
+	case *ssa.BinOp:
+		if x.Op != token.ADD || !isString(x.Type()) {
+			return "", false
+		}
+		a, ok := constString(x.X, depth)
+		if !ok {
+			return "", false
+		}
+		b, ok := constString(x.Y, depth)
+		return a + b, ok
+	case *ssa.Call:
+		return constSprintf(x)
+	case *ssa.UnOp:
+		if depth == 0 {
+			return "", false
+		}
+		if init, ok := loadedInit(x); ok {
+			return constString(init, depth-1)
+		}
 	}
-	k, ok := c.Call.Args[0].(*ssa.Const)
-	if !ok || k.Value == nil || k.Value.Kind() != constant.String {
-		return "", false
-	}
-	return constant.StringVal(k.Value), true
+	return "", false
 }
 
 // constSprintf evaluates fmt.Sprintf of a constant format and constant

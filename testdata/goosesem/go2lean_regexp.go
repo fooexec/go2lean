@@ -48,3 +48,26 @@ func testRegexpRuntimeEscapes() bool {
 	any := regexp.MustCompile("a" + "." + "c")
 	return re.MatchString("v1.25 rest") && !re.MatchString("v1x25") && any.MatchString("abc") && !any.MatchString("a\nc")
 }
+
+// A package-level regexp whose pattern is another package variable built
+// from constants (phonenumbers' VALID_START_CHAR_PATTERN, #46).
+const semPlus = "+＋"
+
+var (
+	semStartChar    = "[" + semPlus + "0-9]"
+	semStartPattern = regexp.MustCompile(semStartChar)
+)
+
+func testRegexpPackageVarPattern() bool {
+	loc := semStartPattern.FindStringIndex("tel: +41 44")
+	return loc != nil && loc[0] == 5 && loc[1] == 6 && semStartPattern.FindStringIndex("tel") == nil
+}
+
+// The []byte methods whose results are indices or a bool (#46).
+func testRegexpBytesIndex() bool {
+	b := []byte("tel: +41 44")
+	loc := semStartPattern.FindIndex(b)
+	all := semStartPattern.FindAllIndex(b, -1)
+	return loc != nil && loc[0] == 5 && loc[1] == 6 && semStartPattern.Match(b) &&
+		!semStartPattern.Match([]byte("tel")) && len(all) == 5 && all[4][0] == 10
+}

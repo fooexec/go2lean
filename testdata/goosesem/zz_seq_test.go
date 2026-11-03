@@ -431,6 +431,12 @@ func SeqTestReflectCallIfaceResult() bool { return testReflectCallIfaceResult() 
 // go2lean:sequence testReflectCallNoArgs
 func SeqTestReflectCallNoArgs() bool { return testReflectCallNoArgs() }
 
+// go2lean:sequence testRegexpBytesIndex
+func SeqTestRegexpBytesIndex() bool { return testRegexpBytesIndex() }
+
+// go2lean:sequence testRegexpPackageVarPattern
+func SeqTestRegexpPackageVarPattern() bool { return testRegexpPackageVarPattern() }
+
 // go2lean:sequence testRegexpRuntimeAltLazy
 func SeqTestRegexpRuntimeAltLazy() bool { return testRegexpRuntimeAltLazy() }
 
