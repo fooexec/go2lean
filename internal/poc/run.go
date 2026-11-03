@@ -99,8 +99,11 @@ type prepared struct {
 // overlay holds files the packages are built with but do not contain
 // (generated specs), by absolute path.
 func VerifyAll(ws contract.Workspace, root string, cxIDs []string, overlay map[string][]byte) ([]*contract.Verdict, error) {
-	byPkg := map[string][]*prepared{}
-	var order []string
+	// Batches: by package, and by subtest pattern (#48), which the batch's
+	// -test.run carries.
+	type batchKey struct{ pkg, subtest string }
+	byPkg := map[batchKey][]*prepared{}
+	var order []batchKey
 	all := map[string]*prepared{}
 	snapshots := map[string]*builtin.Snapshot{}
 	effective := maps.Clone(overlay)
@@ -134,15 +137,16 @@ func VerifyAll(ws contract.Workspace, root string, cxIDs []string, overlay map[s
 		}
 		all[id] = p
 		if p.v == nil {
-			if _, seen := byPkg[p.target.Package]; !seen {
-				order = append(order, p.target.Package)
+			k := batchKey{p.target.Package, p.prop.Subtest}
+			if _, seen := byPkg[k]; !seen {
+				order = append(order, k)
 			}
-			byPkg[p.target.Package] = append(byPkg[p.target.Package], p)
+			byPkg[k] = append(byPkg[k], p)
 		}
 	}
 	overlay = effective
-	for _, pkg := range order {
-		batch := byPkg[pkg]
+	for _, k := range order {
+		batch, pkg := byPkg[k], k.pkg
 		pkgDir, pkgName, err := goList(root, pkg)
 		if err != nil {
 			return nil, err
@@ -501,6 +505,10 @@ func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[
 	run := "^TestGo2LeanPoC_"
 	if len(batch) == 1 {
 		run += batch[0].cx.ID + "$"
+	}
+	if sub := batch[0].prop.Subtest; sub != "" {
+		// The subtests the model ran (#48): a batch shares one pattern.
+		run += "/" + sub
 	}
 	tmp, err := os.MkdirTemp("", "go2lean-poc-")
 	if err != nil {
@@ -1140,7 +1148,9 @@ func parseResults(stdout string) map[string]result {
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if name, ok := strings.CutPrefix(line, "=== RUN   TestGo2LeanPoC_"); ok {
-			current, probes = name, nil
+			if !strings.Contains(name, "/") { // a subtest of a test target's: still its PoC
+				current, probes = name, nil
+			}
 			continue
 		}
 		// "GO2LEAN_PROBE <label> <value as a Go quoted string>", printed by

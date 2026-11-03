@@ -146,9 +146,12 @@ go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm clau
                 [-rounds n] [-lean-tools] [-paranoid] [-deps] [-out proofs.json] <package>
 ```
 
-`-run` selects targets as `go test -run` selects tests: `-run 'TestX/sub'`
-selects `TestX` (with every subtest it runs), and a suite's method is a
-target of its own (`-run 'TestY'`) (#48).
+`-run` selects targets as `go test -run` selects tests, and a suite's
+method is a target of its own (`-run 'TestY'`). `-run 'TestX/sub'` selects
+`TestX` and, within it, the subtests whose name `sub` matches (spaces in
+the name read as `_`, as in Go), in the search and in replay; one subtest
+level only. Only the `t.Run` calls the test makes on its own `t` are
+filtered: a helper's or a nested subtest's run as before (#48).
 
 `run` searches the properties whose target synchronises (goroutines,
 channels, locks) first, then, in each group, specs, test functions and
