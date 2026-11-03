@@ -1,0 +1,15 @@
+# Arm A at 91afeb2 (run46.sh), spec counterexamples scored at the fix.
+# * with #145 (e85d1bf); ** with EXTRA=-specs-only (the default run timed out at 1800 s)
+c008 A:spec-fails-on-fix
+c022 A:not-confirmed(spurious) *
+c024 A:not-confirmed(spurious) **
+c039 A:-
+c069 A:FOUND
+c079 A:FOUND
+c088 A:-
+c093 A:spec-fails-on-fix
+c097 A:not-confirmed(spurious)
+c109 A:spec-fails-on-fix *
+c116 A:spec-fails-on-fix
+c118 A:FOUND **
+c130 A:not-confirmed(spurious)

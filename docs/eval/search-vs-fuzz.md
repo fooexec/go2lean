@@ -216,3 +216,40 @@ fuzzer finds as much or more, and go2lean's own contribution is the rare
 defect that needs a combination of literals. The next question is
 concurrency, where a fuzzer does not vary schedules
 (docs/eval/conc-recent.md).
+
+## The spurious cases again, after the #46 fixes (2026-11-03)
+
+The 13 cases in #46's gap ledger (A spurious, or A blocked by fuel), arm A
+only, at main `91afeb2`. The fixes merged since #46 was filed are:
+`reflect.DeepEqual` (#136), regexps built at run time (#137),
+`strings.Builder.Write`, `fmt.Sprintf` widths (#135), init cells for
+package variables (#94, #121) and the fuel raise (#132). `run46.sh`
+rebuilds each case from `cases.jsonl`, `truth.jsonl` and `specs/`, runs A
+and scores its spec counterexample at the fix, as `score.sh` does. Scores:
+`search-vs-fuzz/rerun46-scores.txt`.
+
+| case | #46 gap | rerun A | now |
+|---|---|---|---|
+| c079 | `reflect.DeepEqual` | spurious | **FOUND** |
+| c093 | `reflect.DeepEqual` | spurious | spec fails on the fix (as B) |
+| c130 | `regexp` built at run time | spurious | spurious: a package-level `regexp.MustCompile` variable is havoc |
+| c039 | floats | – | – (every trial stuck at `math.Mod`) |
+| c069 | floats | spurious | **FOUND** |
+| c088 | floats | – | – (every trial stuck at `math.Mod`) |
+| c097 | `strings.Builder.Write` | spurious | spurious: a call through a function value the model does not know |
+| c022 | opaque map lookup | spurious | spurious: `sort.Search` fixed (#145); a map literal keyed by an array is still opaque |
+| c109 | `growSlice` | spurious | spec fails on the fix (as B), with `recover()` nil (#145) |
+| c008, c116 | fuel | – | spec fails on the fix (as B) |
+| c118 | `fmt.Sprintf` widths | – | **FOUND** (with `-specs-only`) |
+| c024 | `[]byte` globals | spurious | spurious: `html.UnescapeString` unmodelled, `escapeHTML` stuck |
+
+- **3 new finds** (c069, c079, c118). Five more counterexamples are no
+  longer spurious: they fail on the fix as well, as the fuzzer's do (the
+  spec, not the model, is wrong there).
+- **Spurious: 8 → 4** of the rerun's 9 (c063, not in the ledger, was not
+  rerun). Each of the four rests on a different gap. The floats (c039,
+  c088) give no counterexample at all.
+- **Deviation.** The rerun above used `-specs-only`; `run46.sh` searched
+  the templates too, and c118 and c024 hit the 1800 s limit before the
+  replay. Both were run again with `-specs-only` (c118 is found in 32 s).
+  In the other 11 the spec is searched first (#133) with the same budget.
