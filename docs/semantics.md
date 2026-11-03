@@ -459,7 +459,8 @@ string orderings (`<` on strings);
 `-tests` the test functions themselves, `TestXxx(t *testing.T)`, and a
 suite's methods, `func (s) TestY(t *testing.T)` as grpc-go's
 `grpctest.RunSubTests` runs them, are targets, `t` the harness's own;
-`t.Run(name, f)` calls `f(t)` and returns true, and the subtest's closure
+`t.Run(name, f)` calls `f(t)` and returns true (under `-run TestX/sub`, on
+the test's own `t`, only when `sub` matches the name), and the subtest's closure
 is translated with its test's `t`, #48; calls on `t` itself are ignored);
 generic functions as targets (their instances are not targets either:
 a harness cannot name them).

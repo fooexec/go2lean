@@ -156,7 +156,7 @@ func cmdRun(args []string) error {
 	specsOnly := fs.Bool("specs-only", false, "search the packages' specs only, not the no_panic and no_hang templates")
 	runBudget := fs.Int("run-budget", 0, "seconds the hunt stage may take in all: properties start in order (synchronising targets, specs, tests first) until it is spent, and the rest are listed (0: unlimited)")
 	changed := fs.String("changed", "", "a git revision: search first the properties whose target reaches a function `git diff REV` touches (the working tree against REV, untracked files included)")
-	runRe := fs.String("run", "", "search only the properties of target functions matching this regexp (as go test -run; methods as T.M)")
+	runRe := fs.String("run", "", "search only the properties of target functions matching this regexp (as go test -run; methods as T.M; TestX/sub also selects TestX's subtests matching sub, one level)")
 	compareOrder := fs.String("compare-order", "", "explicitly select a pure, deterministic, total func(string,string) int ordering comparator (experimental; one package)")
 	refineRounds := fs.Int("refine", 2, "with -deps, rounds of the refinement loop: translate the dependency functions whose unmodelled calls made a counterexample spurious or inconclusive, then search and replay again (0: off)")
 	fs.Parse(args)
@@ -173,13 +173,19 @@ func cmdRun(args []string) error {
 	env.Refine = *refineRounds
 	if *runRe != "" {
 		// As go test -run: the part before the first slash selects the
-		// test; a subtest within it is not selected on its own (#48).
-		top, _, _ := strings.Cut(*runRe, "/")
+		// test, the part after it the subtests (one level, #48).
+		top, sub, _ := strings.Cut(*runRe, "/")
 		re, err := regexp.Compile(top)
 		if err != nil {
 			return fmt.Errorf("run: -run: %v", err)
 		}
-		env.Run = re
+		if strings.Contains(sub, "/") {
+			return fmt.Errorf("run: -run %q: one subtest level can be selected (TestX/sub), not nested ones", *runRe)
+		}
+		if _, err := regexp.Compile(sub); err != nil {
+			return fmt.Errorf("run: -run: subtest pattern: %v", err)
+		}
+		env.Run, env.Subtest = re, sub
 	}
 	if *compareOrder != "" {
 		env, err = pipeline.ConfigureCompareOrder(w, env, *compareOrder, fs.Args()...)

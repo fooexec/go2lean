@@ -91,6 +91,11 @@ type Options struct {
 	// the walk's depth and count limits: the refinement loop's callees
 	// whose havoc made a counterexample spurious (#85).
 	Translate []string
+	// Subtest selects one subtest of each test target, as the part of
+	// go test -run after the first slash does: t.Run calls the test makes
+	// on its own t run their function only when the pattern matches the
+	// subtest's name (#48).
+	Subtest string
 }
 
 // Limits of the dependency walk: how deep it follows calls from the
@@ -220,7 +225,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	plan.dropUntranslatable(units, xrefs, zeros, sprog, boxed)
 	var progs []*ir.Prog
 	for _, u := range units {
-		p, err := translatePackage(u.path, u.fns, xrefs, zeros, sprog, boxed, plan)
+		p, err := translatePackage(u.path, u.fns, xrefs, zeros, sprog, boxed, plan, opts.Subtest)
 		if err != nil {
 			return nil, "", err
 		}
@@ -1225,8 +1230,15 @@ func candidates(spkg *ssa.Package, tests bool) []*ssa.Function {
 	return fns
 }
 
-func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan) (*ir.Prog, error) {
+func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan, subtest string) (*ir.Prog, error) {
 	st := newProgState(pkgPath, fns, xrefs, zeros, sprog, boxed, plan)
+	if subtest != "" {
+		prog, ok := compileRegexp(subtest)
+		if !ok {
+			return nil, fmt.Errorf("-run: subtest pattern %q does not compile", subtest)
+		}
+		st.subtest = &prog
+	}
 	p := st.prog
 
 	var initFn *ssa.Function
@@ -1406,6 +1418,8 @@ func isTestFunc(name string) bool {
 
 // progState is per-program translation state.
 type progState struct {
+	// subtest is the compiled subtest pattern of -run (Options.Subtest).
+	subtest *ir.ReFind
 	prog    *ir.Prog
 	ids     map[*ssa.Function]int
 	xrefs   map[string]contract.XCall // functions of sibling packages, by name
@@ -4222,7 +4236,10 @@ func (t *fnState) errorsAsWalk(x *ssa.Call, p ir.Var, elem types.Type, dst ir.Va
 // testingRun lowers t.Run(name, f): f(t), then true (#48). Go runs the
 // subtest in a goroutine and waits for it (no t.Parallel); the model does
 // not track a test's failure (t.Error is ignored), so Run reports success.
-// A subtest the model gets stuck in has its effects dropped.
+// A subtest the model gets stuck in has its effects dropped. With a subtest
+// pattern (-run TestX/sub), a t.Run on the test's own t whose name does not
+// match does not run f; t.Run on another t (a helper's, a nested
+// subtest's) runs it, as a one-level pattern selects every nested one.
 func (t *fnState) testingRun(x *ssa.Call) error {
 	tv, err := t.val(x.Call.Args[0])
 	if err != nil {
@@ -4234,6 +4251,26 @@ func (t *fnState) testingRun(x *ssa.Call) error {
 	}
 	after := len(t.out.Blocks)
 	t.addBlocks(t.cur.Name + ".subtest-done")
+	if sel := t.prog.subtest; sel != nil && isTestEntry(t.f) && x.Call.Args[0] == t.f.Params[len(t.f.Params)-1] {
+		// A subtest selected by -run (#48): Go matches the pattern
+		// (unanchored) against the name with its spaces made underscores.
+		name, err := t.val(x.Call.Args[1])
+		if err != nil {
+			return err
+		}
+		under, sp, us, m := t.fresh(), t.fresh(), t.fresh(), t.fresh()
+		// A string literal is an allocating instruction (see val).
+		t.emit(ir.Instr{Dst: sp, Op: ir.StrConst{Bytes: []byte(" ")}})
+		t.emit(ir.Instr{Dst: us, Op: ir.StrConst{Bytes: []byte("_")}})
+		t.emit(ir.Instr{Dst: under, Op: ir.Simple("strReplaceAll"), Args: []ir.Var{name, sp, us}})
+		match := *sel
+		match.Kind = 0
+		t.emit(ir.Instr{Dst: m, Op: match, Args: []ir.Var{under}})
+		run := len(t.out.Blocks)
+		t.addBlocks(t.cur.Name + ".subtest-selected")
+		t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: m, T: run, F: after}
+		t.cur = &t.out.Blocks[run]
+	}
 	t.cur.Term = ir.Term{Kind: ir.TermCallV, FV: f, CArgs: []ir.Var{tv}, Dst: t.fresh(), Next: after, Fallback: after}
 	t.cur = &t.out.Blocks[after]
 	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.BoolVal(true)}})

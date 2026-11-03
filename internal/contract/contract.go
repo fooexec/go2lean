@@ -81,6 +81,9 @@ type Property struct {
 	// MaxLen overrides the search's bound on generated strings and slices
 	// (a spec's `go2lean:maxlen N`, for properties about long inputs).
 	MaxLen int `json:"max_len,omitempty"`
+	// Subtest is the subtest pattern a test target was searched with (go
+	// test -run TestX/Subtest, #48): replay selects the same subtests.
+	Subtest string `json:"subtest,omitempty"`
 	// ExpectedPanic restricts a no_panic property to one panic category
 	// (see PanicKind). Empty means any panic counts.
 	ExpectedPanic PanicKind   `json:"expected_panic,omitempty"`

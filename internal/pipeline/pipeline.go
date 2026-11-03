@@ -67,6 +67,10 @@ type Env struct {
 	// properties whose target reaches a function `git diff Changed` touches
 	// (#45).
 	Changed string
+	// Subtest is the part of -run after the first slash (one level): test
+	// targets run only the subtests it matches, in the model and in
+	// replay (#48).
+	Subtest string
 	// RunBudget bounds the hunt stage of a run (#45): properties start in
 	// order (huntOrder) until it is spent, and the ones not started are
 	// listed. 0: no bound.
@@ -121,7 +125,7 @@ func CompileLinked(w contract.Workspace, env Env, pattern string, out io.Writer)
 	if err := validateCompareOrderOverlay(env); err != nil {
 		return nil, err
 	}
-	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: true, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate}, pattern)
+	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: true, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest}, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +185,7 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 	if err := validateCompareOrderOverlay(env); err != nil {
 		return nil, err
 	}
-	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: env.Deps, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate}, patterns...)
+	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: env.Deps, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest}, patterns...)
 	if err != nil {
 		return nil, err
 	}
@@ -753,6 +757,17 @@ func runReport(w contract.Workspace, env Env, report *contract.ModelReport, opts
 	if env.Run != nil {
 		props = matchingTargets(w, props, env.Run)
 	}
+	if env.Subtest != "" {
+		// The model runs only the selected subtests (#48); replay must too.
+		for _, p := range props {
+			if t, err := w.Target(p.Target); err == nil && isTestName(t.Func) {
+				p.Subtest = env.Subtest
+				if err := w.WriteProperty(p); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	fmt.Fprintln(out, "== Spec & search stage: hunt")
 	cxs, err := HuntAll(w, env, props, opts, out)
 	if err != nil {
@@ -789,6 +804,16 @@ func specsOnly(props []*contract.Property) []*contract.Property {
 }
 
 // matchingTargets keeps the properties whose target's function matches re.
+// isTestName says whether a target function is a test: TestX, or a
+// suite's method T.TestX.
+func isTestName(fn string) bool {
+	_, m, ok := strings.Cut(fn, ".")
+	if !ok {
+		m = fn
+	}
+	return strings.HasPrefix(m, "Test")
+}
+
 func matchingTargets(w contract.Workspace, props []*contract.Property, re *regexp.Regexp) []*contract.Property {
 	var out []*contract.Property
 	for _, p := range props {
