@@ -58,6 +58,11 @@ var compileErr = regexp.MustCompile(`zz_go2lean_poc_\d+_test\.go:\d+(:\d+)?: .*`
 // test files) did not build with the harness.
 var buildErr = regexp.MustCompile(`(?m)^\S+\.go:\d+(:\d+)?: .*$`)
 
+// buildHeader matches the "# pkg" line go prints above the errors of a
+// package that did not build, the linker's included (#140); the line after
+// it is the first error.
+var buildHeader = regexp.MustCompile(`(?m)^# \S+.*\n(.*)`)
+
 func Verify(ws contract.Workspace, root, cxID string) (*contract.Verdict, error) {
 	vs, err := VerifyAll(ws, root, []string{cxID}, nil)
 	if err != nil {
@@ -346,9 +351,17 @@ func raceOne(root, pkgDir, pkgName, pkg string, p *prepared, overlay map[string]
 	if err != nil {
 		return err
 	}
-	res := r[p.cx.ID]
+	res, ran := r[p.cx.ID]
 	rep := raceReport(eo)
 	switch {
+	case rep == "" && !ran:
+		// No result line: the replay did not run to the end (#140).
+		v := verdictOf(&q, r, c, e, o, eo, root)
+		why := reasonOf(v)
+		if v.Diagnosis != nil && len(v.Diagnosis.Notes) > 0 {
+			why += ": " + v.Diagnosis.Notes[0]
+		}
+		return note("did not run (" + why + ")")
 	case rep == "" && res.ReplayDiverged != "":
 		return note(fmt.Sprintf("the real run left the schedule after %s steps: %s", res.Replay, res.ReplayDiverged))
 	case rep == "":
@@ -594,6 +607,10 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 			reason, note = "harness_compile_error", m
 		} else if m := buildErr.FindString(stderr); m != "" && stdout == "" {
 			reason, note = "package_build_error", "the package's tests did not build: "+m
+		} else if m := buildHeader.FindStringSubmatch(stderr); m != nil && stdout == "" {
+			// No compile error but no run either: the link failed (a full
+			// disk, a missing symbol). The test binary never ran (#140).
+			reason, note = "package_build_error", "the package's tests did not build: "+strings.TrimSpace(m[1])
 		} else if exit != 0 {
 			reason, note = "target_exited", "the test binary ended without reporting (log.Fatal or os.Exit in the target?)"
 		}
