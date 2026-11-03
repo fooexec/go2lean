@@ -398,3 +398,26 @@ harnesses and budget, by `run15all.sh`.
 
 So hang detection finds nothing in this evaluation. Its findings are
 `examples/hang`'s loops and livelock, confirmed in Go.
+
+## Rerun at main after M3 (2026-11-03)
+
+Arm A on the same harnesses, budget and scoring, at two points:
+
+- **rerun 3**: main at `e875114` plus #121, after the init cells, the clock and virtual time (#107 to #121). Reported in review 5 on #53.
+- **rerun 4**: main at `15e8aaf`, after loopback networking (#127), raising the fuel (#132), the run order and hunt budget (#133), subtests (#134), `Sprintf` widths (#135), `reflect.DeepEqual` (#136), run-time regexps (#137), the memory limit (#138) and change-first order (#139). `run21.sh` ran it.
+
+Per case: the "rerun 3" and "rerun 4" columns of [results-rerun.tsv](conc-recent/results-rerun.tsv). As in review 5, a schedule-forced find that the fix's new synchronisation stops (k015, k024, k039, k047) counts as found ("adjudicated"); "strict" counts only `FOUND`.
+
+| | rerun 2 | rerun 3 | rerun 4 |
+|---|---|---|---|
+| found, strict | 6 | 7 | 6 |
+| found, adjudicated | 11 | 11 | 10 |
+| spurious counterexamples | 2 | 1 | 2 |
+| time without k023 | 2.1 h | 1.6 h | 2.7 h |
+
+- **k023 runs to the end.** Under the memory limit, nats-server's model builds and is searched in 1140 s. Before, it was killed at 13 GB (#45), or it needed more disk than the container had. The model's counterexample is spurious: a slice bound that fails on results it chose for `base32` calls it does not model.
+- **k031 lost (#142).** The bisection points to #127's constant `net.ErrClosed`. With it, quic-go's `Unwrap` methods return a constant where they returned a havoc read, and the Close/Dial race is no longer reached. It is open.
+- **k007 and k033: no counterexample** where rerun 3 had an inconclusive one. Under the loopback model (#127), the sarama harnesses hold over 2000 trials and the exhaustive inputs. The mock-broker round trip is still not reached, as review 5's note on #53 says.
+- **Time.** The fuel raise (#132) spends the 300 s budget on harnesses whose trials all run out of fuel: k042 (1890 s) and k016 (1320 s), against about 470 s and 270 s before. Neither is found. k007 and k033 cost more for the same reason.
+- **Disk.** The first pass of k023 and k014 failed on a full disk. `go2lean poc` reported k014's failed link as `target_exited` (#140, fixed here). Both were rerun.
+
