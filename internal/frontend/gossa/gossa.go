@@ -1192,7 +1192,19 @@ var modelledNet = map[string]bool{
 
 // modelledFunc says whether a function of a standard-library package that
 // is not modelled as a whole is translated from source on its own.
-func modelledFunc(name string) bool { return modelledTime[name] || modelledNet[name] }
+// modelledSort are the binary searches of package sort, translated from
+// source (#46): a loop calling the program's predicate. A havoc result
+// indexed past the slice searched (golang.org/x/text/language's
+// Canonicalize, eval 5's c022).
+var modelledSort = map[string]bool{
+	"sort.Search": true, "sort.SearchInts": true, "sort.SearchStrings": true,
+	"sort.Find": true, "(sort.IntSlice).Search": true, "(sort.StringSlice).Search": true,
+	"sort.SearchInts$1": true, "sort.SearchStrings$1": true,
+}
+
+func modelledFunc(name string) bool {
+	return modelledTime[name] || modelledNet[name] || modelledSort[name]
+}
 
 func isStdlib(path string) bool {
 	first, _, _ := strings.Cut(path, "/")
@@ -3449,6 +3461,17 @@ func (t *fnState) call(x *ssa.Call) error {
 	hasResult := !isUnitTuple(x.Type())
 	if bi, ok := x.Call.Value.(*ssa.Builtin); ok {
 		switch bi.Name() {
+		case "recover":
+			// A panic ends the model's run before any deferred call: a
+			// deferred function runs only at a normal return, where Go's
+			// recover returns nil, as it does outside a deferred call
+			// (bytes.growSlice's `if recover() != nil`, #46).
+			cv, err := constVal(ssa.NewConst(nil, x.Type()))
+			if err != nil {
+				return err
+			}
+			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: cv}})
+			return nil
 		case "String", "Slice":
 			if b, ok := unsafeView(x.Call); ok {
 				return t.conv(x, b)
