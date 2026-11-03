@@ -910,16 +910,31 @@ def initHeap (p : GoSSA.Prog) (extra : List Nat) (fuel : Nat) :
 
 /-- A concurrent sequence harness's setup, run once for all trials (#87):
 the snapshot at its `setupEnd`, when the setup depends on nothing a trial
-draws. It starts from `heap`, the initializers' (`initHeap`). -/
-def setupSnap (p : GoSSA.Prog) (prop : Property) (extra : List Nat) (fuel : Nat) (heap : Heap Val := #[]) :
-    Option GoConc.Snap × Json :=
+draws. It starts from `heap`, the initializers' (`initHeap`). `draw` seeds
+the setup's havoc reads: the random engine redraws them (#142). -/
+def setupSnap (p : GoSSA.Prog) (prop : Property) (extra : List Nat) (fuel : Nat) (heap : Heap Val := #[])
+    (draw : Nat := 0) : Option GoConc.Snap × Json :=
   match prop with
   | .sequence f =>
     if !GoConc.hasSetupEnd p f then (none, false) else
-    match GoConc.captureSetup p (oracleOf .mixed extra 0) (havocOf 0 p.havocWidths) f fuel heap with
+    match GoConc.captureSetup p (oracleOf .mixed extra 0) (havocOf draw p.havocWidths) f fuel heap with
     | .ok snap => (some snap, true)
     | .error why => (none, why)
   | _ => (none, false)
+
+/-- How many draws of the setup's havoc reads a random search spreads its
+trials over (#142): one draw fixed what an unmodelled call in the setup
+returned (a socket's fields, say) for every trial, so a bug behind another
+result was out of the search's reach. The setup runs again for each draw,
+as many times as a tenth of the budget (30 s without one) pays for, up to
+once a trial; a setup that costs more than that keeps its one draw. -/
+def setupDraws (trials budgetMs setupMs : Nat) : Nat :=
+  let pays := (if budgetMs > 0 then budgetMs / 10 else 30000) / max 1 setupMs
+  min trials (max 1 pays)
+
+/-- Did the setup read havoc values (other than schedule choices)? -/
+def snapReadsHavoc (p : GoSSA.Prog) (snap : Option GoConc.Snap) : Bool :=
+  snap.any fun sn => sn.s.log.any fun (site, _, _) => some site != p.schedSite
 
 /-- Run `trials` random trials; print one JSON line, `{"found": false, ...}` if nothing refutes. -/
 def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
@@ -939,14 +954,27 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
   let trace := (← IO.getEnv "GO2LEAN_TRACE").isSome
   let start ← IO.monoMsNow
   let (heap0, initNote, _, p) := initHeap p extra fuel
-  let (snap, snapNote) := setupSnap p prop extra fuel heap0
-  let base := (snap.map (·.s.heap)).getD heap0
+  let t0 ← IO.monoMsNow
+  let (snap0, snapNote) ← IO.lazyPure fun _ => setupSnap p prop extra fuel heap0
+  let setupMs := (← IO.monoMsNow) - t0
+  -- A setup that read havoc values is run again with a new draw at the
+  -- start of each block of trials (#142); the first block keeps draw 0.
+  let block := if snapReadsHavoc p snap0 then max 1 (trials / setupDraws trials budgetMs setupMs) else trials + 1
+  let mut snap := snap0
+  let mut base := (snap.map (·.s.heap)).getD heap0
+  let mut draws := 1
   let mut done := 0
   for trial in [0:trials] do
     -- A wall-clock budget (0: none) bounds a property whose inputs are
     -- expensive to draw; the report says how many trials ran.
     if budgetMs > 0 && (← IO.monoMsNow) - start > budgetMs then break
     done := trial + 1
+    if trial > 0 && trial % block == 0 then
+      -- A draw whose setup does not reach `setupEnd` (it returned early on
+      -- an error, say) has no snapshot: those trials run the setup.
+      snap := (← IO.lazyPure fun _ => setupSnap p prop extra fuel heap0 (trial / block)).1
+      base := (snap.map (·.s.heap)).getD heap0
+      draws := draws + 1
     let (pfn, g') := randNat g 0 2
     g := g'
     let pf := Profile.ofNat pfn
@@ -997,7 +1025,8 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
     return
   let top := (stuckSites.toArray.qsort (fun a b => a.2 > b.2)).toList.take 5
   IO.println (Json.mkObj (([("found", false), ("trials", done), ("out_of_fuel", fuelOuts),
-    ("moot", moots), ("budget_hit", decide (done < trials)), ("setup_snapshot", snapNote)] : List (String × Json)) ++ initNote ++ ([
+    ("moot", moots), ("budget_hit", decide (done < trials)), ("setup_snapshot", snapNote),
+    ("setup_draws", draws)] : List (String × Json)) ++ initNote ++ ([
     ("stuck_sites", Json.mkObj (top.map fun (site, n) => (site, (n : Json)))),
     ("spec_exits", Json.mkObj (exits.map fun (b, n) => (b, (n : Json))))] : List (String × Json)) ++
     loopFields lassoChecked loops loopSites ++ stepFuelFields stepFuel)).compress

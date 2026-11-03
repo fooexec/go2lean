@@ -894,8 +894,9 @@ def hasSetupEnd (p : Prog) (fid : FuncId) : Bool :=
 
 /-- Run `fid`'s setup once, on `heap` (the initializers', or empty) and placeholder arguments (the
 setup reads none), and snapshot the machine at its `setupEnd` (#87). The
-setup's havoc reads, if any, are then the same in every trial (`h`'s, as
-the exhaustive engine draws them anyway), recorded as an assumption. An
+setup's havoc reads, if any, are then `h`'s in every trial that starts
+from this snapshot, recorded as an assumption (the random engine takes a
+snapshot for each of several draws, #142). An
 error says why there is no snapshot: the run did not get there with the
 main goroutine alone, or chose between schedules on the way. -/
 def captureSetup (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (fuel : Nat)
@@ -911,7 +912,7 @@ def captureSetup (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (fuel :
       else if let some site := snap.s.stuck then .error s!"the setup got stuck: {site}"
       else if snap.s.log.all (fun (site, _, _) => some site == p.schedSite) then .ok snap
       else
-        let s := snap.s.assume "the setup's havoc reads are the same in every trial (it runs once, #87)"
+        let s := snap.s.assume "the setup's havoc reads are those of one run of it (#87; random search runs it again with new draws, #142)"
         .ok { snap with s }
     | .inr (r, _) =>
       let how := match r with

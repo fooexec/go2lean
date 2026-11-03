@@ -178,8 +178,19 @@ projects offer for it (Goose's channel model, Veil, Iris-Lean) is in
     its arguments in the entry frame and its input objects allocated on
     top of the snapshot's heap.
   - **What changes for a trial.** Its setup's havoc reads, if any, take
-    the same values in every trial (one draw, recorded as an assumption);
+    the values of the snapshot it resumes (recorded as an assumption);
     relevance cannot perturb them.
+  - **Redrawn setups (#142).** One draw fixed, for every trial, what an
+    unmodelled call in the setup returned. Evaluation 7's k031 builds its
+    sockets with `net.ListenUDP`, and whether its race could be reached
+    depended on that single draw: renaming the harness, or a change that
+    shifts the havoc site numbers (#127), lost or found it. When the setup
+    reads havoc values, the random engine now takes a new snapshot with a
+    new draw at the start of each block of trials. It draws as often as a
+    tenth of the budget pays for, at most once a trial; a setup that costs
+    more than that (k016's, 38 s) keeps its one draw. The JSON says how
+    many (`setup_draws`). k031's race is found at trial 99 and confirmed.
+    The exhaustive engine still uses one draw.
   - **When there is no snapshot.** If the setup chose between schedules,
     got stuck, or did not reach `setupEnd` alone, there is no snapshot and
     each trial runs from the start. The search's JSON says which
