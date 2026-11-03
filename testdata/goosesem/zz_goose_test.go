@@ -149,6 +149,8 @@ func TestGoose(t *testing.T) {
 		"testPrimitiveTypesEqual": testPrimitiveTypesEqual,
 		"testReflectCallIfaceResult": testReflectCallIfaceResult,
 		"testReflectCallNoArgs": testReflectCallNoArgs,
+		"testRegexpBytesIndex": testRegexpBytesIndex,
+		"testRegexpPackageVarPattern": testRegexpPackageVarPattern,
 		"testRegexpRuntimeAltLazy": testRegexpRuntimeAltLazy,
 		"testRegexpRuntimeClass": testRegexpRuntimeClass,
 		"testRegexpRuntimeEscapes": testRegexpRuntimeEscapes,
