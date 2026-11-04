@@ -762,6 +762,9 @@ func constMapEntries(mm *ssa.MakeMap) []*ssa.MapUpdate {
 		switch r := r.(type) {
 		case *ssa.MapUpdate:
 			_, kc := r.Key.(*ssa.Const)
+			if _, ok := constComposite(r.Key); ok {
+				kc = true // {'a', 'b'}: 1, a key of a fixed size
+			}
 			_, vc := r.Value.(*ssa.Const)
 			if fn, ok := tableFunc(r.Value); ok && len(fn.FreeVars) == 0 {
 				vc = true // a table of functions (an operator table)
@@ -779,6 +782,97 @@ func constMapEntries(mm *ssa.MakeMap) []*ssa.MapUpdate {
 		return []*ssa.MapUpdate{}
 	}
 	return ups
+}
+
+// constComposite folds a composite literal of integer or bool constants
+// (an array or struct key of a lookup table, map[[4]byte]int{{'a', 'b'}: 1})
+// into its value: go/ssa builds one in a fresh local, its elements stored
+// one by one, then loads it. Elements of other types are not folded: the
+// model compares strings by their bytes and floats by their bits, neither
+// as element by element (eqVal).
+func constComposite(v ssa.Value) (ir.Val, bool) {
+	ld, ok := v.(*ssa.UnOp)
+	if !ok || ld.Op != token.MUL {
+		return nil, false
+	}
+	a, ok := ld.X.(*ssa.Alloc)
+	if !ok || a.Comment != "complit" {
+		return nil, false
+	}
+	var elems []ir.Val
+	switch u := ld.Type().Underlying().(type) {
+	case *types.Array:
+		if u.Len() > 256 || !plainKeyElem(u.Elem()) {
+			return nil, false
+		}
+		z, _ := zeroVal(u.Elem())
+		elems = slices.Repeat([]ir.Val{z}, int(u.Len()))
+	case *types.Struct:
+		for i := 0; i < u.NumFields(); i++ {
+			if !plainKeyElem(u.Field(i).Type()) {
+				return nil, false
+			}
+			z, _ := zeroVal(u.Field(i).Type())
+			elems = append(elems, z)
+		}
+	default:
+		return nil, false
+	}
+	for _, r := range *a.Referrers() {
+		var i int
+		switch r := r.(type) {
+		case *ssa.UnOp:
+			if r != ld {
+				return nil, false
+			}
+			continue
+		case *ssa.IndexAddr:
+			c, ok := r.Index.(*ssa.Const)
+			if !ok || c.Value == nil {
+				return nil, false
+			}
+			n, ok := constant.Int64Val(c.Value)
+			if !ok || n < 0 || n >= int64(len(elems)) {
+				return nil, false
+			}
+			i = int(n)
+		case *ssa.FieldAddr:
+			i = r.Field
+		default:
+			return nil, false
+		}
+		refs := *r.(ssa.Value).Referrers()
+		if len(refs) != 1 {
+			return nil, false
+		}
+		st, ok := refs[0].(*ssa.Store)
+		if !ok || st.Addr != r.(ssa.Value) {
+			return nil, false
+		}
+		c, ok := st.Val.(*ssa.Const)
+		if !ok {
+			return nil, false
+		}
+		cv, err := constVal(c)
+		if err != nil {
+			return nil, false
+		}
+		elems[i] = cv
+	}
+	if _, ok := ld.Type().Underlying().(*types.Array); ok {
+		return ir.ArrVal{Elems: elems}, true
+	}
+	return ir.StructVal{Fields: elems}, true
+}
+
+// plainKeyElem says whether t is an integer or bool: an element constComposite
+// folds.
+func plainKeyElem(t types.Type) bool {
+	if isFloat(t) {
+		return false
+	}
+	_, _, isInt := intWidth(t)
+	return isInt || isBool(t)
 }
 
 // tableFunc is the package function a table entry holds: the function
@@ -3281,8 +3375,12 @@ func (t *fnState) unop(x *ssa.UnOp) error {
 					t.emit(ir.Instr{Dst: m, Op: ir.Simple("makeMap")})
 					for _, up := range constMapEntries(mm) {
 						t.mapKey(up.Key)
-						k, err := t.val(up.Key)
-						if err != nil {
+						var k ir.Var
+						var err error
+						if cv, ok := constComposite(up.Key); ok {
+							k = t.fresh()
+							t.emit(ir.Instr{Dst: k, Op: ir.Const{V: cv}})
+						} else if k, err = t.val(up.Key); err != nil {
 							return err
 						}
 						val := up.Value
