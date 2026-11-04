@@ -249,8 +249,10 @@ memory).
 | `-x` | `fneg`: the sign bit flipped (also of a NaN) | exact |
 | float literals | their bits, rounded as Go rounds a typed constant | exact |
 | `math.Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits` | no-ops: the bits are the float | exact |
-| `math.IsNaN`, `IsInf`, `Inf`, `NaN`, `Abs`, `Signbit`, `Copysign` | translated from source under `-deps` (`modelledMath`) | exact |
-| the rest of `math` | unmodelled: the result is a float of havoc bits | havoc |
+| `math.Sqrt` | `fsqrt`: the IEEE square root, correctly rounded | exact |
+| the rest of `math` (`Mod`, `Pow`, `Frexp`, `Ldexp`, `Sin`, `Atan2`, `Cbrt`, …) | translated from Go's portable source under `-deps` | exact for the machines that run that code |
+| `Floor`, `Ceil`, `Trunc`, `Modf`, `Max`, `Min`, `Hypot` (assembly on amd64) | their portable version (`portableMath`) | exact: the same bits as amd64's assembly on 3 million inputs (`docs/eval/floats/archdiff`) |
+| `Exp`, `Log` (assembly on amd64 and arm64) | their portable version, with an assumption | assumed: on amd64, `Exp` differs by 1 ulp on 8% of inputs and overflows from about 709.78 where the portable result is finite; `Log` differs on subnormal inputs (#150) |
 | a map keyed by floats | keys compared by their bits | approximate: `-0` and `+0` are two keys and a NaN key finds itself, unlike Go (before #148 every float key was the same unknown value) |
 
 The float ops are Lean's `Float` and `Float32`, which compile to C `double`

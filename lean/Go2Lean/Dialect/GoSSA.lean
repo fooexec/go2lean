@@ -548,6 +548,8 @@ inductive Op where
   | ftoi (w dw : Nat) (signed : Bool)
   /-- A `w`-bit float converted to `dw` bits (float32 <-> float64). -/
   | fconv (w dw : Nat)
+  /-- The square root (IEEE: correctly rounded; NaN below zero, `-0` of `-0`). -/
+  | fsqrt (w : Nat)
   deriving Repr
 
 /-- Lift a width-polymorphic binary function to two `int` values of equal width. -/
@@ -1708,6 +1710,9 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
       | none => false))
   | .ftoi w dw signed, [a] => match floatBits? w a >>= floatTrunc? w dw signed with
     | some i => .ok (.int dw (BitVec.ofInt dw i))
+    | none => .panic .modelStuck
+  | .fsqrt w, [a] => match floatBits? w a with
+    | some x => .ok (if w == 32 then f32Val (f32Of x).sqrt else f64Val (f64Of x).sqrt)
     | none => .panic .modelStuck
   | .fconv w dw, [a] => match floatBits? w a with
     | some x =>

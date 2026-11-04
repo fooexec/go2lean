@@ -138,6 +138,9 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		if err := addNetLoop(sprog); err != nil {
 			return nil, "", err
 		}
+		// math's assembly versions (archFloor, ...) call the portable Go
+		// ones (#148).
+		portableMath(sprog)
 	}
 	zeros := zeroGlobals(sprog, spkgs, opts.Deps)
 
@@ -1160,6 +1163,9 @@ var modelledStdlib = map[string]bool{
 	"io":             true,
 	// The loopback model (addNetLoop, #126).
 	netloopPath: true,
+	// Floats (#148): the portable Go code, with the bits functions and
+	// Sqrt the dialect's (floatMathCall, portableMath).
+	"math": true,
 }
 
 // modelledTime are the functions of package time translated from source
@@ -3798,7 +3804,7 @@ func (t *fnState) call(x *ssa.Call) error {
 		}
 	}
 	if callee != nil {
-		if done, err := t.floatBitsCall(x, callee); done || err != nil {
+		if done, err := t.floatMathCall(x, callee); done || err != nil {
 			return err
 		}
 	}
