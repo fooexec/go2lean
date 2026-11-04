@@ -253,3 +253,19 @@ and scores its spec counterexample at the fix, as `score.sh` does. Scores:
   the templates too, and c118 and c024 hit the 1800 s limit before the
   replay. Both were run again with `-specs-only` (c118 is found in 32 s).
   In the other 11 the spec is searched first (#133) with the same budget.
+
+### The floats (#148, 2026-11-04)
+
+After floats became IEEE values (#149), `math` was translated from source
+(#151) and float inputs were generated (#152), the three float cases again,
+with `-specs-only` (`run46.sh`, a tool at #152's head):
+
+| case | before | now |
+|---|---|---|
+| c039 (`DistanceCIE94`) | – (every trial stuck at `math.Mod`) | **FOUND** at trial 1 |
+| c069 (`SorensenDice.Compare`) | FOUND | **FOUND** at trial 5 |
+| c088 (`BlendHcl`) | – (every trial stuck at `math.Mod`) | **FOUND** at trial 1 (t = 1.0) |
+
+c039 and c088 were two of the fuzzer's seven "B only" finds in the first
+run: go2lean finds them now. Of #46's ledger, four cases remain
+spurious, each on its own gap (above).
