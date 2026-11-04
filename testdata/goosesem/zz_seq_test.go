@@ -350,8 +350,14 @@ func SeqTestListTypesEqual() bool { return testListTypesEqual() }
 // go2lean:sequence testManyParentheses
 func SeqTestManyParentheses() bool { return testManyParentheses() }
 
+// go2lean:sequence testMapArrayKeyTable
+func SeqTestMapArrayKeyTable() bool { return testMapArrayKeyTable() }
+
 // go2lean:sequence testMapSize
 func SeqTestMapSize() bool { return testMapSize() }
+
+// go2lean:sequence testMapStructKeyTable
+func SeqTestMapStructKeyTable() bool { return testMapStructKeyTable() }
 
 // go2lean:sequence testMathFrexpLdexp
 func SeqTestMathFrexpLdexp() bool { return testMathFrexpLdexp() }

@@ -269,3 +269,16 @@ with `-specs-only` (`run46.sh`, a tool at #152's head):
 c039 and c088 were two of the fuzzer's seven "B only" finds in the first
 run: go2lean finds them now. Of #46's ledger, four cases remain
 spurious, each on its own gap (above).
+
+### Tables keyed by arrays (#46, c022, 2026-11-04)
+
+c022's spurious counterexample came from `grandfatheredMap`, a
+package-level `map[[maxLen]byte]int16` literal. go/ssa builds each array
+key as a local literal, so the table was an unmodelled load and its havoc
+value indexed `altTagIndex` out of range at trial 1. The frontend now
+folds such keys (arrays and structs of integer and bool constants) and
+builds the table. Rerun with `-specs-only`: no counterexample in 2000
+trials. The bug itself stays out of reach of this spec: it compares
+`String()`, which the bug leaves right (`Macro.Canonicalize("cmn-u-co-stroke")`
+prints `zh-u-co-stroke` but its `Extensions()` is empty). Spurious: 4 → 3
+(c024, c097, c130).

@@ -155,3 +155,33 @@ func testInitTickerDaemon() bool {
 	initTick.Unlock()
 	return started
 }
+
+// Lookup tables keyed by arrays and structs of constants (#46, c022:
+// golang.org/x/text/language's grandfatheredMap).
+
+var tagTable = map[[6]byte]int16{
+	{'a', 'r', 't', '-', 'l', 'o'}: -1,
+	{'i', '-', 'a', 'm', 'i'}:      7,
+}
+
+type cell struct {
+	Row, Col int
+	On       bool
+}
+
+var cellTable = map[cell]int{{1, 2, true}: 12, {Col: 3}: 3}
+
+func testMapArrayKeyTable() bool {
+	var k [6]byte
+	copy(k[:], "i-ami")
+	v, ok := tagTable[k]
+	k[4] = 'x'
+	_, miss := tagTable[k]
+	return ok && v == 7 && !miss && tagTable[[6]byte{'a', 'r', 't', '-', 'l', 'o'}] == -1 && len(tagTable) == 2
+}
+
+func testMapStructKeyTable() bool {
+	r := 1
+	_, miss := cellTable[cell{Row: r, Col: 2}]
+	return cellTable[cell{r, 2, true}] == 12 && cellTable[cell{Col: 3}] == 3 && !miss
+}
