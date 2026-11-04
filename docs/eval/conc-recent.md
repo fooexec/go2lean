@@ -421,3 +421,28 @@ Per case: the "rerun 3" and "rerun 4" columns of [results-rerun.tsv](conc-recent
 - **Time.** The fuel raise (#132) spends the 300 s budget on harnesses whose trials all run out of fuel: k042 (1890 s) and k016 (1320 s), against about 470 s and 270 s before. Neither is found. k007 and k033 cost more for the same reason.
 - **Disk.** The first pass of k023 and k014 failed on a full disk. `go2lean poc` reported k014's failed link as `target_exited` (#140, fixed here). Both were rerun.
 
+
+## Rerun after the setup redraw and floats (2026-11-04)
+
+**rerun 5**: arm A at #154's head (`e440aec`, merged as `58f2f49`). New since rerun 4:
+- the setup redraw (#144);
+- `recover` and `sort` (#145);
+- regexp pattern variables (#147);
+- floats (#149, #151, #152);
+- composite-keyed tables (#154).
+
+It used the same harnesses, budget and scoring. `run22.sh` ran it and `score22.sh` scored it. Per case: the "rerun 5" columns of [results-rerun.tsv](conc-recent/results-rerun.tsv).
+
+| | rerun 4 | rerun 5 |
+|---|---|---|
+| found, strict | 6 | 7 |
+| found, adjudicated | 10 | 12 |
+| spurious counterexamples | 2 | 1 (k023 not run) |
+| time without k023 | 2.7 h | 2.2 h |
+
+- **k031 found again.** The redraw (#144) redraws the setup's havoc values every block of trials (#142). The Close/Dial race comes back at trial 15, and the replay confirms it at the parent with `-race`. At the fix it is not observed.
+- **k010 adjudicated.** Its counterexample now replays at the parent: the real run returns false, where rerun 4's replay was inconclusive. At the fix, the model's schedule no longer replays. The fix adds new synchronisation there: `Close` sets a `closeInit` atomic, and `reconnectChannel` checks it once it holds the lock. So k010 counts as adjudicated, like k015, k024, k039 and k047.
+- **k045 changed.** The search finds nothing, as before. But now no mutant of the code fails the spec, where 8 of 22 did; the model's notes on the code are the same. It ran on go1.26.6 (below), where rerun 4 ran it on go1.24.7. The cause is open.
+- **k023 not run.** nats-server's workspace passed 3.6 GB, and the build cache grew at the same time, so the disk filled twice. Each time the run was stopped and the case's output removed.
+- **One toolchain from k023 on.** Until then each case ran the Go that its `go.mod` asked for: a downloaded go1.25.x or go1.26.x, or the system go1.24.7 for older `go` lines. The container held eight toolchains, plus their build caches. From k023 on, `GOTOOLCHAIN=go1.26.6+auto` (`go env -w`) runs every case on go1.26.6, which every case's `go` line allows. k001 to k018 kept their earlier toolchain.
+- **Toolchain comparison: k001 only.** The rerun of k001 to k018 on go1.26.6 got through k001 (the same counterexample, confirmed) before the disk filled in k004.
