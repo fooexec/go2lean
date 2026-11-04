@@ -219,6 +219,8 @@ func genIn(abi *contract.ABI, p contract.ABIParam, maxLen int, open []string) (m
 			return nil, fmt.Errorf("parameter %s: unsupported int type %s", p.Go, p.GoType)
 		}
 		return map[string]any{"k": "int", "name": p.Go, "w": w, "signed": signed}, nil
+	case contract.ABIFloat:
+		return map[string]any{"k": "float", "name": p.Go, "w": p.Width}, nil
 	case contract.ABIBool:
 		return map[string]any{"k": "bool", "name": p.Go}, nil
 	case contract.ABIError:

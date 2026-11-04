@@ -66,7 +66,7 @@ func (a *ABI) Validate() error {
 	for i, p := range a.Params {
 		want := 0
 		switch p.Kind {
-		case ABIInt, ABIBool, ABIError, ABIStruct, ABIPtr, ABIString, ABIOpaque, ABIArray, ABIMap, ABIAny:
+		case ABIInt, ABIFloat, ABIBool, ABIError, ABIStruct, ABIPtr, ABIString, ABIOpaque, ABIArray, ABIMap, ABIAny:
 			want = 1
 		case ABISlice:
 			switch a.Frontend {

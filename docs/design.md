@@ -46,7 +46,8 @@ used for **proof**.
   data races under happens-before are: see [concurrency.md](concurrency.md)).
 - GC, finalizers, `unsafe`, cgo, reflection, the fine semantics of
   `defer`/`recover`.
-- Floating point: a function using it is marked unmodellable.
+- Floating point beyond IEEE 754 float64/float32 (complex numbers); floats
+  themselves are modelled since #148 (semantics.md §4.9).
 - Whole-program verification. The unit is the **function-level** property.
 
 ## 2. Design principles
@@ -221,8 +222,8 @@ Slice elements are any modelled type (`examples/recs`: `[]Item`, `[]string`,
 built with `append`); `append` writes in place while the capacity allows and
 otherwise copies into a fresh backing array of twice the capacity (Go's
 exact growth is implementation-defined and visible only through `cap`).
-Interfaces, maps, funcs, channels, floats and `unsafe.Pointer` are opaque
-values (history §9b); `range` over strings is modelled, over maps assumed empty;
+Interfaces, maps, funcs, channels, complex numbers and `unsafe.Pointer` are
+opaque values (history §9b; floats are IEEE bits since #148); `range` over strings is modelled, over maps assumed empty;
 deferred calls the model does not look into are ignored, deferred calls
 to modelled functions run at the returns, in a loop too (#62); goroutines
 and `select`: [concurrency.md](concurrency.md).

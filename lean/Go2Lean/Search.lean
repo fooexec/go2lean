@@ -42,6 +42,11 @@ inductive Gen where
   small alphabet; for a named string type, mostly one of the constants
   `enum` declared for it. -/
   | str (name : String) (maxLen : Nat) (enum : List (List Nat))
+  /-- A `w`-bit float (64 or 32), as its IEEE bits `.int w bits` (#148):
+  special values (signed zeros, infinities, NaN, the extremes), the
+  program's float literals and integers, small numbers and halves, or any
+  bits. -/
+  | float (name : String) (w : Nat)
   /-- A pointer that is always nil (kept for ABI records that have no type
   table). -/
   | nilptr (name : String)
@@ -150,6 +155,41 @@ def genBits (pf : Profile) (extra : List Nat) (g : StdGen) (w : Nat) : BitVec w 
       let (n, g) := randNat g 0 (2 ^ w - 1)
       (BitVec.ofNat w n, g)
 
+/-- The special floats of width `w` (64 or 32), as bits: +0, -0, 1, -1,
+0.5, 2, 0.1, 100, -3.5, the largest finite, the smallest subnormal, +Inf,
+-Inf and a NaN. -/
+def floatSpecials (w : Nat) : List Nat :=
+  if w == 32 then
+    [0, 0x80000000, 0x3F800000, 0xBF800000, 0x3F000000, 0x40000000, 0x3DCCCCCD, 0x42C80000,
+      0xC0600000, 0x7F7FFFFF, 1, 0x7F800000, 0xFF800000, 0x7FC00001]
+  else
+    [0, 0x8000000000000000, 0x3FF0000000000000, 0xBFF0000000000000, 0x3FE0000000000000,
+      0x4000000000000000, 0x3FB999999999999A, 0x4059000000000000, 0xC00C000000000000,
+      0x7FEFFFFFFFFFFFFF, 1, 0x7FF0000000000000, 0xFFF0000000000000, 0x7FF8000000000001]
+
+/-- The program's mined constants as `w`-bit floats: each read as the
+float of its bits (a float literal is mined as its bits) and as the float
+of its integer value. -/
+def floatMined (w : Nat) (extra : List Nat) : List Nat :=
+  extra.flatMap fun c =>
+    let asInt := if w == 32 then (Float32.ofNat c).toBits.toNat else (Float.ofNat c).toBits.toNat
+    if c < 2 ^ w then [c, asInt] else [asInt]
+
+/-- A random `w`-bit float, as its bits. -/
+def genFloat (extra : List Nat) (g : StdGen) (w : Nat) : Nat × StdGen :=
+  let (pick, g) := randNat g 0 9
+  let pickFrom (xs : List Nat) (g : StdGen) :=
+    let (i, g) := randNat g 0 xs.length.pred
+    (xs.getD i 0, g)
+  if pick < 4 then pickFrom (floatSpecials w) g
+  else if pick < 6 && !extra.isEmpty then pickFrom (floatMined w extra) g
+  else if pick < 8 then
+    -- a small integer or half: -50 .. 50 in steps of 0.5
+    let (n, g) := randNat g 0 200
+    let v := Float.ofInt (Int.ofNat n - 100) / 2
+    ((if w == 32 then v.toFloat32.toBits.toNat else v.toBits.toNat), g)
+  else randNat g 0 (2 ^ w - 1)
+
 /-- Decimal renderings of the mined integers and their neighbours, plus a
 few boundary numbers, as byte strings. -/
 def numberStrs (extra : List Nat) : List (List Nat) :=
@@ -173,7 +213,7 @@ def Gen.name : Gen → String
   | .hot inner => inner.name
   | .int n .. | .bool n | .err n | .slice n .. | .sliceOf n .. | .structv n _ | .ptr n _
   | .link n _ | .str n .. | .nilptr n | .ref n _ | .opaque n _ | .arrOf n .. | .mapOf n .. | .anyOf n _
-  | .jsonText n .. | .sdkDoc n .. => n
+  | .jsonText n .. | .sdkDoc n .. | .float n _ => n
 
 /-- The SDKs of OpenAI and Anthropic spell a union as a struct whose
 fields are all named `Of<Variant>` (pointers, slices, `param.Opt` values):
@@ -291,6 +331,9 @@ partial def genVal (pf : Profile) (extra : List Nat) (g : StdGen) (heap : Heap V
   | .int _ w _ =>
     let (v, g) := genBits pf extra g w
     (.int w v, g, heap)
+  | .float _ w =>
+    let (v, g) := genFloat extra g w
+    (.int w (BitVec.ofNat w v), g, heap)
   | .bool _ =>
     let (b, g) := randBool g
     (.bool b, g, heap)
@@ -693,6 +736,7 @@ def renderInt (signed : Bool) (v : BitVec w) : String :=
 /-- Flatten one argument into the model parameter names M3 expects. -/
 def flatten : Gen → Val → List (String × Json)
   | .int name _ signed, .int _ v => [(name, renderInt signed v)]
+  | .float name _, .int _ v => [(name, renderInt false v)] -- the bits
   | .bool name, .bool b => [(name, toString b)]
   | .err name, .err nonNil => [(name, if nonNil then "error" else "nil")]
   | .slice name _ _ _, .slice ref off len cap
@@ -715,7 +759,7 @@ def flatten : Gen → Val → List (String × Json)
   | g, _ => [(genName g, "?")]
 where
   genName : Gen → String
-    | .int n .. => n | .bool n => n | .err n => n | .slice n .. => n | .structv n .. => n | .ptr n .. => n
+    | .int n .. => n | .float n _ => n | .bool n => n | .err n => n | .slice n .. => n | .structv n .. => n | .ptr n .. => n
     | .str n .. => n | .nilptr n => n | .ref n _ => n | .sliceOf n .. => n | .opaque n _ => n | .arrOf n .. => n | .link n _ => n
     | .mapOf n .. => n | .anyOf n _ => n | .jsonText n .. => n | .sdkDoc n .. => n | .hot inner => genName inner
 
@@ -1187,6 +1231,7 @@ takes the heap so far and returns the value and the extended heap. -/
 partial def enumGen (extra : List Nat) (maxLen : Nat) (pool : List (List Nat)) (table : TypeTable := #[])
     (depth : Nat := 2) (allowNil : Bool := true) : Gen → List (Heap Val → Val × Heap Val)
   | .int _ w _ => (smallInts w extra).map fun v heap => (.int w v, heap)
+  | .float _ w => (floatSpecials w ++ (floatMined w extra).take 6).eraseDups.map fun v heap => (.int w (BitVec.ofNat w v), heap)
   | .bool _ => [fun heap => (.bool true, heap), fun heap => (.bool false, heap)]
   | .err _ => [fun heap => (.err false, heap), fun heap => (.err true, heap)]
   | .slice _ w _ maxLen' =>
@@ -1316,6 +1361,7 @@ where
 partial def genSize (extra : List Nat) (maxLen : Nat) (pool : List (List Nat)) (table : TypeTable := #[])
     (depth : Nat := 2) (allowNil : Bool := true) : Gen → Nat
   | .int _ w _ => (smallInts w extra).length
+  | .float _ w => (floatSpecials w ++ (floatMined w extra).take 6).eraseDups.length
   | .bool _ => 2
   | .err _ => 2
   | .slice _ w _ maxLen' =>
