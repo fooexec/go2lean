@@ -527,6 +527,27 @@ inductive Op where
   | reFindIn (progs : List (Nat × List ReInst × Nat × Nat)) (kind : Nat)
   /-- Is this a regexp value whose id is among these? -/
   | reIn (ids : List Nat)
+  /- Floats (#148): a `w`-bit float (64 or 32) is `.int w bits`, its IEEE
+  754 encoding; a float64 decoded from JSON may also be `knownFloat`'s
+  decimal bytes. Computed with Lean's `Float` / `Float32` (the C double and
+  float), so a result rests on compiled code, not on the kernel. -/
+  /-- Are all operands floats of width `w` the model knows? -/
+  | fknown (w : Nat)
+  /-- `x op y` for `k` = 0 add, 1 sub, 2 mul, 3 div (IEEE, round to nearest even). -/
+  | fbin (k w : Nat)
+  /-- `x op y` for `k` = 0 ==, 1 !=, 2 <, 3 <=, 4 >, 5 >= (false on NaN but !=). -/
+  | fcmp (k w : Nat)
+  /-- `-x`: the sign bit flipped. -/
+  | fneg (w : Nat)
+  /-- An integer (of its own width, `signed` or not) converted to a `w`-bit float. -/
+  | itof (w : Nat) (signed : Bool)
+  /-- Is the truncation of a `w`-bit float a `dw`-bit integer (`signed` or
+  not)? Go leaves the result of a conversion out of range to the machine. -/
+  | ftoiOk (w dw : Nat) (signed : Bool)
+  /-- A `w`-bit float truncated to a `dw`-bit integer (in range: see `ftoiOk`). -/
+  | ftoi (w dw : Nat) (signed : Bool)
+  /-- A `w`-bit float converted to `dw` bits (float32 <-> float64). -/
+  | fconv (w dw : Nat)
   deriving Repr
 
 /-- Lift a width-polymorphic binary function to two `int` values of equal width. -/
@@ -1478,6 +1499,69 @@ library's fixed buffers, bufio's 4096 bytes and a stripe lock table
 (#71). -/
 def sliceBound : Nat := 16384
 
+/-- The bits of a float64 that `knownFloat`'s decimal bytes denote
+(digits, an optional point and fraction, an optional sign), correctly
+rounded. -/
+def decimalBits (bs : List Val) : Option Nat := do
+  let cs ← bs.mapM fun | .int 8 b => some b.toNat | _ => none
+  let digit (c : Nat) := 48 ≤ c && c ≤ 57
+  let (neg, rest) := match cs with
+    | 45 :: r => (true, r)
+    | r => (false, r)
+  let ip := rest.takeWhile digit
+  let fp ← match rest.drop ip.length with
+    | [] => some []
+    | 46 :: r => if r.all digit then some r else none
+    | _ => none
+  if ip.isEmpty then none
+  let m := (ip ++ fp).foldl (fun acc c => acc * 10 + (c - 48)) 0
+  let f := Float.ofScientific m true fp.length
+  some (if neg then -f else f).toBits.toNat
+
+/-- The IEEE bits of a `w`-bit float value the model knows. -/
+def floatBits? (w : Nat) : Val → Option Nat
+  | .int w' b => if w' == w then some b.toNat else none
+  | .tuple [.arr bs] => if w == 64 then decimalBits bs else none
+  | _ => none
+
+def f64Of (n : Nat) : Float := Float.ofBits (UInt64.ofNat n)
+def f32Of (n : Nat) : Float32 := Float32.ofBits (UInt32.ofNat n)
+def f64Val (f : Float) : Val := .int 64 (BitVec.ofNat 64 f.toBits.toNat)
+def f32Val (f : Float32) : Val := .int 32 (BitVec.ofNat 32 f.toBits.toNat)
+
+/-- `fbin k w` on known bits. -/
+def floatBin (k w x y : Nat) : Val :=
+  if w == 32 then
+    let a := f32Of x; let b := f32Of y
+    f32Val (match k with | 0 => a + b | 1 => a - b | 2 => a * b | _ => a / b)
+  else
+    let a := f64Of x; let b := f64Of y
+    f64Val (match k with | 0 => a + b | 1 => a - b | 2 => a * b | _ => a / b)
+
+/-- `fcmp k w` on known bits: IEEE comparisons (a float32 compares as the
+float64 it widens to, exactly). -/
+def floatCmp (k w x y : Nat) : Bool :=
+  let a := if w == 32 then (f32Of x).toFloat else f64Of x
+  let b := if w == 32 then (f32Of y).toFloat else f64Of y
+  match k with
+  | 0 => a == b
+  | 1 => !(a == b)
+  | 2 => decide (a < b)
+  | 3 => decide (a ≤ b)
+  | 4 => decide (b < a)
+  | _ => decide (b ≤ a)
+
+/-- The truncation of a `w`-bit float, when it is a `dw`-bit integer. -/
+def floatTrunc? (w dw : Nat) (signed : Bool) (x : Nat) : Option Int :=
+  let f := if w == 32 then (f32Of x).toFloat else f64Of x
+  -- toward zero, exact: |f| < 2^64 here, or the range check fails
+  let t := if f < 0 then -((-f).floor) else f.floor
+  let lo : Float := if signed then -(Float.ofNat (2 ^ (dw - 1))) else 0
+  let hi : Float := Float.ofNat (if signed then 2 ^ (dw - 1) else 2 ^ dw)
+  if lo ≤ t && t < hi then
+    some (if signed then t.toInt64.toInt else t.toUInt64.toNat)
+  else none
+
 /-- Pure instructions: no heap access. -/
 def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
   | .const v, [] => .ok v
@@ -1605,6 +1689,32 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
   | .not, [.bool b] => .ok (.bool !b)
   | .conv w' se, [.int _ a] =>
     .ok (.int w' (if se then a.signExtend w' else a.zeroExtend w'))
+  | .fknown w, args => .ok (.bool (args.all fun v => (floatBits? w v).isSome))
+  | .fbin k w, [a, b] => match floatBits? w a, floatBits? w b with
+    | some x, some y => .ok (floatBin k w x y)
+    | _, _ => .panic .modelStuck
+  | .fcmp k w, [a, b] => match floatBits? w a, floatBits? w b with
+    | some x, some y => .ok (.bool (floatCmp k w x y))
+    | _, _ => .panic .modelStuck
+  | .fneg w, [a] => match floatBits? w a with
+    | some x => .ok (.int w (BitVec.ofNat w x ^^^ (1#w <<< (w - 1))))
+    | none => .panic .modelStuck
+  | .itof w signed, [.int _ a] =>
+    .ok (if w == 32 then f32Val (if signed then Float32.ofInt a.toInt else Float32.ofNat a.toNat)
+      else f64Val (if signed then Float.ofInt a.toInt else Float.ofNat a.toNat))
+  | .ftoiOk w dw signed, [a] =>
+    .ok (.bool (match floatBits? w a with
+      | some x => (floatTrunc? w dw signed x).isSome
+      | none => false))
+  | .ftoi w dw signed, [a] => match floatBits? w a >>= floatTrunc? w dw signed with
+    | some i => .ok (.int dw (BitVec.ofInt dw i))
+    | none => .panic .modelStuck
+  | .fconv w dw, [a] => match floatBits? w a with
+    | some x =>
+      if w == dw then .ok (.int w (BitVec.ofNat w x))
+      else if dw == 32 then .ok (f32Val (f64Of x).toFloat32)
+      else .ok (f64Val (f32Of x).toFloat)
+    | none => .panic .modelStuck
   | .len, [.slice _ _ len _] => .ok (.int 64 len)
   | .cap, [.slice _ _ _ cap] => .ok (.int 64 cap)
   | .indexCheck, [.slice _ _ len _, i] =>
