@@ -16,6 +16,7 @@ import (
 	"go/token"
 	"go/types"
 	"hash/fnv"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1202,8 +1203,16 @@ var modelledSort = map[string]bool{
 	"sort.SearchInts$1": true, "sort.SearchStrings$1": true,
 }
 
+// modelledMath are the functions of package math translated from source
+// (#148): pure Go over math.Float64bits and Float64frombits, which are the
+// dialect's own (floatBitsCall).
+var modelledMath = map[string]bool{
+	"math.IsNaN": true, "math.IsInf": true, "math.Inf": true, "math.NaN": true,
+	"math.Abs": true, "math.Signbit": true, "math.Copysign": true,
+}
+
 func modelledFunc(name string) bool {
-	return modelledTime[name] || modelledNet[name] || modelledSort[name]
+	return modelledTime[name] || modelledNet[name] || modelledSort[name] || modelledMath[name]
 }
 
 func isStdlib(path string) bool {
@@ -2121,6 +2130,9 @@ func constVal(c *ssa.Const) (ir.Val, error) {
 			return ir.NilSlice{}, nil
 		case isNilable(c.Type()):
 			return ir.OpaqueNil{}, nil
+		case isFloat(c.Type()):
+			z, _ := zeroVal(c.Type())
+			return z, nil
 		case isOpaqueType(c.Type()):
 			return ir.Opaque{}, nil
 		}
@@ -2136,8 +2148,11 @@ func constVal(c *ssa.Const) (ir.Val, error) {
 	if isString(c.Type()) {
 		return ir.StrConst{Bytes: []byte(constant.StringVal(c.Value))}, nil
 	}
+	if w, ok := floatWidth(c.Type()); ok {
+		return floatConst(c.Value, w), nil
+	}
 	if isOpaqueType(c.Type()) {
-		return ir.Opaque{}, nil // a float literal: the model does not compute with it
+		return ir.Opaque{}, nil // a complex literal: the model does not compute with it
 	}
 	w, signed, ok := intWidth(c.Type())
 	if !ok {
@@ -2343,6 +2358,8 @@ func (t *fnState) binop(x *ssa.BinOp) error {
 		default:
 			return fmt.Errorf("string operator %s not supported", x.Op)
 		}
+	} else if w, ok := floatWidth(x.X.Type()); ok {
+		return t.floatBinOp(x, w)
 	} else if isOpaqueType(x.X.Type()) {
 		if eqOp && isNilable(x.X.Type()) {
 			if v, ok := nilOperand(x); ok {
@@ -2428,6 +2445,9 @@ func havocKind(t types.Type) (int, bool) {
 		return ir.HavocBool, true
 	case isString(t):
 		return ir.HavocString, true
+	}
+	if w, ok := floatWidth(t); ok {
+		return w, true // any bits: a float the model does not know (#148)
 	}
 	w, _, ok := intWidth(t)
 	return w, ok
@@ -3311,6 +3331,13 @@ func (t *fnState) unop(x *ssa.UnOp) error {
 		t.syncOp(ir.SyncOp{Kind: "recv", WithOk: x.CommaOk}, t.def(x), ch)
 		return nil
 	case token.SUB, token.XOR:
+		if w, ok := floatWidth(x.X.Type()); ok && x.Op == token.SUB {
+			a, err := t.val(x.X)
+			if err != nil {
+				return err
+			}
+			return t.floatGuarded(x, w, ir.Raw(fmt.Sprintf("(.fneg %d)", w)), []ir.Var{a}, "-x")
+		}
 		if isOpaqueType(x.X.Type()) {
 			return t.havoc(x, fmt.Sprintf("%s on %s", x.Op, x.X.Type()), "opaque-op", "")
 		}
@@ -3377,8 +3404,11 @@ func (t *fnState) conv(dst ssa.Value, src ssa.Value) error {
 		t.emit(ir.Instr{Dst: t.def(dst), Op: ir.Simple("runeToStr"), Args: []ir.Var{a}})
 		return nil
 	}
+	if done, err := t.floatConv(dst, src); done || err != nil {
+		return err
+	}
 	if isOpaqueType(dst.Type()) || isOpaqueType(src.Type()) {
-		// int <-> float and the like: the model does not compute with floats.
+		// complex numbers, unsafe pointers: the model does not compute with them.
 		return t.havoc(dst, fmt.Sprintf("conversion %s -> %s", src.Type(), dst.Type()), "opaque-op", "")
 	}
 	w, _, ok := intWidth(dst.Type())
@@ -3764,6 +3794,11 @@ func (t *fnState) call(x *ssa.Call) error {
 	}
 	if callee != nil {
 		if done, err := t.jsonEncoder(x, callee); done || err != nil {
+			return err
+		}
+	}
+	if callee != nil {
+		if done, err := t.floatBitsCall(x, callee); done || err != nil {
 			return err
 		}
 	}
@@ -8156,6 +8191,37 @@ func isOpaqueType(t types.Type) bool {
 	return false
 }
 
+// floatWidth is the width of a float type: 64 for float64 (and untyped
+// float constants), 32 for float32. A float is its IEEE 754 encoding in the
+// model, `.int w bits` (#148).
+func floatWidth(t types.Type) (int, bool) {
+	if b, ok := t.Underlying().(*types.Basic); ok {
+		switch b.Kind() {
+		case types.Float64, types.UntypedFloat:
+			return 64, true
+		case types.Float32:
+			return 32, true
+		}
+	}
+	return 0, false
+}
+
+func isFloat(t types.Type) bool {
+	_, ok := floatWidth(t)
+	return ok
+}
+
+// floatConst is the IEEE encoding of a float constant, rounded to w bits
+// as Go rounds a typed constant.
+func floatConst(v constant.Value, w int) ir.Val {
+	if w == 32 {
+		f, _ := constant.Float32Val(constant.ToFloat(v))
+		return ir.IntVal{Width: 32, Bits: strconv.FormatUint(uint64(math.Float32bits(f)), 10)}
+	}
+	f, _ := constant.Float64Val(constant.ToFloat(v))
+	return ir.IntVal{Width: 64, Bits: strconv.FormatUint(math.Float64bits(f), 10)}
+}
+
 // isStringsBuilder says whether t is strings.Builder, which the model keeps
 // as a string cell (its methods are dialect ops).
 func isStringsBuilder(t types.Type) bool {
@@ -8335,6 +8401,9 @@ func zeroVal(t types.Type) (ir.Val, bool) {
 	}
 	if isNilable(t) {
 		return ir.OpaqueNil{}, true
+	}
+	if w, ok := floatWidth(t); ok {
+		return ir.IntVal{Width: w, Bits: "0"}, true // +0.0
 	}
 	if isOpaqueType(t) {
 		return ir.Opaque{}, true

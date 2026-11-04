@@ -239,6 +239,33 @@ func SeqTestExplicitBlockStmt() bool { return testExplicitBlockStmt() }
 // go2lean:sequence testFirstClassFunction
 func SeqTestFirstClassFunction() bool { return testFirstClassFunction() }
 
+// go2lean:sequence testFloat32Arith
+func SeqTestFloat32Arith() bool { return testFloat32Arith() }
+
+// go2lean:sequence testFloat32Rounds
+func SeqTestFloat32Rounds() bool { return testFloat32Rounds() }
+
+// go2lean:sequence testFloatAddRounds
+func SeqTestFloatAddRounds() bool { return testFloatAddRounds() }
+
+// go2lean:sequence testFloatArith
+func SeqTestFloatArith() bool { return testFloatArith() }
+
+// go2lean:sequence testFloatCompareMixed
+func SeqTestFloatCompareMixed() bool { return testFloatCompareMixed() }
+
+// go2lean:sequence testFloatInf
+func SeqTestFloatInf() bool { return testFloatInf() }
+
+// go2lean:sequence testFloatNaN
+func SeqTestFloatNaN() bool { return testFloatNaN() }
+
+// go2lean:sequence testFloatSignedZero
+func SeqTestFloatSignedZero() bool { return testFloatSignedZero() }
+
+// go2lean:sequence testFloatToInt
+func SeqTestFloatToInt() bool { return testFloatToInt() }
+
 // go2lean:sequence testFmtHexByte
 func SeqTestFmtHexByte() bool { return testFmtHexByte() }
 
@@ -301,6 +328,9 @@ func SeqTestInitStructCellShared() bool { return testInitStructCellShared() }
 
 // go2lean:sequence testInitTickerDaemon
 func SeqTestInitTickerDaemon() bool { return testInitTickerDaemon() }
+
+// go2lean:sequence testIntToFloat
+func SeqTestIntToFloat() bool { return testIntToFloat() }
 
 // go2lean:sequence testInterfaceNilWithType
 func SeqTestInterfaceNilWithType() bool { return testInterfaceNilWithType() }

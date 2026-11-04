@@ -38,7 +38,8 @@ memory images.
 | interface (incl. `any`) | `.boxed tag v` (`tag` = hash of the dynamic type's name), nil is `.opaqueNil` | exact for values the program boxed or the generator made; `.unit` (unknown) for others |
 | func | `.boxed 0 (tuple [fid, captured…])`, nil `.opaqueNil` | exact for functions and closures of the program |
 | tuple (multiple results) | `.tuple vs` | exact |
-| `float32/64`, `complex64/128` | opaque (`.unit`) | havoc: arithmetic, comparisons and conversions |
+| `float64`, `float32` | `.int 64 bits`, `.int 32 bits`: the IEEE 754 encoding (#148); a float64 decoded from JSON may also be the decimal bytes `json.Marshal` writes for it | exact (§4.9); a float the model does not know (an opaque input, an unknown JSON number) makes what it reaches havoc |
+| `complex64/128` | opaque (`.unit`) | havoc: arithmetic, comparisons and conversions |
 | `chan T` | `.ptr r []` to a heap object `.structv [cap, .arr buffer, .bool closed, zero]`; nil is `.ptr 0 []` or `.opaqueNil` | exact (§6) |
 | `unsafe.Pointer` | opaque | havoc |
 | `unsafe.String(unsafe.SliceData(b), len(b))`, `unsafe.Slice(unsafe.StringData(s), len(s))` (zero-copy views, prometheus' `yoloString`) | `string(b)`, `[]byte(s)` | exact: package `unsafe` forbids writing the bytes while the view is in use (#87) |
@@ -235,8 +236,27 @@ memory).
 | integer ↔ integer | `conv` | exact |
 | named ↔ underlying type, `json.RawMessage` ↔ `[]byte` | no-op | exact |
 | string ↔ bytes / runes | §4.2 | exact |
-| integer ↔ float, float ↔ float | havoc | havoc |
+| integer → float, float32 ↔ float64 | `itof`, `fconv` | exact (rounded to nearest even, once) |
+| float → integer | `ftoi` | exact when the truncation fits the type; NaN, infinities and values out of range, whose result Go leaves to the machine, are havoc |
 | others | — | rejected |
+
+### 4.9 Floats (#148)
+
+| Go | Model | Status |
+|---|---|---|
+| `+ - * /` on float64, float32 | `fbin`: Lean's `Float` / `Float32` on the bits, round to nearest even | exact (IEEE 754; float32 rounds once, in single precision) |
+| `== != < <= > >=` | `fcmp`: IEEE comparisons (false with a NaN operand, `!=` true; `-0 == +0`) | exact |
+| `-x` | `fneg`: the sign bit flipped (also of a NaN) | exact |
+| float literals | their bits, rounded as Go rounds a typed constant | exact |
+| `math.Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits` | no-ops: the bits are the float | exact |
+| `math.IsNaN`, `IsInf`, `Inf`, `NaN`, `Abs`, `Signbit`, `Copysign` | translated from source under `-deps` (`modelledMath`) | exact |
+| the rest of `math` | unmodelled: the result is a float of havoc bits | havoc |
+| a map keyed by floats | keys compared by their bits | approximate: `-0` and `+0` are two keys and a NaN key finds itself, unlike Go (before #148 every float key was the same unknown value) |
+
+The float ops are Lean's `Float` and `Float32`, which compile to C `double`
+and `float`: the kernel cannot evaluate them, so a result that depends on
+one rests on the compiled search, not on a kernel check. Checked against
+Go by `testdata/goosesem/go2lean_float.go`.
 
 ## 5. Standard library and SDK models
 
