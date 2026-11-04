@@ -2783,6 +2783,12 @@ func (t *fnState) instr(b *ssa.BasicBlock, in ssa.Instruction) error {
 		elem := x.Type().(*types.Pointer).Elem()
 		zero, ok := zeroVal(elem)
 		if !ok {
+			// A large array (new [10000]int, make([]T, 10000) with a
+			// constant length): its zero value, which the dialect allocates
+			// as an array it updates in place (arrA, #71).
+			zero, ok = bigArrayZero(elem)
+		}
+		if !ok {
 			if zero, ok = assumedValue(elem); !ok {
 				return fmt.Errorf("alloc of unsupported type %s", elem)
 			}
@@ -8487,6 +8493,25 @@ func valueOKVisiting(t types.Type, visiting map[types.Type]bool) bool {
 }
 
 // zeroVal is the model's zero value of t.
+// sliceBound is the dialect's sliceBound: the most elements the model
+// allocates for an array or a slice.
+const sliceBound = 16384
+
+// bigArrayZero is the zero value of an array type longer than zeroVal
+// builds (4096 elements, which keeps zero values inside other types small),
+// up to sliceBound elements.
+func bigArrayZero(t types.Type) (ir.Val, bool) {
+	a, ok := t.Underlying().(*types.Array)
+	if !ok || a.Len() > sliceBound {
+		return nil, false
+	}
+	z, ok := zeroVal(a.Elem())
+	if !ok {
+		return nil, false
+	}
+	return ir.ArrVal{Elems: slices.Repeat([]ir.Val{z}, int(a.Len()))}, true
+}
+
 func zeroVal(t types.Type) (ir.Val, bool) {
 	if w, _, ok := intWidth(t); ok {
 		return ir.IntVal{Width: w, Bits: "0"}, true

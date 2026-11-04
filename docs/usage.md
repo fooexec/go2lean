@@ -175,7 +175,7 @@ searches it again; the rest of the run goes on (#45).
 
 `-fuel` is where a hunt starts: when a quarter of the random trials run
 out of fuel and none of them loops forever (the runs are long, not hung),
-the hunt searches again with four times the fuel, up to 64 times the
+the hunt searches again with four times the fuel, up to 256 times the
 first, and the exhaustive engine, the counterexample and the certificate
 use the raised fuel; the hunt summary says so (#45).
 

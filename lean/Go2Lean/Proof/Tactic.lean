@@ -30,7 +30,8 @@ macro_rules
     let fs := (fs.map (·.getElems)).getD #[]
     let fs ← fs.mapM fun f => `(simpLemma| $f:term)
     `(tactic| simp [wpBlockN, wpTermN, execInstrs, enter, bindParams, $fs,*,
-      Dialect.denote, Dialect.toBool, Dialect.assumption, Go2Lean.GoSSA.assumption, denote,
+      Dialect.denote, Dialect.denoteH, Go2Lean.GoSSA.denoteH_spec,
+      Dialect.toBool, Dialect.assumption, Go2Lean.GoSSA.assumption, denote,
       Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, Array.getElem?_setIfInBounds,
       Array.size_setIfInBounds, Array.getElem?_replicate, Array.size_replicate])
 
