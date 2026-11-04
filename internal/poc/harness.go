@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/token"
+	"math"
 	"math/big"
 	"path"
 	"regexp"
@@ -355,6 +356,8 @@ func harnessFunc(t *contract.Target, p *contract.Property, cx *contract.Countere
 			imports["errors"] = true
 		}
 	}
+	// Floats are written as math.Float64frombits(bits) (kept only if used).
+	imports["math"] = true
 	// Types in the table may be reached only through references; their
 	// imports join the candidates, which are kept only when the generated
 	// code names the package.
@@ -462,6 +465,16 @@ func paramDecl(abi *contract.ABI, p contract.ABIParam, cx *contract.Counterexamp
 			return "", fmt.Errorf("counterexample has no value for %s", p.Go)
 		}
 		return fmt.Sprintf("%s := %s(%s)", p.Go, p.GoType, v), nil
+	case contract.ABIFloat:
+		v, ok := cx.Inputs[p.Model[0]]
+		if !ok {
+			return "", fmt.Errorf("counterexample has no value for %s", p.Go)
+		}
+		lit, err := floatLiteral(p, v)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s := %s", p.Go, lit), nil
 	case contract.ABIBool:
 		v, ok := cx.Inputs[p.Model[0]]
 		if !ok {
@@ -576,6 +589,15 @@ func literal(abi *contract.ABI, p contract.ABIParam, v any) (string, error) {
 				p.Fields = t.Fields
 			}
 		}
+	}
+	if p.Kind == contract.ABIFloat {
+		// Nested values are rendered signed by the model: back to the bits.
+		if str, ok := v.(string); ok && strings.HasPrefix(str, "-") {
+			if n, ok := new(big.Int).SetString(str, 10); ok {
+				v = n.Add(n, new(big.Int).Lsh(big.NewInt(1), uint(p.Width))).String()
+			}
+		}
+		return floatLiteral(p, v)
 	}
 	switch p.Kind {
 	case contract.ABIInt:
@@ -823,6 +845,26 @@ func hasRawJSON(abi *contract.ABI, p contract.ABIParam, v any) bool {
 // object where no typed field has the key.
 func jsonDoc(abi *contract.ABI, p contract.ABIParam, v any) any {
 	p = withTable(abi, p)
+	if p.Kind == contract.ABIFloat {
+		// The number json.Marshal writes for the float (NaN and infinities
+		// have none: left out).
+		str, _ := v.(string)
+		n, ok := new(big.Int).SetString(str, 10)
+		if !ok {
+			return nil
+		}
+		if n.Sign() < 0 {
+			n.Add(n, new(big.Int).Lsh(big.NewInt(1), uint(p.Width)))
+		}
+		f := math.Float64frombits(n.Uint64())
+		if p.Width == 32 {
+			f = float64(math.Float32frombits(uint32(n.Uint64())))
+		}
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil
+		}
+		return json.Number(strconv.FormatFloat(f, 'g', -1, p.Width))
+	}
 	switch p.Kind {
 	case contract.ABIInt:
 		s, _ := v.(string)
@@ -1021,7 +1063,8 @@ func isZeroJSON(abi *contract.ABI, p contract.ABIParam, v any) bool {
 		}
 	}
 	switch p.Kind {
-	case contract.ABIInt:
+	case contract.ABIInt, contract.ABIFloat:
+		// A float only at +0 (bits 0): leaving out a -0 would decode as +0.
 		return v == "0"
 	case contract.ABIBool:
 		return v == "false" || v == false
@@ -1147,4 +1190,22 @@ func emptyComposite(e string) bool {
 		}
 	}
 	return depth == 0
+}
+
+// floatLiteral is a float of the model as Go code: its exact bits,
+// math.Float64frombits(0x...) (or Float32frombits), converted to the
+// parameter's type (#148).
+func floatLiteral(p contract.ABIParam, v any) (string, error) {
+	s, ok := v.(string)
+	if !ok {
+		return "", fmt.Errorf("%s: expected the bits of a float, got %v", p.Go, v)
+	}
+	bits, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("%s: float bits %q: %w", p.Go, s, err)
+	}
+	if p.Width == 32 {
+		return fmt.Sprintf("%s(math.Float32frombits(0x%08x))", p.GoType, bits), nil
+	}
+	return fmt.Sprintf("%s(math.Float64frombits(0x%016x))", p.GoType, bits), nil
 }

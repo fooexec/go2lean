@@ -111,6 +111,12 @@ confirmed divzero_avg_nopanic
 proved divzero_ratio_nopanic
 exhausted errs_apierror_error_nopanic
 exhausted_assuming errs_status_nopanic
+confirmed floats_bucket_nopanic
+exhausted floats_clamp_nopanic
+confirmed floats_clamp_specclampinrange
+confirmed floats_hue_nopanic
+exhausted floats_mean_nohang
+exhausted floats_mean_nopanic
 exhausted fuzzed_decode_nohang
 exhausted fuzzed_decode_nopanic
 exhausted fuzzed_encode_nohang

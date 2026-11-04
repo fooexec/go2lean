@@ -466,7 +466,8 @@ writes the same value as a Go literal.
 | pointers | non-nil by default (nil with `-nil-inputs`); recursive types through a bounded type table |
 | maps | nil (with `-nil-inputs`) or up to `maxlen` entries, keys mostly from the strings the call tree uses as map keys |
 | `interface{}` | nil, string, bool, int, `map[string]interface{}`, `[]interface{}`, and (at the top level) up to six concrete types the function's call tree asserts empty interfaces to (`x.(int64)`, a type switch's cases), so that every case can be taken; the PoC writes them typed (`uint8(0)`) |
-| interfaces with methods, funcs, channels, floats | their zero value (nil, 0) |
+| float64, float32 | their IEEE bits (#148): four draws in ten a special value (±0, ±1, 0.5, 2, 0.1, 100, -3.5, the largest finite, the smallest subnormal, ±Inf, NaN), two the program's float literals and integers, two a number from -50 to 50 in halves, two any bits; the exhaustive engine takes the special values and a few literals. The PoC writes `math.Float64frombits(0x…)`, the exact bits |
+| interfaces with methods, funcs, channels | their zero value (nil) |
 | two parameters of one kind (integers of one width and sign, strings) | one trial in four, one takes the other's value: equal arguments are an edge case independent draws almost never reach for strings (two appends of one label set, #87) |
 | `context.Context` | `context.Background()` |
 | unexported fields of another package's struct | their zero value (a test cannot set them) |

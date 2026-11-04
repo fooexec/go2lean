@@ -226,7 +226,13 @@ func buildTrusted(leanDir, module string) error {
 	cmd := exec.Command("lake", args...)
 	cmd.Dir = leanDir
 	if out, e := cmd.CombinedOutput(); e != nil {
-		err = fmt.Errorf("lake %s: %s", strings.Join(args, " "), firstError(string(out)))
+		msg := firstError(string(out))
+		if msg == "" {
+			// lake did not run, or failed without an error line (not on
+			// PATH, killed): say how.
+			msg = e.Error()
+		}
+		err = fmt.Errorf("lake %s: %s", strings.Join(args, " "), msg)
 	}
 	lemmasErr[key] = err
 	return err

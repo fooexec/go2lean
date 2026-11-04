@@ -20,7 +20,8 @@ Construct-by-construct detail: [docs/semantics.md](../docs/semantics.md).
 - ✅ Interfaces holding values the program boxed: type assertions, type switches, method calls
 - ✅ Closures, function values, method values; methods; multiple results
 - ✅ `error` nil-ness; sentinel errors (`errors.New` / `fmt.Errorf` of a constant, `var errX = &T{...}`) with `==`; `errors.Is`, `errors.As`, `errors.Unwrap` through the program's own error types (`Unwrap`, `Is`)
-- 🟡 Floats and complex numbers (opaque; JSON numbers keep their encoding)
+- ✅ Floats (IEEE 754 float64 and float32: arithmetic, comparisons, conversions, `math` from source, generated inputs; #148); `Exp` and `Log` under an assumption on amd64 (#150); a computed float's `json.Marshal` and `fmt` output 🟡
+- 🟡 Complex numbers (opaque)
 - 🟡 Interfaces, maps and funcs the model did not build (results of unmodelled calls)
 - ❌ Ordered string comparison (`s < t`)
 
@@ -91,7 +92,7 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - ✅ Specs as Go fuzz targets (`go2lean fuzz`, and in `agent`): the same properties searched by `go test -fuzz` on the real code
 - ✅ Go fuzz targets (`FuzzXxx`) read as specs (`go2lean run`, `-fuzz-specs`): a project with fuzz targets needs no spec writing
 - 🚧 Proofs of postconditions: `go2lean prove` states a function's contract from a postcondition and proves loop-free functions alone; loops by an agent that writes the invariants under the kernel's check (10 of 10 goals, nested loops and bubble sort included, [eval](../docs/eval/proof-agent.md)) or by hand (up to insertion sort); a Go spec can be the postcondition; every proof judged by Lean's comparator in a sandbox, with a certificate ([trust](trust.md), [#22](https://github.com/andreasfoo/go2lean/issues/22))
-- 🚧 `init` functions and package state (stores an `init` makes on every path, since 2026-10-23); floats ⬜
+- 🚧 `init` functions and package state (stores an `init` makes on every path, since 2026-10-23); floats ✅ (#148)
 - 🚧 Concurrency (C1, C2, [concurrency.md](../docs/concurrency.md)): goroutines, channels, `select`, `sync`; deadlocks and leaks found and confirmed in 60 of GoKer's 68 blocking kernels (`context`, timers, `sync.Cond` included), with the model's schedule replayed in Go when its scheduler does not take it; data races found and confirmed under `-race` in 24 of its 35 non-blocking kernels; a certificate under every schedule for small configurations (C3)
 
 **LLVM line (C, LLVM IR, TinyGo → VeIR semantics)**: 7 / 11

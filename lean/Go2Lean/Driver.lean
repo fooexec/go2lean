@@ -29,6 +29,7 @@ partial def genOfJson (t : GoSSA.JTable) (j : Json) : Except String Gen := do
   let name := (j.getObjValAs? String "name").toOption.getD ""
   match k with
   | "int" => return .int name (← j.getObjValAs? Nat "w") (← j.getObjValAs? Bool "signed")
+  | "float" => return .float name (← j.getObjValAs? Nat "w")
   | "bool" => return .bool name
   | "err" => return .err name
   | "slice" =>

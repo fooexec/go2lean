@@ -8820,6 +8820,9 @@ func (ab *abiBuilder) param(name string, t types.Type, stack []*types.Named) (co
 			return mp, nil
 		}
 		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIOpaque, Zero: zeroLit(t, src)}, nil
+	case isFloat(t) && !isForeignUnexported(pkg, t):
+		w, _ := floatWidth(t)
+		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, Width: w, Model: []string{name}, Kind: contract.ABIFloat}, nil
 	case isOpaqueType(t) || isForeignOpaqueStruct(pkg, t) || isForeignUnexported(pkg, t):
 		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIOpaque, Zero: zeroLit(t, src)}, nil
 	case isBool(t):

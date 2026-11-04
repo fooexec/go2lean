@@ -412,6 +412,7 @@ type ABIParamKind string
 const (
 	ABIInt    ABIParamKind = "int"    // one model value
 	ABIBool   ABIParamKind = "bool"   // one model value
+	ABIFloat  ABIParamKind = "float"  // one model value: the IEEE bits of a float of Width 64 or 32 (#148)
 	ABIError  ABIParamKind = "error"  // one model value: nil or an opaque non-nil error
 	ABISlice  ABIParamKind = "slice"  // model: ref, off, len, cap (gossa) or ptr, len, cap (llvm)
 	ABIStruct ABIParamKind = "struct" // one model value; Fields describe the components
