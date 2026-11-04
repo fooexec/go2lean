@@ -353,6 +353,24 @@ func SeqTestManyParentheses() bool { return testManyParentheses() }
 // go2lean:sequence testMapSize
 func SeqTestMapSize() bool { return testMapSize() }
 
+// go2lean:sequence testMathFrexpLdexp
+func SeqTestMathFrexpLdexp() bool { return testMathFrexpLdexp() }
+
+// go2lean:sequence testMathMaxMin
+func SeqTestMathMaxMin() bool { return testMathMaxMin() }
+
+// go2lean:sequence testMathModFloor
+func SeqTestMathModFloor() bool { return testMathModFloor() }
+
+// go2lean:sequence testMathModf
+func SeqTestMathModf() bool { return testMathModf() }
+
+// go2lean:sequence testMathSqrtPow
+func SeqTestMathSqrtPow() bool { return testMathSqrtPow() }
+
+// go2lean:sequence testMathTrig
+func SeqTestMathTrig() bool { return testMathTrig() }
+
 // go2lean:sequence testMaxUint64
 func SeqTestMaxUint64() bool { return testMaxUint64() }
 

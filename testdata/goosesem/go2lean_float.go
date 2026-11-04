@@ -67,3 +67,47 @@ func testFloatCompareMixed() bool {
 	}
 	return max == 3
 }
+
+// math from source (#148, step 2): the portable Go code, with the
+// assembly-backed Floor, Ceil, Trunc, Max, Min and Modf on their portable
+// versions, which give the same (only correct) results.
+
+func testMathModFloor() bool {
+	a, b := 370.0, 360.0
+	m := math.Mod(a, b)
+	n := math.Mod(-a, b)
+	return m == 10 && n == -10 && math.Floor(-2.5) == -3 && math.Ceil(-2.5) == -2 && math.Trunc(-2.7) == -2 &&
+		math.IsNaN(math.Mod(a, 0))
+}
+
+func testMathSqrtPow() bool {
+	two, x := 2.0, 1e-3
+	return math.Sqrt(two) == 1.4142135623730951 && math.Sqrt(-two) != math.Sqrt(-two) &&
+		math.Pow(two, 10) == 1024 && math.Pow(two, 0.5) == math.Sqrt(two) && math.Pow(x, 2) == 1e-06
+}
+
+func testMathFrexpLdexp() bool {
+	v := 48.0
+	f, e := math.Frexp(v)
+	return f == 0.75 && e == 6 && math.Ldexp(f, e) == v && math.Ldexp(1, -1074) == 5e-324
+}
+
+func testMathMaxMin() bool {
+	zero, one := 0.0, 1.0
+	negz := -zero
+	nan := zero / zero
+	return math.Max(one, zero) == 1 && math.Min(one, zero) == 0 && math.IsNaN(math.Max(nan, one)) &&
+		math.Signbit(math.Min(zero, negz)) && !math.Signbit(math.Max(zero, negz))
+}
+
+func testMathTrig() bool {
+	x, y := 1.0, -1.0
+	return math.Atan2(x, y) == 2.356194490192345 && math.Sin(math.Pi/6) == 0.5 &&
+		math.Cos(0*x) == 1 && math.Cbrt(27*x) == 3
+}
+
+func testMathModf() bool {
+	v := -3.25
+	i, f := math.Modf(v)
+	return i == -3 && f == -0.25
+}
