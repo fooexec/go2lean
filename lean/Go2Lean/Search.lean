@@ -1172,7 +1172,15 @@ def mutate (p : GoSSA.Prog) (prop : Property) (fids : List Nat) (gens : List Gen
   let (base, _, _, p) := initHeap p extra fuel
   let mut killed : List Json := []
   let mut survived : List String := []
+  let mut tried := 0
+  let start ← IO.monoMsNow
   for m in chosen do
+    -- The whole budget, not only each mutant's share: a mutant's first
+    -- trial runs whatever its share, and one trial can cost more than the
+    -- share when the setup is long (eval 7's k042 ran 24 mutants at 256000
+    -- fuel for half an hour, #71). The mutants left are not tried.
+    if budgetMs > 0 && (← IO.monoMsNow) - start > budgetMs then break
+    tried := tried + 1
     let pm := m.apply p
     let mstart ← IO.monoMsNow
     let mut g := mkStdGen seed
@@ -1198,7 +1206,7 @@ def mutate (p : GoSSA.Prog) (prop : Property) (fids : List Nat) (gens : List Gen
     match hit with
     | some t => killed := Json.mkObj [("mutant", m.desc), ("trial", t)] :: killed
     | none => survived := m.desc :: survived
-  IO.println (Json.mkObj [("mutation", true), ("mutants_total", all.length), ("tried", chosen.length),
+  IO.println (Json.mkObj [("mutation", true), ("mutants_total", all.length), ("tried", tried),
     ("killed", killed.length), ("killed_by", Json.arr killed.reverse.toArray),
     ("survived", Json.arr (survived.reverse.map Json.str).toArray)]).compress
 
