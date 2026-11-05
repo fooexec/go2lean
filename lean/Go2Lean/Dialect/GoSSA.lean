@@ -733,7 +733,7 @@ theorem setPath_isSome (v : Val) (path : List Nat) (nv : Val) :
     case arrA es =>
       by_cases hi : i < es.size
       · have := ih es[i]
-        simp only [hi, dite_true, getElem?_pos, Option.bind_some]
+        simp only [hi, dite_true, getElem?_pos]
         cases h : setPath es[i] rest nv <;> simp_all
       · simp [hi]
 
@@ -757,7 +757,7 @@ theorem heapStore_of_storeCheck (heap : Heap Val) (p v : Val) :
     | none => simp
     | some obj =>
       have hs := setPath_isSome obj path v
-      cases obj <;> simp only [Option.bind_some] at hs ⊢ <;>
+      cases obj <;> simp only at hs ⊢ <;>
         (split <;> rename_i hg <;> simp_all <;>
           (try (cases hset : setPath _ path v <;> simp_all)))
   | .int .. | .bool .. | .slice .. | .tuple .. | .err .. | .structv .. | .arr .. | .arrA ..

@@ -128,7 +128,8 @@ def results : Res Val → List Val | .ok (.tuple vs) => vs | .ok v => [v] | _ =>
 		b.WriteString("  resOk r.1 && resTrue s.1 && s.2.log.isEmpty && s.2.assumed.isEmpty\n")
 	}
 	lemmas := fmt.Sprintf(`holds, run, runFunc, runBlock, execInstrs, enter, bindParams, %s,
-    Dialect.denote, Dialect.toBool, Dialect.assumption, GoSSA.assumption, denote,
+    Dialect.denote, Dialect.denoteH, GoSSA.denoteH_spec, Dialect.toBool, Dialect.assumption,
+    GoSSA.assumption, denote,
     Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, Array.getElem?_setIfInBounds,
     Array.size_setIfInBounds, Array.getElem?_replicate, Array.size_replicate,
     resOk, resTrue, results`, strings.Join(unfold, ", "))
