@@ -106,12 +106,35 @@ const (
 	depLimit = 1500
 )
 
+// modelTags are the build tags the model is translated under: the ones
+// GOFLAGS sets (an explicit -tags replaces them, so they are kept), and
+// purego. Packages with assembly keep a portable Go version behind that tag
+// (cespare/xxhash's Sum64 and writeBlocks, golang.org/x/crypto,
+// klauspost/compress): the model translates the Go, where the assembly is a
+// function without a body it cannot run. Replay builds the real program,
+// without the tag; both compute the same results.
+func modelTags(goflags string) []string {
+	var tags []string
+	for _, f := range strings.Fields(goflags) {
+		if v, ok := strings.CutPrefix(f, "-tags="); ok {
+			tags = append(tags, strings.Split(v, ",")...)
+		} else if v, ok := strings.CutPrefix(f, "--tags="); ok {
+			tags = append(tags, strings.Split(v, ",")...)
+		}
+	}
+	if !slices.Contains(tags, "purego") {
+		tags = append(tags, "purego")
+	}
+	return slices.DeleteFunc(tags, func(t string) bool { return t == "" })
+}
+
 // TranslateAllOpts is TranslateAll with options.
 func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog, string, error) {
 	// Tests: true also loads the package's internal test variant
 	// ("path [path.test]"), which includes *_test.go files of the same
 	// package: that is where agent-written spec-in-Go functions live.
-	cfg := &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedModule, Dir: dir, Tests: true, Overlay: opts.Overlay}
+	cfg := &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedModule, Dir: dir, Tests: true, Overlay: opts.Overlay,
+		BuildFlags: []string{"-tags=" + strings.Join(modelTags(os.Getenv("GOFLAGS")), ",")}}
 	loaded, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		return nil, "", err
