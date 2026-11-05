@@ -222,6 +222,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			units = append(units, unit{path, fns})
 		}
 		units = withShims(sprog, units)
+		units = withInitStdCallees(sprog, units)
 	}
 	// Anonymous functions after the rest, so calls through closures can
 	// follow them; their FuncIds come last and move nothing.
@@ -277,6 +278,72 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		}
 	}
 	return progs, modPath, nil
+}
+
+// withInitStdCallees adds the functions of standard-library packages the
+// model translates from source (modelledStdlib) that a package initializer
+// of a translated package calls, and their callees there: the walk of
+// calls starts from the program's functions, not from initializers, so
+// nkeys' var b32Enc = base32.StdEncoding.WithPadding(...) left WithPadding
+// out, and the slice of the initializer that builds b32Enc (initCells)
+// could not run it.
+func withInitStdCallees(sprog *ssa.Program, units []unit) []unit {
+	have := map[*ssa.Function]bool{}
+	byPath := map[string]int{}
+	for k, u := range units {
+		byPath[u.path] = k
+		for _, f := range u.fns {
+			have[f] = true
+		}
+	}
+	var visit func(f *ssa.Function)
+	visit = func(f *ssa.Function) {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				for _, op := range in.Operands(nil) {
+					fn, ok := (*op).(*ssa.Function)
+					if !ok || have[fn] || fn.Pkg == nil || fn.Synthetic != "" || len(fn.Blocks) == 0 || isInit(fn.Name()) {
+						continue
+					}
+					if fn.Parent() != nil {
+						have[fn] = true
+						visit(fn)
+						continue
+					}
+					path := fn.Pkg.Pkg.Path()
+					if !modelledStdlib[path] {
+						continue
+					}
+					if _, std := stdlibOp(fn.String()); std {
+						continue
+					}
+					have[fn] = true
+					k, ok := byPath[path]
+					if !ok {
+						units = append(units, unit{path: path})
+						k = len(units) - 1
+						byPath[path] = k
+					}
+					units[k].fns = append(units[k].fns, fn)
+					visit(fn)
+				}
+			}
+		}
+	}
+	paths := make([]string, 0, len(units))
+	for _, u := range units {
+		paths = append(paths, u.path)
+	}
+	for _, path := range paths {
+		if spkg := sprog.ImportedPackage(path); spkg != nil {
+			if initFn := spkg.Func("init"); initFn != nil {
+				for _, f := range initFuncs(initFn) {
+					visit(f)
+				}
+			}
+		}
+	}
+	return units
 }
 
 // withShims adds every function and method of each shim package in the
@@ -1384,6 +1451,11 @@ var modelledStdlib = map[string]bool{
 	// Floats (#148): the portable Go code, with the bits functions and
 	// Sqrt the dialect's (floatMathCall, portableMath).
 	"math": true,
+	// Pure Go over byte slices and lookup tables: nkeys encodes its keys
+	// with base32 (eval 7's k023), and base64 and hex are as common.
+	"encoding/base32": true,
+	"encoding/base64": true,
+	"encoding/hex":    true,
 }
 
 // modelledTime are the functions of package time translated from source
@@ -6399,7 +6471,11 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 		if fn != nil && fn.Origin() != nil {
 			fn = fn.Origin()
 		}
-		return fn != nil && fn.Pkg == spkg && fn.Parent() == nil && !isInit(fn.Name())
+		// A function of the package, or of a standard-library package the
+		// model translates from source (nkeys' var b32Enc =
+		// base32.StdEncoding.WithPadding(base32.NoPadding)).
+		return fn != nil && fn.Parent() == nil && !isInit(fn.Name()) &&
+			(fn.Pkg == spkg || fn.Pkg != nil && modelledStdlib[fn.Pkg.Pkg.Path()])
 	}
 	return false
 }

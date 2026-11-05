@@ -40,6 +40,11 @@ inductive Val where
   the model updates in place (#71): a `List` costs O(i) to read or write
   element `i`, so a loop over a large array is quadratic. -/
   | arrA (elems : Array Val)
+  /-- The backing store of a slice of an array inside another heap object
+  (`d.mem[2:]` for a field `mem [8]byte`): the object and the path to the
+  array. Loads and stores through it go to that array (`normPtr`), so
+  writes through the slice land in the object, as in Go. -/
+  | view (ref : Nat) (path : List Nat)
   /-- A string: `len` bytes starting at `off` in the immutable byte array
   `ref` (elements are `.int 8`). The empty string is `str 0 0 0`. -/
   | str (ref : Nat) (off len : BitVec 64)
@@ -692,8 +697,39 @@ def chanIsNil : Val → Bool
   | .opaqueNil => true
   | _ => false
 
+/-- A pointer into a `view` object, as a pointer into the object it views:
+every load and store goes through it. -/
+def normPtr (heap : Heap Val) : Val → Val
+  | .ptr ref path =>
+    match heap[ref]? with
+    | some (.view r p) => .ptr r (p ++ path)
+    | _ => .ptr ref path
+  | v => v
+
+/-- The backing array of a slice at `ref`, a `view` resolved to the array
+it views (a small `.arr`: views are of arrays inside other objects). -/
+def objAt (heap : Heap Val) (ref : Nat) : Option Val :=
+  match heap[ref]? with
+  | some (.view r p) =>
+    match heap[r]? >>= (getPath · p) with
+    | some v@(.arr _) => some v
+    | _ => none
+  | o => o
+
+/-- Replace the backing array of a slice at `ref`: in the object a `view`
+views, else at `ref`. -/
+def setObj (heap : Heap Val) (ref : Nat) (obj : Val) : Heap Val :=
+  match heap[ref]? with
+  | some (.view r p) =>
+    match heap[r]? >>= (setPath · p obj) with
+    | some o => heap.set! r o
+    | none => heap
+  | _ => heap.set! ref obj
+
 /-- Read through a pointer. `ref = 0` is nil. -/
-def heapLoad (heap : Heap Val) : Val → Res Val
+def heapLoad (heap : Heap Val) (p : Val) : Res Val := heapLoadP heap (normPtr heap p)
+where
+  heapLoadP (heap : Heap Val) : Val → Res Val
   | .ptr 0 _ => .panic .nilDereference
   | .ptr ref path =>
     match heap[ref]? >>= (getPath · path) with
@@ -701,8 +737,8 @@ def heapLoad (heap : Heap Val) : Val → Res Val
     | none => .panic .modelStuck
   | _ => .panic .modelStuck
 
-/-- Write through a pointer. -/
-def heapStore (heap : Heap Val) : Val → Val → Res (Heap Val)
+/-- Write through a pointer (at a pointer `normPtr` gave). -/
+def heapStoreP (heap : Heap Val) : Val → Val → Res (Heap Val)
   | .ptr 0 _, _ => .panic .nilDereference
   | .ptr ref path, nv =>
     match heap[ref]? with
@@ -740,19 +776,19 @@ theorem setPath_isSome (v : Val) (path : List Nat) (nv : Val) :
 /-- Whether a store through `p` succeeds: `none`, or the panic it gives.
 It reads the heap without changing it, so that `denoteH` can hand the heap
 to `heapStore` unshared and still give it back unchanged on a failure. -/
-def storeCheck (heap : Heap Val) : Val → Option PanicKind
+def storeCheckP (heap : Heap Val) : Val → Option PanicKind
   | .ptr 0 _ => some .nilDereference
   | .ptr ref path => if (heap[ref]? >>= (getPath · path)).isSome then none else some .modelStuck
   | _ => some .modelStuck
 
-theorem heapStore_of_storeCheck (heap : Heap Val) (p v : Val) :
-    match storeCheck heap p with
-    | none => ∃ h', heapStore heap p v = .ok h'
-    | some k => heapStore heap p v = .panic k := by
+theorem heapStoreP_of_storeCheckP (heap : Heap Val) (p v : Val) :
+    match storeCheckP heap p with
+    | none => ∃ h', heapStoreP heap p v = .ok h'
+    | some k => heapStoreP heap p v = .panic k := by
   match p with
-  | .ptr 0 _ => simp [storeCheck, heapStore]
+  | .ptr 0 _ => simp [storeCheckP, heapStoreP]
   | .ptr (r + 1) path =>
-    simp only [storeCheck, heapStore]
+    simp only [storeCheckP, heapStoreP]
     cases hr : heap[r + 1]? with
     | none => simp
     | some obj =>
@@ -760,8 +796,22 @@ theorem heapStore_of_storeCheck (heap : Heap Val) (p v : Val) :
       cases obj <;> simp only at hs ⊢ <;>
         (split <;> rename_i hg <;> simp_all <;>
           (try (cases hset : setPath _ path v <;> simp_all)))
-  | .int .. | .bool .. | .slice .. | .tuple .. | .err .. | .structv .. | .arr .. | .arrA ..
-  | .str .. | .boxed .. | .opaqueNil | .unit => simp [storeCheck, heapStore]
+  | .int .. | .bool .. | .slice .. | .tuple .. | .err .. | .structv .. | .arr .. | .arrA .. | .view ..
+  | .str .. | .boxed .. | .opaqueNil | .unit => simp [storeCheckP, heapStoreP]
+
+/-- Write through a pointer. -/
+def heapStore (heap : Heap Val) (p v : Val) : Res (Heap Val) := heapStoreP heap (normPtr heap p) v
+
+/-- Whether a store through `p` succeeds: `none`, or the panic it gives.
+It reads the heap without changing it, so that `denoteH` can hand the heap
+to `heapStore` unshared and still give it back unchanged on a failure. -/
+def storeCheck (heap : Heap Val) (p : Val) : Option PanicKind := storeCheckP heap (normPtr heap p)
+
+theorem heapStore_of_storeCheck (heap : Heap Val) (p v : Val) :
+    match storeCheck heap p with
+    | none => ∃ h', heapStore heap p v = .ok h'
+    | some k => heapStore heap p v = .panic k :=
+  heapStoreP_of_storeCheckP heap (normPtr heap p) v
 
 /-- Allocate `obj`; the heap's slot 0 is nil, so the first real object gets
 reference 1. -/
@@ -971,7 +1021,7 @@ def upperByte (b : Nat) : Nat := if 97 ≤ b && b ≤ 122 then b - 32 else b
 def strSliceBytes (heap : Heap Val) : Val → Option (List (List Nat))
   | .slice _ _ 0#64 _ => some []
   | .slice ref off len _ =>
-    match heap[ref]? with
+    match objAt heap ref with
     | some (.arr es) => ((es.drop off.toNat).take len.toNat).mapM (strBytes heap)
     | some (.arrA es) => (es.extract off.toNat (off.toNat + len.toNat)).toList.mapM (strBytes heap)
     | _ => none
@@ -981,7 +1031,7 @@ def strSliceBytes (heap : Heap Val) : Val → Option (List (List Nat))
 def sliceElems (heap : Heap Val) : Val → Option (List Val)
   | .slice 0 _ _ _ => some []
   | .slice ref off len _ =>
-    match heap[ref]? with
+    match objAt heap ref with
     | some (.arr es) => some ((es.drop off.toNat).take len.toNat)
     | some (.arrA es) => some (es.extract off.toNat (off.toNat + len.toNat)).toList
     | _ => none
@@ -1820,7 +1870,7 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
       if i.ult len then
         -- A backing array on the heap (materialised input or allocation)
         -- is authoritative; anything else reads the oracle.
-        match heap[ref]? with
+        match objAt heap ref with
         | some (.arr es) =>
           match es[(off + i).toNat]? with
           | some (.int _ v) => .ok (.int w (v.zeroExtend w))
@@ -2530,7 +2580,7 @@ partial def jEnc (t : JTable) (heap : Heap Val) (d : Nat) (v : Val) : Except Boo
       | .error _ => .error true
     | none => .error false
   | some (.slice e), .slice ref off len _ =>
-    match heap[ref]? with
+    match objAt heap ref with
     | some (.arr es) => elems e ((es.drop off.toNat).take len.toNat)
     | some (.arrA es) => elems e (es.extract off.toNat (off.toNat + len.toNat)).toList
     | _ => .error false
@@ -2585,7 +2635,7 @@ partial def jEnc (t : JTable) (heap : Heap Val) (d : Nat) (v : Val) : Except Boo
       | none => .error false
     | none, .slice 0 .. => .ok (asciiBytes "null")
     | none, .slice ref off len _ =>
-      match heap[ref]?.bind arrList? with
+      match (objAt heap ref).bind arrList? with
       | some es =>
         let es := (es.drop off.toNat).take len.toNat
         -- []interface{} only: a []byte encodes as base64.
@@ -3112,7 +3162,7 @@ partial def jDoc (t : JTable) (heap : Heap Val) (d : Nat) (v : Val) : Option (Li
       | .error _ => asciiBytes "null"
   | some (.slice _), .slice 0 .. => some (asciiBytes "[]")
   | some (.slice e), .slice ref off len _ =>
-    match heap[ref]? with
+    match objAt heap ref with
     | some (.arr es) => elems e ((es.drop off.toNat).take len.toNat)
     | some (.arrA es) => elems e (es.extract off.toNat (off.toNat + len.toNat)).toList
     | _ => none
@@ -3149,7 +3199,7 @@ partial def jDoc (t : JTable) (heap : Heap Val) (d : Nat) (v : Val) : Option (Li
       else if tag == t.basic.getD 4 0 then
         match inner with
         | .slice ref off len _ =>
-          match heap[ref]? with
+          match objAt heap ref with
           | some (.arr es) => elems d ((es.drop off.toNat).take len.toNat)
           | some (.arrA es) => elems d (es.extract off.toNat (off.toNat + len.toNat)).toList
           | _ => none
@@ -3375,6 +3425,29 @@ def sbAppend (heap : Heap Val) (p : Val) : Option (List Nat) → Res (Val × Hea
     | .panic k => .panic k
     | .outOfFuel => .panic .modelStuck
   | none => .panic .modelStuck
+
+/-- `a[lo:hi]` or `a[lo:hi:mx]` for a pointer to an array inside another
+object (a struct field, `d.mem[2:]`): a slice over a new `view` object of
+that array, so that it aliases the field. -/
+def resliceView (heap : Heap Val) (p lo hi : Val) (mx : Option Val) : Res (Val × Heap Val) :=
+  match normPtr heap p with
+  | .ptr 0 _ => .panic .nilDereference
+  | .ptr ref path =>
+    match heap[ref]? >>= (getPath · path) with
+    | some (.arr es) =>
+      let n := BitVec.ofNat 64 es.length
+      match asIndex lo, asIndex hi, (match mx with | some m => asIndex m | none => some n) with
+      | some lo, some hi, some mx =>
+        if lo.ule hi && hi.ule mx && mx.ule n then
+          if path.isEmpty then .ok (.slice ref lo (hi - lo) (mx - lo), heap) else
+          let (v, heap) := heapAlloc heap (.view ref path)
+          match v with
+          | .ptr r _ => .ok (.slice r lo (hi - lo) (mx - lo), heap)
+          | _ => .panic .modelStuck
+        else .panic .sliceBounds
+      | _, _, _ => .panic .modelStuck
+    | _ => .panic .modelStuck
+  | _ => .panic .modelStuck
 
 /-- All instructions: heap-touching ones here, the rest via `denotePure`. -/
 def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Heap Val)
@@ -3772,13 +3845,13 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
         | .ptr ref _ => .ok (.slice ref 0#64 (BitVec.ofNat 64 ts.length) (BitVec.ofNat 64 ts.length), heap)
         | _ => .panic .modelStuck
       | .slice ref off len cap =>
-        match heap[ref]? with
+        match objAt heap ref with
         | some (.arr es) =>
           let newLen := len.toNat + ts.length
           if newLen ≤ cap.toNat then
             -- Room in the backing array: write in place (aliases stay live).
             .ok (.slice ref off (BitVec.ofNat 64 newLen) cap,
-                 heap.set! ref (.arr (writeAt es (off.toNat + len.toNat) ts)))
+                 setObj heap ref (.arr (writeAt es (off.toNat + len.toNat) ts)))
           else
             -- Grow: Go doubles small slices; the exact capacity is
             -- implementation-defined and only visible through `cap`.
@@ -3815,9 +3888,9 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
     | some ts, .slice 0 _ _ _ => .ok (.int 64 (BitVec.ofNat 64 (min 0 ts.length)), heap)
     | some ts, .slice ref off len _ =>
       let n := min len.toNat ts.length
-      match heap[ref]? with
+      match objAt heap ref with
       | some (.arr es) =>
-        .ok (.int 64 (BitVec.ofNat 64 n), heap.set! ref (.arr (writeAt es off.toNat (ts.take n))))
+        .ok (.int 64 (BitVec.ofNat 64 n), setObj heap ref (.arr (writeAt es off.toNat (ts.take n))))
       | some (.arrA es) =>
         let heap := heap.set! ref .unit
         .ok (.int 64 (BitVec.ofNat 64 n), heap.set! ref (.arrA (writeAtA es off.toNat (ts.take n))))
@@ -3855,6 +3928,8 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
       else if len.ule cap then .outOfFuel
       else .panic .makeSliceLen
     | _, _ => .panic .modelStuck
+  | .reslice, [p@(.ptr _ (_ :: _)), lo, hi] => resliceView heap p lo hi none
+  | .reslice3, [p@(.ptr _ (_ :: _)), lo, hi, mx] => resliceView heap p lo hi (some mx)
   | op, args =>
     match denotePure or heap op args with
     | .ok v => .ok (v, heap)
