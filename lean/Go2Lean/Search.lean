@@ -983,10 +983,19 @@ def setupDraws (trials budgetMs setupMs : Nat) : Nat :=
 def snapReadsHavoc (p : GoSSA.Prog) (snap : Option GoConc.Snap) : Bool :=
   snap.any fun sn => sn.s.log.any fun (site, _, _) => some site != p.schedSite
 
-/-- Run `trials` random trials; print one JSON line, `{"found": false, ...}` if nothing refutes. -/
+/-- Whether the trials so far show the fuel short, as the hunt judges it
+(`fuelShort` in hunt.go): a quarter of at least 20 out of fuel, none of
+them looping. -/
+def fuelShortSoFar (done fuelOuts loops : Nat) : Bool :=
+  done ≥ 20 && fuelOuts * 4 ≥ done && loops == 0
+
+/-- Run `trials` random trials; print one JSON line, `{"found": false, ...}` if nothing refutes.
+`stopShort` (the hunt can raise the fuel): stop once `fuelShortSoFar`, so
+that the budget goes to the search at the raised fuel instead of to trials
+at this one that only run out (eval 7's k042, #71). -/
 def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
     (seed trials fuel : Nat) (strs : List String := []) (table : TypeTable := #[])
-    (allowNil : Bool := true) (budgetMs : Nat := 0) : IO Unit := do
+    (allowNil : Bool := true) (budgetMs : Nat := 0) (stopShort : Bool := false) : IO Unit := do
   let pool := strs.map fun s => s.toUTF8.toList.map (·.toNat)
   let mut g := mkStdGen seed
   let mut fuelOuts := 0
@@ -1011,10 +1020,14 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
   let mut base := (snap.map (·.s.heap)).getD heap0
   let mut draws := 1
   let mut done := 0
+  let mut stoppedShort := false
   for trial in [0:trials] do
     -- A wall-clock budget (0: none) bounds a property whose inputs are
     -- expensive to draw; the report says how many trials ran.
     if budgetMs > 0 && (← IO.monoMsNow) - start > budgetMs then break
+    if stopShort && fuelShortSoFar done fuelOuts loops then
+      stoppedShort := true
+      break
     done := trial + 1
     if trial > 0 && trial % block == 0 then
       -- A draw whose setup does not reach `setupEnd` (it returned early on
@@ -1053,7 +1066,9 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
       fuelOuts := fuelOuts + 1
       if let some site := s.stuck then
         if site.startsWith "out of fuel in a goroutine" then stepFuel := bump stepFuel site
-      if lassoChecked < lassoLimit && !prop.isNoHang then
+      -- Each rerun costs as much as the trial: not past the budget.
+      if lassoChecked < lassoLimit && !prop.isNoHang &&
+          !(budgetMs > 0 && (← IO.monoMsNow) - start > budgetMs) then
         lassoChecked := lassoChecked + 1
         if let some l := lassoOf p or h prop args fuel heap snap then
           loops := loops + 1
@@ -1072,7 +1087,8 @@ def run (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List Nat)
     return
   let top := (stuckSites.toArray.qsort (fun a b => a.2 > b.2)).toList.take 5
   IO.println (Json.mkObj (([("found", false), ("trials", done), ("out_of_fuel", fuelOuts),
-    ("moot", moots), ("budget_hit", decide (done < trials)), ("setup_snapshot", snapNote),
+    ("moot", moots), ("budget_hit", decide (done < trials && !stoppedShort)),
+    ("stopped_short", stoppedShort), ("setup_snapshot", snapNote),
     ("setup_draws", draws)] : List (String × Json)) ++ initNote ++ ([
     ("stuck_sites", Json.mkObj (top.map fun (site, n) => (site, (n : Json)))),
     ("spec_exits", Json.mkObj (exits.map fun (b, n) => (b, (n : Json))))] : List (String × Json)) ++
@@ -1499,7 +1515,9 @@ def exhaust (p : GoSSA.Prog) (prop : Property) (gens : List Gen) (extra : List N
       fuelOuts := fuelOuts + 1
       if let some site := s.stuck then
         if site.startsWith "out of fuel in a goroutine" then stepFuel := run.bump stepFuel site
-      if lassoChecked < lassoLimit && !prop.isNoHang then
+      -- Each rerun costs as much as the trial: not past the budget.
+      if lassoChecked < lassoLimit && !prop.isNoHang &&
+          !(budgetMs > 0 && (← IO.monoMsNow) - start > budgetMs) then
         lassoChecked := lassoChecked + 1
         if let some l := lassoOf p or h prop args fuel heap snap then
           loops := loops + 1

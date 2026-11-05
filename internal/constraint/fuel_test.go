@@ -12,6 +12,8 @@ func TestFuelShort(t *testing.T) {
 		{searchResult{Trials: 2000, OutOfFuel: 499}, false},
 		{searchResult{Trials: 2000, OutOfFuel: 1323, LoopsChecked: 20, LoopsForever: 1}, false},
 		{searchResult{Trials: 10, OutOfFuel: 10}, false},
+		// A search that stopped early (stopShort) still reads as short.
+		{searchResult{Trials: 20, OutOfFuel: 5, StoppedShort: true}, true},
 	} {
 		if got := fuelShort(&c.res); got != c.want {
 			t.Errorf("fuelShort(%d of %d out, %d loop) = %v, want %v", c.res.OutOfFuel, c.res.Trials, c.res.LoopsForever, got, c.want)

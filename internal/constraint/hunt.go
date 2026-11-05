@@ -107,36 +107,37 @@ func (o SearchOptions) withDefaults() SearchOptions {
 
 // searchResult is the JSON line Go2Lean.Search.run prints.
 type searchResult struct {
-	Found       bool                       `json:"found"`
-	Trial       int                        `json:"trial"`
-	Seed        int                        `json:"seed"`
-	Trials      int                        `json:"trials"`
-	OutOfFuel   int                        `json:"out_of_fuel"`
-	Moot        int                        `json:"moot"` // postcondition runs where the target panicked first
-	Exhaustive  bool                       `json:"exhaustive"`
-	Domain      float64                    `json:"domain"` // may exceed int64 when the domain is too large
-	Reason      string                     `json:"reason"`
-	MaxLen      int                        `json:"max_len"`
-	HavocSites  int                        `json:"havoc_sites"`
-	HavocRead   int                        `json:"havoc_read"`        // exhaustive inputs whose run read a havoc value
-	Schedules   int                        `json:"schedules"`         // exhaustive runs under enumerated schedules (C3)
-	SchedSample int                        `json:"schedules_sampled"` // inputs with more schedules than the engine runs
-	BudgetHit   bool                       `json:"budget_hit"`
-	StuckSites  map[string]int             `json:"stuck_sites"` // where the model got stuck, by count
-	SpecExits   map[string]int             `json:"spec_exits"`  // spec return block -> trials that left through it
-	Checked     int                        `json:"checked"`
-	Inputs      map[string]string          `json:"inputs"`
-	Memory      map[string][]string        `json:"memory"`
-	Objects     map[string]json.RawMessage `json:"objects"`
-	Havoc       []contract.HavocValue      `json:"havoc"`
-	Relevant    []contract.HavocRead       `json:"relevant_havoc"`
-	Perturbed   int                        `json:"havoc_perturbed"`
-	Skipped     bool                       `json:"relevance_skipped"`
-	ModelOutput *contract.ModelOutput      `json:"model_output"`
-	Probes      []contract.Probe           `json:"probes"`
-	PanicAt     string                     `json:"panic_at"`
-	Assumptions []string                   `json:"assumptions"`
-	Schedule    []contract.SchedStep       `json:"schedule"`
+	Found        bool                       `json:"found"`
+	Trial        int                        `json:"trial"`
+	Seed         int                        `json:"seed"`
+	Trials       int                        `json:"trials"`
+	OutOfFuel    int                        `json:"out_of_fuel"`
+	Moot         int                        `json:"moot"` // postcondition runs where the target panicked first
+	Exhaustive   bool                       `json:"exhaustive"`
+	Domain       float64                    `json:"domain"` // may exceed int64 when the domain is too large
+	Reason       string                     `json:"reason"`
+	MaxLen       int                        `json:"max_len"`
+	HavocSites   int                        `json:"havoc_sites"`
+	HavocRead    int                        `json:"havoc_read"`        // exhaustive inputs whose run read a havoc value
+	Schedules    int                        `json:"schedules"`         // exhaustive runs under enumerated schedules (C3)
+	SchedSample  int                        `json:"schedules_sampled"` // inputs with more schedules than the engine runs
+	BudgetHit    bool                       `json:"budget_hit"`
+	StoppedShort bool                       `json:"stopped_short"`
+	StuckSites   map[string]int             `json:"stuck_sites"` // where the model got stuck, by count
+	SpecExits    map[string]int             `json:"spec_exits"`  // spec return block -> trials that left through it
+	Checked      int                        `json:"checked"`
+	Inputs       map[string]string          `json:"inputs"`
+	Memory       map[string][]string        `json:"memory"`
+	Objects      map[string]json.RawMessage `json:"objects"`
+	Havoc        []contract.HavocValue      `json:"havoc"`
+	Relevant     []contract.HavocRead       `json:"relevant_havoc"`
+	Perturbed    int                        `json:"havoc_perturbed"`
+	Skipped      bool                       `json:"relevance_skipped"`
+	ModelOutput  *contract.ModelOutput      `json:"model_output"`
+	Probes       []contract.Probe           `json:"probes"`
+	PanicAt      string                     `json:"panic_at"`
+	Assumptions  []string                   `json:"assumptions"`
+	Schedule     []contract.SchedStep       `json:"schedule"`
 	// Init: the package initializers' slices run before the trials (#55).
 	Init *initResult `json:"init"`
 
@@ -661,6 +662,12 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 
 	var summary []string
 	if opts.Engine == EngineRandom || opts.Engine == EngineAll {
+		// While the fuel can still be raised, a search stops once its
+		// trials show the fuel short, and the budget goes to the raised
+		// search (eval 7's k042 spent four full budgets climbing to the
+		// fuel its trials needed, #71).
+		canRaise := func() bool { return opts.Fuel*4 <= first*maxFuelRaise }
+		spec["stopShort"] = canRaise()
 		res, err := runSearch(leanDir, prop.ID+"_random", spec, "random")
 		if oom, ok := memgov.IsOutOfMemory(err); ok {
 			// Degrade, not die (#45): this property is not searched further.
@@ -679,6 +686,7 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 			short := res
 			opts.Fuel *= 4
 			spec["fuel"] = opts.Fuel
+			spec["stopShort"] = canRaise()
 			res, err = runSearch(leanDir, prop.ID+"_random", spec, "random")
 			if oom, ok := memgov.IsOutOfMemory(err); ok {
 				// Keep the last search that finished, at its fuel.
@@ -697,7 +705,11 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 			cx, err := writeCx(ws, prop, res, "random", opts)
 			return cx, fmt.Sprintf("random: found at trial %d%s", res.Trial, raised), err
 		}
+		delete(spec, "stopShort")
 		note := raised
+		if res.StoppedShort {
+			note += " [stopped early: the fuel was short]"
+		}
 		if res.BudgetHit {
 			note += fmt.Sprintf(" [stopped by the %ds budget]", opts.BudgetSeconds)
 		}
