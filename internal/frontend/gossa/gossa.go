@@ -138,6 +138,12 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		if err := addNetLoop(sprog); err != nil {
 			return nil, "", err
 		}
+		// The environment the program writes, and temporary directories:
+		// os.Getenv, os.Setenv, os.MkdirTemp and friends call package
+		// osmodel.
+		if err := addOSModel(sprog); err != nil {
+			return nil, "", err
+		}
 		// math's assembly versions (archFloor, ...) call the portable Go
 		// ones (#148).
 		portableMath(sprog)
@@ -234,12 +240,47 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			return nil, "", err
 		}
 		p.Dependency = !mainPaths[u.path]
-		if !p.Dependency {
-			addCtorWrappers(p, u.fns)
-		}
 		progs = append(progs, p)
 	}
+	markSyncAcross(progs)
+	for i, u := range units {
+		if !progs[i].Dependency {
+			addCtorWrappers(progs[i], u.fns)
+		}
+	}
 	return progs, modPath, nil
+}
+
+// markSyncAcross carries markSync over package boundaries: a function that
+// calls a function of another package that can synchronise can too, so the
+// concurrent machine runs it. Without it a sequential caller of osmodel's
+// Setenv, which takes a mutex, got stuck at the lock.
+func markSyncAcross(progs []*ir.Prog) {
+	byPath := map[string]*ir.Prog{}
+	for _, p := range progs {
+		byPath[p.Package] = p
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, p := range progs {
+			grew := false
+			for _, f := range p.Funcs {
+				if f.Sync {
+					continue
+				}
+				for _, xc := range f.XCalls {
+					if q := byPath[xc.Package]; q != nil && xc.ID >= 0 && xc.ID < len(q.Funcs) && q.Funcs[xc.ID].Sync {
+						f.Sync, grew = true, true
+						break
+					}
+				}
+			}
+			if grew {
+				markSync(p)
+				changed = true
+			}
+		}
+	}
 }
 
 // depClosure walks the static calls of roots into packages outside the
@@ -1257,6 +1298,8 @@ var modelledStdlib = map[string]bool{
 	"io":             true,
 	// The loopback model (addNetLoop, #126).
 	netloopPath: true,
+	// The environment and temporary-directory model (addOSModel).
+	osmodelPath: true,
 	// Floats (#148): the portable Go code, with the bits functions and
 	// Sqrt the dialect's (floatMathCall, portableMath).
 	"math": true,
@@ -5893,9 +5936,9 @@ func planCells(units []unit, mainPaths map[string]bool) *cellPlan {
 			plan.concurrent[u.path] = true
 			mainSpawns = mainSpawns || mainPaths[u.path]
 		}
-		if u.path == netloopPath {
-			// Its listener table is shared by every caller, with or
-			// without goroutines: cells.
+		if shimPaths[u.path] {
+			// The shims' tables (listeners, the environment) are shared by
+			// every caller, with or without goroutines: cells.
 			plan.concurrent[u.path] = true
 		}
 	}
@@ -5928,6 +5971,14 @@ func planCells(units []unit, mainPaths map[string]bool) *cellPlan {
 	}
 	for g := range written {
 		if g.Pkg != nil && plan.concurrent[g.Pkg.Pkg.Path()] {
+			plan.shared[g] = true
+		}
+	}
+	for g := range plan.used {
+		// A shim's variables are its state, even the ones only a function
+		// the program does not call writes (osmodel's cleared, written by
+		// Clearenv): cells, from their zero or initial value.
+		if g.Pkg != nil && shimPaths[g.Pkg.Pkg.Path()] {
 			plan.shared[g] = true
 		}
 	}

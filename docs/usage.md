@@ -177,7 +177,11 @@ searches it again; the rest of the run goes on (#45).
 out of fuel and none of them loops forever (the runs are long, not hung),
 the hunt searches again with four times the fuel, up to 256 times the
 first, and the exhaustive engine, the counterexample and the certificate
-use the raised fuel; the hunt summary says so (#45).
+use the raised fuel; the hunt summary says so (#45). While the fuel can
+still be raised, a search stops as soon as its trials show the fuel
+short (a quarter of at least 20), so the budget goes to the search at the
+raised fuel (#71). The reruns that look for a loop in out-of-fuel trials
+stop at the budget too.
 
 `prove` states, for each goal, the function's contract as a Lean theorem
 (for every input, every value the model does not know, and every run that

@@ -91,6 +91,9 @@ structure Spec where
   maxLen : Nat
   limit : Nat
   budgetMs : Nat
+  /-- The hunt can raise the fuel: stop as soon as the trials show it is
+  short (`fuelShortSoFar`). -/
+  stopShort : Bool := false
   /-- For the mutation engine: the functions whose mutants it tries. -/
   mutate : List Nat := []
   maxMutants : Nat := 24
@@ -115,12 +118,13 @@ def specOfJson (tables : List (String × GoSSA.JTable)) (j : Json) : Except Stri
     maxLen := ← j.getObjValAs? Nat "maxLen"
     limit := ← j.getObjValAs? Nat "limit"
     budgetMs := (j.getObjValAs? Nat "budgetMs").toOption.getD 0
+    stopShort := (j.getObjValAs? Bool "stopShort").toOption.getD false
     mutate := (j.getObjValAs? (List Nat) "mutate").toOption.getD []
     maxMutants := (j.getObjValAs? Nat "maxMutants").toOption.getD 24 }
 
 def runSpec (p : GoSSA.Prog) (s : Spec) : IO UInt32 := do
   match s.engine with
-  | "random" => run p s.prop s.gens s.extra s.seed s.trials s.fuel s.strs s.table s.allowNil s.budgetMs; return 0
+  | "random" => run p s.prop s.gens s.extra s.seed s.trials s.fuel s.strs s.table s.allowNil s.budgetMs s.stopShort; return 0
   | "mutate" => mutate p s.prop s.mutate s.gens s.extra s.seed s.trials s.fuel s.strs s.table s.allowNil s.budgetMs s.maxMutants; return 0
   | "exhaustive" => exhaust p s.prop s.gens s.extra s.maxLen s.limit s.fuel s.strs s.table s.allowNil s.budgetMs; return 0
   | other => IO.eprintln s!"unknown engine {other}"; return 2

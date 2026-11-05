@@ -407,6 +407,12 @@ func SeqTestMaxUint64() bool { return testMaxUint64() }
 // go2lean:sequence testMinUint64
 func SeqTestMinUint64() bool { return testMinUint64() }
 
+// go2lean:sequence testMkdirTempBadPattern
+func SeqTestMkdirTempBadPattern() bool { return testMkdirTempBadPattern() }
+
+// go2lean:sequence testMkdirTempFresh
+func SeqTestMkdirTempFresh() bool { return testMkdirTempFresh() }
+
 // go2lean:sequence testModPrecedence
 func SeqTestModPrecedence() bool { return testModPrecedence() }
 
@@ -557,6 +563,15 @@ func SeqTestSelectReady() bool { return testSelectReady() }
 // go2lean:sequence testSelectSelf
 func SeqTestSelectSelf() bool { return testSelectSelf() }
 
+// go2lean:sequence testSetenvGetenv
+func SeqTestSetenvGetenv() bool { return testSetenvGetenv() }
+
+// go2lean:sequence testSetenvInvalid
+func SeqTestSetenvInvalid() bool { return testSetenvInvalid() }
+
+// go2lean:sequence testSetenvOverwrite
+func SeqTestSetenvOverwrite() bool { return testSetenvOverwrite() }
+
 // go2lean:sequence testSharedFunctionsInterface
 func SeqTestSharedFunctionsInterface() bool { return testSharedFunctionsInterface() }
 
@@ -661,6 +676,9 @@ func SeqTestU64ToU32() bool { return testU64ToU32() }
 
 // go2lean:sequence testUint32Untyped
 func SeqTestUint32Untyped() bool { return testUint32Untyped() }
+
+// go2lean:sequence testUnsetenv
+func SeqTestUnsetenv() bool { return testUnsetenv() }
 
 // go2lean:sequence testWaitGroupWaits
 func SeqTestWaitGroupWaits() bool { return testWaitGroupWaits() }

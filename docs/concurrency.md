@@ -351,8 +351,11 @@ as a finding).
   above lower to synchronisation terms instead of being rejected.
 - Each function is classified: it *can synchronise* when it, or a
   function it calls (statically, through a known func value, or by
-  interface dispatch to a modelled method), performs one. Only those get
-  frames in the machine.
+  interface dispatch to a modelled method), performs one, in its own
+  package or, under `-deps`, in another (`markSyncAcross`: a sequential
+  test calling `os.Setenv`, whose model takes a mutex, ran the call
+  big-step and got stuck at the lock). Only those get frames in the
+  machine.
 - Lock words: a `sync.Mutex` field is a heap slot like any field; its
   zero value (today an opaque value) reads as unlocked.
 
