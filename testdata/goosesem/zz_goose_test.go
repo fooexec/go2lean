@@ -175,6 +175,8 @@ func TestGoose(t *testing.T) {
 		"testPolymorphismInterface": testPolymorphismInterface,
 		"testPoolGetFromNew": testPoolGetFromNew,
 		"testPrimitiveTypesEqual": testPrimitiveTypesEqual,
+		"testRandReadDiffers": testRandReadDiffers,
+		"testRandReaderReadFull": testRandReaderReadFull,
 		"testReflectCallIfaceResult": testReflectCallIfaceResult,
 		"testReflectCallNoArgs": testReflectCallNoArgs,
 		"testRegexpBytesIndex": testRegexpBytesIndex,

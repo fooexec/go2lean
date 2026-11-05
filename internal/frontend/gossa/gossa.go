@@ -144,6 +144,10 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		if err := addOSModel(sprog); err != nil {
 			return nil, "", err
 		}
+		// crypto/rand's Read and Reader never fail.
+		if err := addRandModel(sprog); err != nil {
+			return nil, "", err
+		}
 		// math's assembly versions (archFloor, ...) call the portable Go
 		// ones (#148).
 		portableMath(sprog)
@@ -194,6 +198,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			}
 			units = append(units, unit{path, fns})
 		}
+		units = withShims(sprog, units)
 	}
 	// Anonymous functions after the rest, so calls through closures can
 	// follow them; their FuncIds come last and move nothing.
@@ -249,6 +254,57 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		}
 	}
 	return progs, modPath, nil
+}
+
+// withShims adds every function and method of each shim package in the
+// program (netloop, osmodel, randmodel) to its unit: the walk of the
+// program's calls reaches the functions the program calls, but not a
+// method only an interface call dispatches to (randmodel's reader.Read,
+// boxed by the package's initializer).
+func withShims(sprog *ssa.Program, units []unit) []unit {
+	for path := range shimPaths {
+		spkg := sprog.ImportedPackage(path)
+		if spkg == nil {
+			continue
+		}
+		k := slices.IndexFunc(units, func(u unit) bool { return u.path == path })
+		if k < 0 {
+			units = append(units, unit{path: path})
+			k = len(units) - 1
+		}
+		have := map[*ssa.Function]bool{}
+		for _, f := range units[k].fns {
+			have[f] = true
+		}
+		var add []*ssa.Function
+		for f := range ssautil.AllFunctions(sprog) {
+			if f.Pkg != spkg || have[f] || f.Synthetic != "" || f.Parent() != nil || len(f.Blocks) == 0 ||
+				(isInit(f.Name()) && f.Signature.Recv() == nil) {
+				continue
+			}
+			add = append(add, f)
+		}
+		sort.Slice(add, func(i, j int) bool { return funcName(add[i]) < funcName(add[j]) })
+		units[k].fns = append(units[k].fns, add...)
+	}
+	return units
+}
+
+// randReaderLoad gives a load of randmodel.Reader (crypto/rand.Reader, see
+// addRandModel) as the value it holds, a *reader boxed as an io.Reader:
+// the model keeps an interface its package initializer builds opaque, and
+// an interface call on it could not dispatch. reader.Read does not read
+// its receiver, so the boxed pointer is nil.
+func randReaderLoad(x *ssa.UnOp) (ir.Val, bool) {
+	g, ok := x.X.(*ssa.Global)
+	if !ok || x.Op != token.MUL || g.Pkg == nil || g.Pkg.Pkg.Path() != randmodelPath || g.Name() != "Reader" {
+		return nil, false
+	}
+	tn, ok := g.Pkg.Pkg.Scope().Lookup("reader").(*types.TypeName)
+	if !ok {
+		return nil, false
+	}
+	return ir.Boxed{Tag: typeTag(types.NewPointer(tn.Type())), V: ir.NilPtr{}}, true
 }
 
 // markSyncAcross carries markSync over package boundaries: a function that
@@ -1300,6 +1356,8 @@ var modelledStdlib = map[string]bool{
 	netloopPath: true,
 	// The environment and temporary-directory model (addOSModel).
 	osmodelPath: true,
+	// crypto/rand's model (addRandModel).
+	randmodelPath: true,
 	// Floats (#148): the portable Go code, with the bits functions and
 	// Sqrt the dialect's (floatMathCall, portableMath).
 	"math": true,
@@ -3335,6 +3393,10 @@ func hasStr(v ir.Val) bool {
 }
 
 func (t *fnState) unop(x *ssa.UnOp) error {
+	if v, ok := randReaderLoad(x); ok {
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: v}})
+		return nil
+	}
 	switch x.Op {
 	case token.MUL: // load through a pointer
 		if g, ok := x.X.(*ssa.Global); ok && g.Pkg != nil && g.Pkg.Pkg.Path() == "time" {
