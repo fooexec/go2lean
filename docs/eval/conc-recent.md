@@ -463,3 +463,29 @@ It used the same harnesses, budget and scoring. `run22.sh` ran it and `score22.s
 - **k009 is not a fuel case.** The same 970 trials run out at 256000 as at 64000, inside one goroutine step from `registry.load`. The harness sets `OTEL_TRACES_EXPORTER=none`, but `os.Getenv` is havoc in the model (`docs/semantics.md`). otel's `autoexport` then falls back to `otlp`, and `registry.load` builds `otlptracehttp.New` while it holds its mutex, one long step.
 - **k023 fits.** nats-server's workspace and build fitted in 19 GB free, with one toolchain. The random search finds a nil dereference at trial 4. The replay calls it spurious: it rests on the result the model chose for `os.MkdirTemp` (the harness's `StoreDir`), and the real run returns true.
 - **Next.** `os.MkdirTemp` (k023, k042) and `os.Getenv`/`os.Setenv` (k009) are what block three of the four cases. Bounding the fuel raises by one budget per property would keep k042's cost in check, but k016 needs about 1250 s at the 300 s budget.
+
+## Rerun after the environment model and the early stop (2026-11-05)
+
+**rerun 7**: arm A on the same four cases at #158's head (`ec96503`, merged as `d90f9f4`). #158 models the environment and `os.MkdirTemp` (`osmodel`), marks callers of concurrent functions in other packages concurrent, and stops a search early when the fuel is short and can still be raised. Same harnesses, flags and budget as rerun 6 (`run23.sh` with that build, `score23.sh`). Per case: the "rerun 7" columns of [results-rerun.tsv](conc-recent/results-rerun.tsv).
+
+| case | rerun 6 | rerun 7 | secs (6 → 7) |
+|---|---|---|---|
+| k016 | found, adjudicated | **found, adjudicated** | 1258 → 448 |
+| k042 | no result (2400 s limit) | no result (2400 s limit) | 2400 → 2400 |
+| k009 | none, out of fuel in `registry.load` | inconclusive (race not observed) | 435 → 206 |
+| k023 | spurious (`os.MkdirTemp`) | spurious (a stuck `Read`) | 1245 → 783 |
+
+- **k016 faster.** Each level up to 64000 stops after 20 trials, all out of fuel, and the search at 256000 finds the violation at trial 3, as in rerun 6. The case takes 448 s instead of 1258 s.
+- **k009 past the environment.** `OTEL_TRACES_EXPORTER=none` now reads back, and the trials no longer build the OTLP exporter. The model then reports a data race at trial 0. The replay does not observe it under `-race` (`race_not_observed`), so it is inconclusive. It rests on 622 havoc reads and on otel's attribute hashing, where the model is stuck: `xxhash.NewWithSeed` and `Digest.Sum64`. The leak that is k009's defect is not reached.
+- **k023 spurious for another reason.** Its counterexample no longer rests on `os.MkdirTemp`. It now rests on a `Read` that `io.ReadAtLeast` dispatched to a modelled reader that got stuck. The stuck-callee fallback gives `n` and `err` free havoc, and the `io.Reader` contract that unmodelled `Read`s keep (#85) is not applied there.
+- **k042: mutation was the cost.** A rerun with each engine timed (default flags, budget 300) gives:
+
+  | step | time |
+  |---|---|
+  | compile and model build | 3.5 min |
+  | fuel climb to 64000 | 43 s |
+  | random search at 256000 | 327 s, 12 trials, none found |
+  | exhaustive engine | 300 s |
+  | mutation | 32 min |
+
+  Mutation gave each of its 24 mutants a share of the budget, but checked it only before each trial. Each mutant ran at least one trial, and those trials do not resume from the setup snapshot, so each one redoes k042's 16384-stripe setup at 256000 fuel. Mutation now stops at the whole budget. The random search's 12 trials, about 25 s each, are the next cost.
