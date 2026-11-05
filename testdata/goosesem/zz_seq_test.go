@@ -638,6 +638,15 @@ func SeqTestSliceOps() bool { return testSliceOps() }
 // go2lean:sequence testSliceRef
 func SeqTestSliceRef() bool { return testSliceRef() }
 
+// go2lean:sequence testSlicesSortFunc
+func SeqTestSlicesSortFunc() bool { return testSlicesSortFunc() }
+
+// go2lean:sequence testSlicesSortInts
+func SeqTestSlicesSortInts() bool { return testSlicesSortInts() }
+
+// go2lean:sequence testSlicesSortStableFunc
+func SeqTestSlicesSortStableFunc() bool { return testSlicesSortStableFunc() }
+
 // go2lean:sequence testSortSearch
 func SeqTestSortSearch() bool { return testSortSearch() }
 

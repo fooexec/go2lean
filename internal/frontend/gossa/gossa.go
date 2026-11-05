@@ -1456,6 +1456,11 @@ var modelledStdlib = map[string]bool{
 	"encoding/base32": true,
 	"encoding/base64": true,
 	"encoding/hex":    true,
+	// The generic sorts and searches of slices (pdqsort with its helpers,
+	// generic or not: nextPowerOfTwo, xorshift) and cmp's Compare and
+	// Less: otel sorts attribute sets with SortStableFunc (eval 7's k009).
+	"slices": true,
+	"cmp":    true,
 }
 
 // modelledTime are the functions of package time translated from source
