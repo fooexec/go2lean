@@ -488,4 +488,4 @@ It used the same harnesses, budget and scoring. `run22.sh` ran it and `score22.s
   | exhaustive engine | 300 s |
   | mutation | 32 min |
 
-  Mutation gave each of its 24 mutants a share of the budget, but checked it only before each trial. Each mutant ran at least one trial, and those trials do not resume from the setup snapshot, so each one redoes k042's 16384-stripe setup at 256000 fuel. Mutation now stops at the whole budget. The random search's 12 trials, about 25 s each, are the next cost.
+  Mutation gave each of its 24 mutants a share of the budget, but checked it only before each trial. Each mutant ran at least one trial, and those trials do not resume from the setup snapshot, so each one redoes k042's 16384-stripe setup at 256000 fuel. Mutation now stops at the whole budget (#159). Rerun at #159's head, k042 finishes in 1202 s instead of 2400. Mutation stops after 4 of 24 mutants. k042 is still not found: at 256000 fuel the random search runs 12 trials in its 300 s, about 25 s each, and the exhaustive engine 158 of its 294 inputs. The cost of one trial is the next thing to cut.
