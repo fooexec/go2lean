@@ -36,29 +36,50 @@ var osmodelCalls = map[string]string{
 	"os.Unsetenv": "Unsetenv", "os.Clearenv": "Clearenv", "os.MkdirTemp": "MkdirTemp",
 }
 
+// randmodelPath is the import path crypto/rand's model is checked under.
+const randmodelPath = "go2lean/randmodel"
+
+//go:embed randmodel/randmodel.go
+var randmodelSrc string
+
+// randmodelCalls and randmodelVars: crypto/rand.Read and the reader
+// crypto/rand.Reader never fail (k023: nkeys reads a server's seed with
+// io.ReadFull(rand.Reader, ...), and a havoc error made a spurious run).
+var (
+	randmodelCalls = map[string]string{"crypto/rand.Read": "Read"}
+	randmodelVars  = map[string]string{"crypto/rand.Reader": "Reader"}
+)
+
 // shimPaths are the models added as Go source; their globals are shared
 // by every caller, with or without goroutines (planCells).
-var shimPaths = map[string]bool{netloopPath: true, osmodelPath: true}
+var shimPaths = map[string]bool{netloopPath: true, osmodelPath: true, randmodelPath: true}
 
 // addNetLoop adds the loopback model (package netloop) to a program that
 // calls net.Listen or net.Dial, and makes those calls call it: a listener
 // in a table, a connection a net.Pipe pair through its backlog. Both ends
 // are then the program's own code over channels.
 func addNetLoop(sprog *ssa.Program) error {
-	return addShim(sprog, "net", netloopCalls, netloopPath, netloopSrc)
+	return addShim(sprog, "net", netloopCalls, nil, netloopPath, netloopSrc)
 }
 
 // addOSModel adds package osmodel to a program that calls the os functions
 // it models, and makes those calls call it.
 func addOSModel(sprog *ssa.Program) error {
-	return addShim(sprog, "os", osmodelCalls, osmodelPath, osmodelSrc)
+	return addShim(sprog, "os", osmodelCalls, nil, osmodelPath, osmodelSrc)
+}
+
+// addRandModel adds package randmodel to a program that uses crypto/rand's
+// Read or Reader.
+func addRandModel(sprog *ssa.Program) error {
+	return addShim(sprog, "crypto/rand", randmodelCalls, randmodelVars, randmodelPath, randmodelSrc)
 }
 
 // addShim type-checks src as package path into the program when it calls
-// any of the functions of package pkg named in calls, and points those
-// calls at the shim's functions. The shim's own calls of them are left
-// alone: they read what the model does not know.
-func addShim(sprog *ssa.Program, pkg string, calls map[string]string, path, src string) error {
+// any of the functions of package pkg named in calls, or reads any of its
+// variables named in vars, and points those calls and reads at the shim's
+// functions and variables (of the same types). The shim's own calls of
+// them are left alone: they read what the model does not know.
+func addShim(sprog *ssa.Program, pkg string, calls, vars map[string]string, path, src string) error {
 	stdPkg := sprog.ImportedPackage(pkg)
 	if stdPkg == nil {
 		return nil
@@ -69,25 +90,44 @@ func addShim(sprog *ssa.Program, pkg string, calls map[string]string, path, src 
 			targets[f] = shim
 		}
 	}
+	globals := map[*ssa.Global]string{}
+	for name, shim := range vars {
+		if g := stdPkg.Var(name[len(pkg)+1:]); g != nil {
+			globals[g] = shim
+		}
+	}
 	type site struct {
 		c    *ssa.CallCommon
 		shim string
 	}
+	type use struct {
+		op   *ssa.Value
+		shim string
+	}
 	var sites []site
+	var uses []use
 	for f := range ssautil.AllFunctions(sprog) {
+		if f.Pkg == stdPkg {
+			continue
+		}
 		for _, b := range f.Blocks {
 			for _, in := range b.Instrs {
-				c, ok := in.(ssa.CallInstruction)
-				if !ok {
-					continue
+				if c, ok := in.(ssa.CallInstruction); ok {
+					if callee, ok := c.Common().Value.(*ssa.Function); ok && targets[callee] != "" {
+						sites = append(sites, site{c.Common(), targets[callee]})
+					}
 				}
-				if callee, ok := c.Common().Value.(*ssa.Function); ok && targets[callee] != "" {
-					sites = append(sites, site{c.Common(), targets[callee]})
+				if len(globals) > 0 {
+					for _, op := range in.Operands(nil) {
+						if g, ok := (*op).(*ssa.Global); ok && globals[g] != "" {
+							uses = append(uses, use{op, globals[g]})
+						}
+					}
 				}
 			}
 		}
 	}
-	if len(sites) == 0 {
+	if len(sites) == 0 && len(uses) == 0 {
 		return nil
 	}
 	file, err := parser.ParseFile(sprog.Fset, "go2lean_"+path[len("go2lean/"):]+".go", src, 0)
@@ -117,6 +157,9 @@ func addShim(sprog *ssa.Program, pkg string, calls map[string]string, path, src 
 	spkg.Build()
 	for _, s := range sites {
 		s.c.Value = spkg.Func(s.shim)
+	}
+	for _, u := range uses {
+		*u.op = spkg.Var(u.shim)
 	}
 	return nil
 }
