@@ -36,13 +36,15 @@ func testUnsetenv() bool {
 	return !ok && os.Getenv("GO2LEAN_SEM_C") == ""
 }
 
-// An empty key, or one holding '=', is rejected, and nothing is set.
+// An empty key, one holding '=', or a value holding NUL is rejected, and
+// the variable keeps the value it had.
 func testSetenvInvalid() bool {
-	if os.Setenv("", "x") == nil || os.Setenv("GO2LEAN_SEM=D", "x") == nil {
+	os.Setenv("GO2LEAN_SEM_D", "keep")
+	if os.Setenv("", "x") == nil || os.Setenv("GO2LEAN_SEM=D", "x") == nil ||
+		os.Setenv("GO2LEAN_SEM_D", "a\x00b") == nil {
 		return false
 	}
-	_, ok := os.LookupEnv("GO2LEAN_SEM")
-	return !ok
+	return os.Getenv("GO2LEAN_SEM_D") == "keep"
 }
 
 // Two directories from one pattern are different, and each name is the

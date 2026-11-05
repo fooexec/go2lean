@@ -1,4 +1,5 @@
 testinittickerdaemon exhausted_assuming  # by design: a goroutine waits on a ticker a package initializer started, which the trials do not keep (#129)
+testmkdirtempfresh exhausted_assuming  # by design: os.RemoveAll of the directories is not modelled (osmodel models MkdirTemp only)
 testnetlistendialecho exhausted_havoc  # sampled: a round trip through Accept and a pipe has more schedules than the exhaustive engine runs (#126)
 testnetpipewriteread exhausted_havoc  # sampled: a pipe's selects give more schedules than the exhaustive engine runs (#122)
 testpoolgetfromnew exhausted_assuming  # by design: Get gives New, objects Put back are not modelled (#105)
