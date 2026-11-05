@@ -489,3 +489,18 @@ It used the same harnesses, budget and scoring. `run22.sh` ran it and `score22.s
   | mutation | 32 min |
 
   Mutation gave each of its 24 mutants a share of the budget, but checked it only before each trial. Each mutant ran at least one trial, and those trials do not resume from the setup snapshot, so each one redoes k042's 16384-stripe setup at 256000 fuel. Mutation now stops at the whole budget (#159). Rerun at #159's head, k042 finishes in 1202 s instead of 2400. Mutation stops after 4 of 24 mutants. k042 is still not found: at 256000 fuel the random search runs 12 trials in its 300 s, about 25 s each, and the exhaustive engine 158 of its 294 inputs. The cost of one trial is the next thing to cut.
+
+## Reruns 8 and 9: concurrent-machine speed, purego, field slices (2026-11-05)
+
+**rerun 8** at #162's head (`2f9d74b`): the concurrent machine no longer copies its heap, log or race maps every step, and the model is translated with the `purego` tag. **rerun 9** of k009, k042 and k023 at #163's head (`b138335`): slices of a struct's array field alias it, and `encoding/base32`, `base64` and `hex` are translated. Same harnesses, flags and budget as rerun 7. Per case: the "rerun 9" columns of [results-rerun.tsv](conc-recent/results-rerun.tsv); k016 is rerun 8's.
+
+| case | rerun 7 | rerun 8 | rerun 9 | next gap |
+|---|---|---|---|---|
+| k016 | found, 448 s | found (trial 4), 518 s | – | – |
+| k042 | 2400 s limit | spurious: `xxhash` `Digest.Write` stuck, 793 s | none in 35 trials, 1435 s | the defect needs a chunk write to fail; the harness removes the directory with `os.RemoveAll`, and the model does not model the file system |
+| k009 | inconclusive | inconclusive | inconclusive, 349 s | otel's attribute sets: `computeDataFixed` stuck, `slices.insertionSortCmpFunc` |
+| k023 | spurious (a stuck `Read`) | spurious: `base32` | spurious, 1464 s: `crypto/ed25519.GenerateKey` | the ed25519 keys nkeys makes when the server starts |
+
+- **Speed.** At 256000 fuel, k042's search runs 37 trials in 120 s where it ran 3, and an out-of-fuel trial takes 16 s instead of 158 s (#162).
+- **Each blocker of rerun 7 is gone.** k009 is no longer stuck in `xxhash`'s `Digest`; the refinement round translates `NewWithSeed`. k042 no longer gives a spurious counterexample. k023 gets past `crypto/rand` (#161) and `base32` (#163).
+- **Next.** In each case the next gap is code around the bug: otel's attribute sets, nkeys' ed25519 keys, and file-system errors.
