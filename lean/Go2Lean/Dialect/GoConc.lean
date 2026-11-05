@@ -801,7 +801,7 @@ def syncObj (g : Gor) (name : String) : Option (Nat × List Nat) :=
 the race it makes, or the shadow state with the access added. Two atomic
 accesses never race. -/
 def checkAccess (s : HState Val) (vc : Array Nat) (g : Nat) (k : Nat × List Nat) (write atomic : Bool) :
-    Except String (HState Val) :=
+    Option String × HState Val :=
   let unordered := fun (h c : Nat) (a : Bool) => h != g && c > vcGet vc h && !(atomic && a)
   let check := fun (e : Option (Nat × Nat × Bool) × List (Nat × Nat × Bool)) =>
     let byWrite := match e.1 with
@@ -822,12 +822,13 @@ def checkAccess (s : HState Val) (vc : Array Nat) (g : Nat) (k : Nat × List Nat
     else none)
   match race with
   | some (h, what) =>
-    .error s!"data race on object {k.1} at {k.2}: goroutine {g} {if write then "writes" else "reads"} it, goroutine {h} {what} it, neither ordered before the other"
+    -- The run ends at the race: the state comes back without its shadow.
+    (some s!"data race on object {k.1} at {k.2}: goroutine {g} {if write then "writes" else "reads"} it, goroutine {h} {what} it, neither ordered before the other", s)
   | none =>
     let clk := vcGet vc g
     let (w, rs) := paths.getD k.2 (none, [])
     let entry := if write then (some (g, clk, atomic), []) else (w, (g, clk, atomic) :: rs.filter (·.1 != g))
-    .ok { s with conc.shadow := shadow.insert k.1 (max depth k.2.length, paths.insert k.2 entry) }
+    (none, { s with conc.shadow := shadow.insert k.1 (max depth k.2.length, paths.insert k.2 entry) })
 
 /-- Go's race annotations of `sync.WaitGroup`, as accesses to a location of
 its own next to the counter: an `Add` that raises the counter from zero
@@ -851,7 +852,7 @@ def wgAccesses (heap : Heap Val) (g g' : Gor) : List (Val × Nat) × List (Val �
 /-- After goroutine `i` stepped from `gs` to `gs'` (firing `name`, completing
 `partners`): its synchronisation, then its accesses, in order. -/
 def raceStep (gs gs' : Array Gor) (i : Nat) (name : String) (partners : List Nat) (s : HState Val) :
-    Except String (Array Gor × HState Val) :=
+    Except String (Array Gor) × HState Val :=
   let vcOf := fun (gs : Array Gor) (j : Nat) => (gs[j]?.map (·.vc)).getD #[]
   let (gs', s) :=
     if name == "spawn" then
@@ -865,8 +866,10 @@ def raceStep (gs gs' : Array Gor) (i : Nat) (name : String) (partners : List Nat
       let parts := i :: partners
       let joined := parts.foldl (fun v j => vcJoin v (vcOf gs j)) (syncGet s k)
       (parts.foldl (fun gs' j => gs'.modify j fun g => { g with vc := vcTick joined j }) gs', syncSet s k joined)
-  let rec go : List (Val × Nat) → Array Nat → HState Val → Except String (Array Nat × HState Val)
-    | [], vc, s => .ok (vc, s)
+  -- The state comes back on a race too, so that the caller keeps no copy
+  -- of its own: the race detector's maps are then updated in place.
+  let rec go : List (Val × Nat) → Array Nat → HState Val → Except String (Array Nat) × HState Val
+    | [], vc, s => (.ok vc, s)
     | (p, kind) :: rest, vc, s =>
       match locKey p with
       | none => go rest vc s
@@ -876,14 +879,15 @@ def raceStep (gs gs' : Array Gor) (i : Nat) (name : String) (partners : List Nat
         | 3 => go rest (vcTick vc i) (syncSet s k (vcJoin (syncGet s k) vc))
         | _ =>
           match checkAccess s vc i k (kind == 1 || kind == 5) (kind ≥ 4) with
-          | .ok s => go rest vc s
-          | .error e => .error e
+          | (none, s) => go rest vc s
+          | (some e, s) => (.error e, s)
   let (wgAdd, wgWait) := match gs[i]?, gs'[i]? with
     | some g, some g' => wgAccesses s.heap g g'
     | _, _ => ([], [])
-  match go (wgAdd ++ s.conc.acc.toList ++ wgWait) (vcOf gs' i) s with
-  | .ok (vc, s) => .ok (gs'.modify i fun g => { g with vc }, { s with conc.acc := #[] })
-  | .error e => .error e
+  let acc := s.conc.acc.toList
+  match go (wgAdd ++ acc ++ wgWait) (vcOf gs' i) s with
+  | (.ok vc, s) => (.ok (gs'.modify i fun g => { g with vc }), { s with conc.acc := #[] })
+  | (.error e, s) => (.error e, s)
 
 /-- The machine where the main goroutine, still the only one, reached its
 `setupEnd` (#87): the goroutines, the state, and the schedule steps and
@@ -935,8 +939,8 @@ def scheduleS (p : Prog) (or : Oracle) (h : Havoc Val) (stepFuel : Nat) (stop : 
         -- the replay follows.
         let s := if name == "setupEnd" then s else { s with conc.sched := s.conc.sched.push (i, name, partners, pkg) }
         match raceStep gs gs' i name partners s with
-        | .ok (gs', s) => scheduleS p or h stepFuel stop gs' s n (if live.isEmpty then idle + 1 else 0)
-        | .error e => .inr (.panic .dataRace, { s with panicAt := some e })
+        | (.ok gs', s) => scheduleS p or h stepFuel stop gs' s n (if live.isEmpty then idle + 1 else 0)
+        | (.error e, s) => .inr (.panic .dataRace, { s with panicAt := some e })
       | (.error .other, s) => .inr (.outOfFuel, s)
       | (.error k, s) => .inr (.panic k, s)
 
