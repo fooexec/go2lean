@@ -54,7 +54,7 @@ def specHolds (v lo hi : BitVec 64) : Bool :=
 
 theorem clampIdentity (v lo hi : BitVec 64) : specHolds v lo hi = true := by
   simp [specHolds, run, runFunc, runBlock, execInstrs, enter, bindParams, prog_clamp, prog_spec,
-    f0, f4, Dialect.denote, Dialect.toBool, Dialect.assumption, GoSSA.assumption, denote_slt, denote_sgt, denote_const]
+    f0, f4, Dialect.denote, Dialect.denoteH, GoSSA.denoteH_spec, Dialect.toBool, Dialect.assumption, GoSSA.assumption, denote_slt, denote_sgt, denote_const]
   cases h1 : v.slt lo <;> cases h2 : hi.slt v <;> cases h3 : hi.slt lo <;> simp_all <;> bv_decide
 
 #print axioms clampIdentity

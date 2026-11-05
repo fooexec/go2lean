@@ -115,6 +115,15 @@ of the same location agree. `toBool` reads a branch condition. -/
 class Dialect (Op : Type) (Val Oracle : outParam Type) where
   /-- One instruction: reads the oracle, may read and write the heap. -/
   denote : Oracle → Heap Val → Op → List Val → Res (Val × Heap Val)
+  /-- `denote` with the heap owned: it comes back on every outcome (the
+  heap before the op when the op fails), so the interpreter can hand it
+  over unshared and the op can update it in place (#71). -/
+  denoteH : Oracle → Heap Val → Op → List Val → Res Val × Heap Val :=
+    fun or heap o vals =>
+      match denote or heap o vals with
+      | .ok (v, heap') => (.ok v, heap')
+      | .panic k => (.panic k, heap)
+      | .outOfFuel => (.outOfFuel, heap)
   toBool : Val → Option Bool
   /-- The function a func value calls. -/
   callee : Val → Callee Val := fun _ => .unknown
@@ -356,16 +365,20 @@ def execInstrs (or : Oracle) (h : Havoc Val) (track : Bool) :
         let s := { s with conc.acc := #[] }
         { s with conc.acc := (Dialect.accesses o vals).foldl (·.push ·) acc }
       else s
-    match Dialect.denote or s.heap o vals with
-    | .ok (v, heap) => execInstrs or h track rest (env.set! dst v) { s with heap := heap }
-    | .panic .modelStuck =>
+    -- The heap is taken out of `s`, so that the op owns it and the ones
+    -- that write it do so in place (#71).
+    let heap := s.heap
+    let s := { s with heap := #[] }
+    match Dialect.denoteH or heap o vals with
+    | (.ok v, heap) => execInstrs or h track rest (env.set! dst v) { s with heap := heap }
+    | (.panic .modelStuck, heap) =>
       -- Record where (op and operand shapes, truncated) for the engines.
-      let site := match Dialect.stuckSite s.heap o vals with
+      let site := match Dialect.stuckSite heap o vals with
         | some d => (d.take 300).toString
         | none => (s!"{repr o} {repr vals}".take 160).toString
-      (.panic .modelStuck, { s with stuck := s.stuck <|> some site })
-    | .panic k => (.panic k, { s with panicAt := s.panicAt <|> some (s!"{repr o}".take 160).toString })
-    | .outOfFuel => (.outOfFuel, s)
+      (.panic .modelStuck, { s with heap := heap, stuck := s.stuck <|> some site })
+    | (.panic k, heap) => (.panic k, { s with heap := heap, panicAt := s.panicAt <|> some (s!"{repr o}".take 160).toString })
+    | (.outOfFuel, heap) => (.outOfFuel, { s with heap := heap })
   | .probe label v :: rest, env, s =>
     execInstrs or h track rest env { s with probes := s.probes.push (label, env[v]!) }
   | .havoc dst site :: rest, env, s =>
