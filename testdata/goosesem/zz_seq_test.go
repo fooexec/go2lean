@@ -53,6 +53,15 @@ func SeqTestAtomicInt64AndOr() bool { return testAtomicInt64AndOr() }
 // go2lean:sequence testAtomicUint32CompareAndSwap
 func SeqTestAtomicUint32CompareAndSwap() bool { return testAtomicUint32CompareAndSwap() }
 
+// go2lean:sequence testBase32NoPadding
+func SeqTestBase32NoPadding() bool { return testBase32NoPadding() }
+
+// go2lean:sequence testBase32RoundTrip
+func SeqTestBase32RoundTrip() bool { return testBase32RoundTrip() }
+
+// go2lean:sequence testBase64RoundTrip
+func SeqTestBase64RoundTrip() bool { return testBase64RoundTrip() }
+
 // go2lean:sequence testBasicInterface
 func SeqTestBasicInterface() bool { return testBasicInterface() }
 
@@ -325,6 +334,9 @@ func SeqTestFooBarMutation() bool { return testFooBarMutation() }
 
 // go2lean:sequence testForLoopWait
 func SeqTestForLoopWait() bool { return testForLoopWait() }
+
+// go2lean:sequence testHexRoundTrip
+func SeqTestHexRoundTrip() bool { return testHexRoundTrip() }
 
 // go2lean:sequence testIOReadAllChunks
 func SeqTestIOReadAllChunks() bool { return testIOReadAllChunks() }
