@@ -34,6 +34,7 @@ memory images.
 | struct | `.structv fields` | exact |
 | array `[N]T` | `.arr elems` (a value; `N > 64` is opaque in the ABI) | exact |
 | slice | `.slice ref off len cap` over a heap `.arr` | exact |
+| a heap array of more than 256 elements (`make([]T, n)`, `new([N]T)`, up to 16384) | `.arrA elems`, an `Array` the interpreter updates in place (#71): a `List` costs O(i) per element read or write, so a loop over a large slice was quadratic. Stores and allocations own the heap (`denoteH`, the same results as `denote` by `denoteH_spec`) | exact |
 | map | `.boxed 1 p`, `p` → heap `.arr` of `(key, value)` in insertion order; nil is `.opaqueNil` | exact for maps the program built or the generator made; see §5 |
 | interface (incl. `any`) | `.boxed tag v` (`tag` = hash of the dynamic type's name), nil is `.opaqueNil` | exact for values the program boxed or the generator made; `.unit` (unknown) for others |
 | func | `.boxed 0 (tuple [fid, captured…])`, nil `.opaqueNil` | exact for functions and closures of the program |

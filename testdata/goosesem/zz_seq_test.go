@@ -56,6 +56,30 @@ func SeqTestAtomicUint32CompareAndSwap() bool { return testAtomicUint32CompareAn
 // go2lean:sequence testBasicInterface
 func SeqTestBasicInterface() bool { return testBasicInterface() }
 
+// go2lean:sequence testBigArrayConstLen
+func SeqTestBigArrayConstLen() bool { return testBigArrayConstLen() }
+
+// go2lean:sequence testBigArrayEqual
+func SeqTestBigArrayEqual() bool { return testBigArrayEqual() }
+
+// go2lean:sequence testBigBytesString
+func SeqTestBigBytesString() bool { return testBigBytesString() }
+
+// go2lean:sequence testBigSliceAppendCopy
+func SeqTestBigSliceAppendCopy() bool { return testBigSliceAppendCopy() }
+
+// go2lean:sequence testBigSliceFillRead
+func SeqTestBigSliceFillRead() bool { return testBigSliceFillRead() }
+
+// go2lean:sequence testBigSliceJSON
+func SeqTestBigSliceJSON() bool { return testBigSliceJSON() }
+
+// go2lean:sequence testBigSliceOfStructs
+func SeqTestBigSliceOfStructs() bool { return testBigSliceOfStructs() }
+
+// go2lean:sequence testBigSliceReverse
+func SeqTestBigSliceReverse() bool { return testBigSliceReverse() }
+
 // go2lean:sequence testBinaryExprInterface
 func SeqTestBinaryExprInterface() bool { return testBinaryExprInterface() }
 

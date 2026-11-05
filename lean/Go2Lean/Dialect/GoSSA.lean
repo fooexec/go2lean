@@ -36,6 +36,10 @@ inductive Val where
   | structv (fields : List Val)
   /-- A heap array: the backing store of a slice or an allocated array. -/
   | arr (elems : List Val)
+  /-- A large heap array (more than `bigArr` elements) in an `Array`, which
+  the model updates in place (#71): a `List` costs O(i) to read or write
+  element `i`, so a loop over a large array is quadratic. -/
+  | arrA (elems : Array Val)
   /-- A string: `len` bytes starting at `off` in the immutable byte array
   `ref` (elements are `.int 8`). The empty string is `str 0 0 0`. -/
   | str (ref : Nat) (off len : BitVec 64)
@@ -51,6 +55,22 @@ inductive Val where
   deriving Repr
 
 instance : Inhabited Val := ⟨.unit⟩
+
+/-- Heap arrays with more elements than this are `arrA`. -/
+def bigArr : Nat := 256
+
+/-- A heap array holding `es`: `arrA` when it is large, else `arr`. -/
+def mkArr (es : List Val) : Val := if es.length > bigArr then .arrA es.toArray else .arr es
+
+/-- The elements of a heap array, in either form. -/
+def arrList? : Val → Option (List Val)
+  | .arr es => some es
+  | .arrA es => some es.toList
+  | _ => none
+
+/-- `es` written over `as` from index `i`, in place when `as` is unshared. -/
+def writeAtA (as : Array Val) (i : Nat) (es : List Val) : Array Val :=
+  (es.foldl (fun (as, j) e => (as.set! j e, j + 1)) (as, i)).1
 
 /-- A struct field as `encoding/json` sees it: its key, its position in the
 struct value, its type in the table, and its tag options. -/
@@ -583,6 +603,7 @@ def eqVal : Val → Val → Option Bool
   -- Arrays and structs compare element by element (the frontend only
   -- lowers == on those whose elements compare without the heap).
   | .arr as, .arr bs => eqVals as bs
+  | .arrA ⟨as⟩, .arrA ⟨bs⟩ | .arr as, .arrA ⟨bs⟩ | .arrA ⟨as⟩, .arr bs => eqVals as bs
   | .structv as, .structv bs => eqVals as bs
   | .bool a, .bool b => some (a == b)
   | .err a, .err b => some (a == b)
@@ -616,6 +637,7 @@ def getPath : Val → List Nat → Option Val
   | v, [] => some v
   | .structv fs, i :: rest => fs[i]? >>= (getPath · rest)
   | .arr es, i :: rest => es[i]? >>= (getPath · rest)
+  | .arrA es, i :: rest => es[i]? >>= (getPath · rest)
   | _, _ => none
 
 /-- Replace the value at `path` inside object `v`. -/
@@ -625,6 +647,12 @@ def setPath : Val → List Nat → Val → Option Val
     fs[i]? >>= fun f => (setPath f rest nv).map fun f' => .structv (fs.set i f')
   | .arr es, i :: rest, nv =>
     es[i]? >>= fun e => (setPath e rest nv).map fun e' => .arr (es.set i e')
+  | .arrA es, i :: rest, nv =>
+    if h : i < es.size then
+      match setPath es[i] rest nv with
+      | some e' => some (.arrA (es.set i e' h))
+      | none => none
+    else none
   | _, _, _ => none
 
 -- Channels ---------------------------------------------------------------------
@@ -677,10 +705,63 @@ def heapLoad (heap : Heap Val) : Val → Res Val
 def heapStore (heap : Heap Val) : Val → Val → Res (Heap Val)
   | .ptr 0 _, _ => .panic .nilDereference
   | .ptr ref path, nv =>
-    match heap[ref]? >>= (setPath · path nv) with
-    | some obj => .ok (heap.set! ref obj)
-    | none => .panic .modelStuck
+    match heap[ref]? with
+    | some obj@(.arrA _) =>
+      -- A large array is updated in place: take it out of the heap first,
+      -- so that the heap does not share it (#71).
+      let heap := heap.set! ref .unit
+      match setPath obj path nv with
+      | some obj => .ok (heap.set! ref obj)
+      | none => .panic .modelStuck
+    | o =>
+      match o >>= (setPath · path nv) with
+      | some obj => .ok (heap.set! ref obj)
+      | none => .panic .modelStuck
   | _, _ => .panic .modelStuck
+
+/-- `setPath` succeeds exactly where `getPath` does. -/
+theorem setPath_isSome (v : Val) (path : List Nat) (nv : Val) :
+    (setPath v path nv).isSome = (getPath v path).isSome := by
+  induction path generalizing v with
+  | nil => simp [setPath, getPath]
+  | cons i rest ih =>
+    cases v <;> simp only [setPath, getPath] <;> try rfl
+    case structv fs =>
+      cases h : fs[i]? <;> simp [ih]
+    case arr es =>
+      cases h : es[i]? <;> simp [ih]
+    case arrA es =>
+      by_cases hi : i < es.size
+      · have := ih es[i]
+        simp only [hi, dite_true, getElem?_pos, Option.bind_some]
+        cases h : setPath es[i] rest nv <;> simp_all
+      · simp [hi]
+
+/-- Whether a store through `p` succeeds: `none`, or the panic it gives.
+It reads the heap without changing it, so that `denoteH` can hand the heap
+to `heapStore` unshared and still give it back unchanged on a failure. -/
+def storeCheck (heap : Heap Val) : Val → Option PanicKind
+  | .ptr 0 _ => some .nilDereference
+  | .ptr ref path => if (heap[ref]? >>= (getPath · path)).isSome then none else some .modelStuck
+  | _ => some .modelStuck
+
+theorem heapStore_of_storeCheck (heap : Heap Val) (p v : Val) :
+    match storeCheck heap p with
+    | none => ∃ h', heapStore heap p v = .ok h'
+    | some k => heapStore heap p v = .panic k := by
+  match p with
+  | .ptr 0 _ => simp [storeCheck, heapStore]
+  | .ptr (r + 1) path =>
+    simp only [storeCheck, heapStore]
+    cases hr : heap[r + 1]? with
+    | none => simp
+    | some obj =>
+      have hs := setPath_isSome obj path v
+      cases obj <;> simp only [Option.bind_some] at hs ⊢ <;>
+        (split <;> rename_i hg <;> simp_all <;>
+          (try (cases hset : setPath _ path v <;> simp_all)))
+  | .int .. | .bool .. | .slice .. | .tuple .. | .err .. | .structv .. | .arr .. | .arrA ..
+  | .str .. | .boxed .. | .opaqueNil | .unit => simp [storeCheck, heapStore]
 
 /-- Allocate `obj`; the heap's slot 0 is nil, so the first real object gets
 reference 1. -/
@@ -704,6 +785,8 @@ def strBytes (heap : Heap Val) : Val → Option (List Nat)
     match heap[ref]? with
     | some (.arr es) =>
       some (((es.drop off.toNat).take len.toNat).map fun | .int _ v => v.toNat | _ => 0)
+    | some (.arrA es) =>
+      some ((es.extract off.toNat (off.toNat + len.toNat)).toList.map fun | .int _ v => v.toNat | _ => 0)
     | _ => none
   | _ => none
 
@@ -890,6 +973,7 @@ def strSliceBytes (heap : Heap Val) : Val → Option (List (List Nat))
   | .slice ref off len _ =>
     match heap[ref]? with
     | some (.arr es) => ((es.drop off.toNat).take len.toNat).mapM (strBytes heap)
+    | some (.arrA es) => (es.extract off.toNat (off.toNat + len.toNat)).toList.mapM (strBytes heap)
     | _ => none
   | _ => none
 
@@ -899,6 +983,7 @@ def sliceElems (heap : Heap Val) : Val → Option (List Val)
   | .slice ref off len _ =>
     match heap[ref]? with
     | some (.arr es) => some ((es.drop off.toNat).take len.toNat)
+    | some (.arrA es) => some (es.extract off.toNat (off.toNat + len.toNat)).toList
     | _ => none
   | _ => none
 
@@ -909,6 +994,7 @@ def eqDeep (heap : Heap Val) : Val → Val → Option Bool
     | some x, some y => some (x == y)
     | _, _ => none
   | .arr as, .arr bs => eqDeeps heap as bs
+  | .arrA ⟨as⟩, .arrA ⟨bs⟩ | .arr as, .arrA ⟨bs⟩ | .arrA ⟨as⟩, .arr bs => eqDeeps heap as bs
   | .structv as, .structv bs => eqDeeps heap as bs
   | a, b => eqVal a b
 where
@@ -932,6 +1018,7 @@ def isZeroVal : Val → Option Bool
   | .opaqueNil => some true
   | .boxed .. => some false
   | .arr vs => allZero vs
+  | .arrA ⟨vs⟩ => allZero vs
   | .structv vs => allZero vs
   | _ => none
 where
@@ -1078,6 +1165,7 @@ def reflectDeepEq (heap : Heap Val) : Nat → Val → Val → Option Bool
         | .ok x, .ok y => reflectDeepEq heap n x y
         | _, _ => none
     | .arr xs, .arr ys | .structv xs, .structv ys => all n xs ys
+    | .arrA ⟨xs⟩, .arrA ⟨ys⟩ | .arr xs, .arrA ⟨ys⟩ | .arrA ⟨xs⟩, .arr ys => all n xs ys
     | .boxed 1 _, .boxed 1 _ =>
       match mapEntries heap a, mapEntries heap b with
       | some (_, es), some (_, fs) =>
@@ -1738,6 +1826,11 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
           | some (.int _ v) => .ok (.int w (v.zeroExtend w))
           | some v => .ok v
           | none => .panic .modelStuck
+        | some (.arrA es) =>
+          match es[(off + i).toNat]? with
+          | some (.int _ v) => .ok (.int w (v.zeroExtend w))
+          | some v => .ok v
+          | none => .panic .modelStuck
         | _ => .ok (.int w ((or.mem ref (off + i)).zeroExtend w))
       else .panic .indexOutOfRange
     | none => .panic .modelStuck
@@ -1759,8 +1852,17 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
     match asIndex i, heap[ref]? >>= (getPath · path) with
     | some i, some (.arr es) =>
       if i.toNat < es.length then .ok (.ptr ref (path ++ [i.toNat])) else .panic .indexOutOfRange
+    | some i, some (.arrA es) =>
+      if i.toNat < es.size then .ok (.ptr ref (path ++ [i.toNat])) else .panic .indexOutOfRange
     | _, _ => .panic .modelStuck
   | .arrIndex, [.arr es, i] =>
+    match asIndex i with
+    | some i =>
+      match es[i.toNat]? with
+      | some v => .ok v
+      | none => .panic .indexOutOfRange
+    | none => .panic .modelStuck
+  | .arrIndex, [.arrA es, i] =>
     match asIndex i with
     | some i =>
       match es[i.toNat]? with
@@ -1776,11 +1878,17 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
         .ok (.slice ref lo (hi - lo) (BitVec.ofNat 64 es.length - lo))
       else if !path.isEmpty then .panic .modelStuck
       else .panic .sliceBounds
+    | some lo, some hi, some (.arrA es) =>
+      if path.isEmpty && lo.ule hi && hi.toNat ≤ es.size then
+        .ok (.slice ref lo (hi - lo) (BitVec.ofNat 64 es.size - lo))
+      else if !path.isEmpty then .panic .modelStuck
+      else .panic .sliceBounds
     | _, _, _ => .panic .modelStuck
   | .strLen, [.ptr ref path] =>
     -- `len(a)` for a pointer to an array, reached through the generic path.
     match heap[ref]? >>= (getPath · path) with
     | some (.arr es) => .ok (.int 64 (BitVec.ofNat 64 es.length))
+    | some (.arrA es) => .ok (.int 64 (BitVec.ofNat 64 es.size))
     | _ => .panic .modelStuck
   | .isNil, [.ptr r _] => .ok (.bool (r == 0))
   | .isNil, [.err nonNil] => .ok (.bool !nonNil)
@@ -1917,6 +2025,10 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
     match asIndex lo, asIndex hi, asIndex mx, heap[ref]? >>= (getPath · path) with
     | some lo, some hi, some mx, some (.arr es) =>
       if path.isEmpty && lo.ule hi && hi.ule mx && mx.toNat ≤ es.length then
+        .ok (.slice ref lo (hi - lo) (mx - lo))
+      else .panic (if path.isEmpty then .sliceBounds else .modelStuck)
+    | some lo, some hi, some mx, some (.arrA es) =>
+      if path.isEmpty && lo.ule hi && hi.ule mx && mx.toNat ≤ es.size then
         .ok (.slice ref lo (hi - lo) (mx - lo))
       else .panic (if path.isEmpty then .sliceBounds else .modelStuck)
     | _, _, _, _ => .panic .modelStuck
@@ -2342,6 +2454,7 @@ def jIsEmpty (heap : Heap Val) : Val → Bool
   | .ptr 0 _ | .opaqueNil => true
   | .slice _ _ len _ => len == 0
   | .arr es => es.isEmpty
+  | .arrA es => es.isEmpty
   | m@(.boxed 1 _) => match mapEntries heap m with | some (_, es) => es.isEmpty | none => false
   | .tuple [.arr [.int _ b]] => b.toNat == 48 -- a known float: zero
   | _ => false
@@ -2419,8 +2532,10 @@ partial def jEnc (t : JTable) (heap : Heap Val) (d : Nat) (v : Val) : Except Boo
   | some (.slice e), .slice ref off len _ =>
     match heap[ref]? with
     | some (.arr es) => elems e ((es.drop off.toNat).take len.toNat)
+    | some (.arrA es) => elems e (es.extract off.toNat (off.toNat + len.toNat)).toList
     | _ => .error false
   | some (.arr _ e), .arr es => elems e es
+  | some (.arr _ e), .arrA es => elems e es.toList
   | some (.ptr _), .ptr 0 _ => .ok (asciiBytes "null")
   | some (.ptr e), p@(.ptr ..) =>
     match heapLoad heap p with
@@ -2470,8 +2585,8 @@ partial def jEnc (t : JTable) (heap : Heap Val) (d : Nat) (v : Val) : Except Boo
       | none => .error false
     | none, .slice 0 .. => .ok (asciiBytes "null")
     | none, .slice ref off len _ =>
-      match heap[ref]? with
-      | some (.arr es) =>
+      match heap[ref]?.bind arrList? with
+      | some es =>
         let es := (es.drop off.toNat).take len.toNat
         -- []interface{} only: a []byte encodes as base64.
         if es.all (fun x => x matches .boxed .. || x matches .opaqueNil) then elems d es else .error false
@@ -2967,6 +3082,7 @@ partial def jsZero : Val → Bool
   | .ptr 0 _ | .slice 0 .. | .opaqueNil | .unit | .boxed 0 _ => true
   | .tuple [.arr [.int _ b]] => b.toNat == 48 -- a known float: zero
   | .structv vs | .arr vs => vs.all jsZero
+  | .arrA vs => vs.all jsZero
   | _ => false
 
 def jObjBytes (members : List (List Nat × List Nat)) : List Nat :=
@@ -2998,8 +3114,10 @@ partial def jDoc (t : JTable) (heap : Heap Val) (d : Nat) (v : Val) : Option (Li
   | some (.slice e), .slice ref off len _ =>
     match heap[ref]? with
     | some (.arr es) => elems e ((es.drop off.toNat).take len.toNat)
+    | some (.arrA es) => elems e (es.extract off.toNat (off.toNat + len.toNat)).toList
     | _ => none
   | some (.arr _ e), .arr es => elems e es
+  | some (.arr _ e), .arrA es => elems e es.toList
   | some (.map ..), .opaqueNil => some (asciiBytes "{}")
   | some (.map kd vd), m@(.boxed 1 _) => do
     let (_, es) ← mapEntries heap m
@@ -3033,6 +3151,7 @@ partial def jDoc (t : JTable) (heap : Heap Val) (d : Nat) (v : Val) : Option (Li
         | .slice ref off len _ =>
           match heap[ref]? with
           | some (.arr es) => elems d ((es.drop off.toNat).take len.toNat)
+          | some (.arrA es) => elems d (es.extract off.toNat (off.toNat + len.toNat)).toList
           | _ => none
         | _ => none
       else none
@@ -3259,7 +3378,7 @@ def sbAppend (heap : Heap Val) (p : Val) : Option (List Nat) → Res (Val × Hea
 
 /-- All instructions: heap-touching ones here, the rest via `denotePure`. -/
 def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Heap Val)
-  | .alloc zero, [] => .ok (heapAlloc heap zero)
+  | .alloc zero, [] => .ok (heapAlloc heap (match zero with | .arr es => mkArr es | z => z))
   | .makeMap, [] =>
     let (p, heap) := heapAlloc heap (.arr [])
     .ok (.boxed 1 p, heap)
@@ -3648,7 +3767,7 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
     | some ts =>
       match s with
       | .slice 0 _ _ _ =>
-        let (p, heap) := heapAlloc heap (.arr ts)
+        let (p, heap) := heapAlloc heap (mkArr ts)
         match p with
         | .ptr ref _ => .ok (.slice ref 0#64 (BitVec.ofNat 64 ts.length) (BitVec.ofNat 64 ts.length), heap)
         | _ => .panic .modelStuck
@@ -3669,7 +3788,23 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
             if newCap > sliceBound then .outOfFuel
             else
               let contents := (es.drop off.toNat).take len.toNat ++ ts ++ List.replicate (newCap - newLen) zero
-              let (p, heap) := heapAlloc heap (.arr contents)
+              let (p, heap) := heapAlloc heap (mkArr contents)
+              match p with
+              | .ptr ref' _ => .ok (.slice ref' 0#64 (BitVec.ofNat 64 newLen) (BitVec.ofNat 64 newCap), heap)
+              | _ => .panic .modelStuck
+        | some (.arrA es) =>
+          let newLen := len.toNat + ts.length
+          if newLen ≤ cap.toNat then
+            -- In place: the array is taken out of the heap first (#71).
+            let heap := heap.set! ref .unit
+            .ok (.slice ref off (BitVec.ofNat 64 newLen) cap,
+                 heap.set! ref (.arrA (writeAtA es (off.toNat + len.toNat) ts)))
+          else
+            let newCap := max (2 * cap.toNat) newLen
+            if newCap > sliceBound then .outOfFuel
+            else
+              let contents := (es.extract off.toNat (off.toNat + len.toNat)).toList ++ ts ++ List.replicate (newCap - newLen) zero
+              let (p, heap) := heapAlloc heap (mkArr contents)
               match p with
               | .ptr ref' _ => .ok (.slice ref' 0#64 (BitVec.ofNat 64 newLen) (BitVec.ofNat 64 newCap), heap)
               | _ => .panic .modelStuck
@@ -3683,6 +3818,9 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
       match heap[ref]? with
       | some (.arr es) =>
         .ok (.int 64 (BitVec.ofNat 64 n), heap.set! ref (.arr (writeAt es off.toNat (ts.take n))))
+      | some (.arrA es) =>
+        let heap := heap.set! ref .unit
+        .ok (.int 64 (BitVec.ofNat 64 n), heap.set! ref (.arrA (writeAtA es off.toNat (ts.take n))))
       | _ => .panic .modelStuck
     | _, _ => .panic .modelStuck
   | .conc c, args => denoteConc heap c args
@@ -3709,7 +3847,7 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
       -- A negative length or capacity panics, as in Go.
       if len.slt 0 || cap.slt 0 then .panic .makeSliceLen else
       if len.ule cap && cap.toNat ≤ sliceBound then
-        let (p, heap) := heapAlloc heap (.arr (List.replicate cap.toNat zero))
+        let (p, heap) := heapAlloc heap (mkArr (List.replicate cap.toNat zero))
         match p with
         | .ptr ref _ => .ok (.slice ref 0#64 len cap, heap)
         | _ => .panic .modelStuck
@@ -3769,8 +3907,55 @@ def accesses : Op → List Val → List (Val × Nat)
   | .conc .atomicStore, [p, _] => [(p, 5), (p, 3)]
   | _, _ => []
 
+/-- `denote` with the heap owned (#71): the heap comes back on every
+outcome, so the interpreter hands it over without keeping a reference of
+its own, and stores and allocations update it in place (a shared heap is
+copied whole by each of them, which makes a loop over a large array, or one
+that allocates, quadratic). Other ops go through `denote`. `denoteH_spec`:
+the results are `denote`'s. -/
+def denoteH (or : Oracle) (heap : Heap Val) (o : Op) (args : List Val) : Res Val × Heap Val :=
+  match o, args with
+  | .alloc zero, [] =>
+    let (p, heap) := heapAlloc heap (match zero with | .arr es => mkArr es | z => z)
+    (.ok p, heap)
+  | .makeMap, [] =>
+    let (p, heap) := heapAlloc heap (.arr [])
+    (.ok (.boxed 1 p), heap)
+  | .storePath, [p, v] =>
+    match storeCheck heap p with
+    | some k => (.panic k, heap)
+    | none =>
+      match heapStore heap p v with
+      | .ok heap => (.ok .unit, heap)
+      | .panic k => (.panic k, #[])
+      | .outOfFuel => (.outOfFuel, #[])
+  | o, args =>
+    match denote or heap o args with
+    | .ok (v, heap') => (.ok v, heap')
+    | .panic k => (.panic k, heap)
+    | .outOfFuel => (.outOfFuel, heap)
+
+theorem denoteH_spec (or : Oracle) (heap : Heap Val) (o : Op) (args : List Val) :
+    denoteH or heap o args =
+      match denote or heap o args with
+      | .ok (v, heap') => (.ok v, heap')
+      | .panic k => (.panic k, heap)
+      | .outOfFuel => (.outOfFuel, heap) := by
+  unfold denoteH
+  split
+  · simp [denote]
+  · simp [denote]
+  · rename_i p v
+    have h := heapStore_of_storeCheck heap p v
+    split at h <;> rename_i hc
+    · obtain ⟨h', hh⟩ := h
+      simp [denote, hc, hh]
+    · simp [denote, hc, h]
+  · rfl
+
 instance : Dialect Op Val Oracle where
   denote := denote
+  denoteH := denoteH
   accesses := accesses
   stuckSite := stuckSite
   assumption := assumption

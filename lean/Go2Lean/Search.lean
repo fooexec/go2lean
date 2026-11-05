@@ -775,6 +775,7 @@ partial def renderObj (heap : Heap Val) (signed : Bool) : Val → Json
   | .err nonNil => Json.str (if nonNil then "error" else "nil")
   | .structv fs => Json.arr (fs.map (renderObj heap signed)).toArray
   | .arr es => Json.arr (es.map (renderObj heap signed)).toArray
+  | .arrA es => Json.arr (es.map (renderObj heap signed))
   | .ptr 0 _ => Json.null
   | .ptr ref path =>
     match heap[ref]? >>= (getPath · path) with
@@ -803,6 +804,7 @@ partial def renderObj (heap : Heap Val) (signed : Bool) : Val → Json
   | .slice ref off len _ =>
     match heap[ref]? with
     | some (.arr es) => Json.arr ((es.drop off.toNat).take len.toNat |>.map (renderObj heap signed)).toArray
+    | some (.arrA es) => Json.arr ((es.extract off.toNat (off.toNat + len.toNat)).map (renderObj heap signed))
     | _ => Json.str "?"
   | v => Json.str (toString (repr v))
 
@@ -812,7 +814,7 @@ def memoryOf (or : Oracle) (heap : Heap Val) (gens : List Gen) (args : List Val)
   (gens.zip args).filterMap fun
     | (.slice name w signed _, .slice ref off len cap) =>
       match heap[ref]? with
-      | some (.arr _) => some (name, renderObj heap signed (.slice ref off len cap))
+      | some (.arr _) | some (.arrA _) => some (name, renderObj heap signed (.slice ref off len cap))
       | _ =>
         let elems := (List.range len.toNat).map fun j =>
           Json.str (renderInt signed ((or.mem ref (off + BitVec.ofNat 64 j)).zeroExtend w))
@@ -849,6 +851,7 @@ partial def renderVal : Val → Json
   | .str ref off len => Json.str s!"str(ref={ref}, off={off.toNat}, len={len.toNat})"
   | .structv fs => Json.arr (fs.map renderVal).toArray
   | .arr es => Json.arr (es.map renderVal).toArray
+  | .arrA es => Json.arr (es.map renderVal)
   | .boxed t v => Json.mkObj [("type", (t : Json)), ("value", renderVal v)]
   | .opaqueNil => Json.str "nil"
   | .unit => Json.str "unit"

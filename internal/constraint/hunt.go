@@ -1138,9 +1138,11 @@ func StoppedForMemory(summary string) bool {
 	return strings.Contains(summary, "stopped, out of memory") || strings.Contains(summary, "stopped: out of memory")
 }
 
-// maxFuelRaise bounds how far a hunt raises the fuel: 64 times the first
-// (64000 steps at the default 1000).
-const maxFuelRaise = 64
+// maxFuelRaise bounds how far a hunt raises the fuel: 256 times the first
+// (256000 steps at the default 1000). Fill loops over prometheus' 16384
+// stripes take more than 64000 (#71); a run that loops forever is not
+// raised for (fuelShort), and memgov stops one that would not fit.
+const maxFuelRaise = 256
 
 // fuelShort says whether a random search ran out of fuel on a quarter of
 // at least 20 trials, and none of the out-of-fuel runs rerun loops
