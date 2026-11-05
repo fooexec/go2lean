@@ -138,6 +138,12 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		if err := addNetLoop(sprog); err != nil {
 			return nil, "", err
 		}
+		// The environment the program writes, and temporary directories:
+		// os.Getenv, os.Setenv, os.MkdirTemp and friends call package
+		// osmodel.
+		if err := addOSModel(sprog); err != nil {
+			return nil, "", err
+		}
 		// math's assembly versions (archFloor, ...) call the portable Go
 		// ones (#148).
 		portableMath(sprog)
@@ -1257,6 +1263,8 @@ var modelledStdlib = map[string]bool{
 	"io":             true,
 	// The loopback model (addNetLoop, #126).
 	netloopPath: true,
+	// The environment and temporary-directory model (addOSModel).
+	osmodelPath: true,
 	// Floats (#148): the portable Go code, with the bits functions and
 	// Sqrt the dialect's (floatMathCall, portableMath).
 	"math": true,
@@ -5893,9 +5901,9 @@ func planCells(units []unit, mainPaths map[string]bool) *cellPlan {
 			plan.concurrent[u.path] = true
 			mainSpawns = mainSpawns || mainPaths[u.path]
 		}
-		if u.path == netloopPath {
-			// Its listener table is shared by every caller, with or
-			// without goroutines: cells.
+		if shimPaths[u.path] {
+			// The shims' tables (listeners, the environment) are shared by
+			// every caller, with or without goroutines: cells.
 			plan.concurrent[u.path] = true
 		}
 	}
