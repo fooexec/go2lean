@@ -163,9 +163,10 @@ the same concurrent harness): go2lean found **6**, Go's fuzzer under
 `-race` found **22**, and go2lean found none the fuzzer missed. go2lean's
 misses were gaps in its model of the code around the bug (sockets, atomics,
 standard-library calls it did not translate, runs out of fuel). Rerun after
-fixing the first of them, go2lean found **10**, then **11**, and k016 with more fuel
+fixing the first of them, go2lean found **10**, then **11**, then **12**; with
+large arrays updated in place it also finds k016 at the default budget
 ([details](docs/eval/conc-recent.md#rerun-at-main-2026-10-30),
-[k016](docs/eval/conc-recent.md#k016-found-87-2026-10-30),
+[rerun 6](docs/eval/conc-recent.md#rerun-of-the-fuel-cases-after-in-place-arrays-2026-11-05),
 [roadmap](https://github.com/andreasfoo/go2lean/issues/53)).
 
 [Validation and regression cases](docs/validation.md) ·

@@ -446,3 +446,20 @@ It used the same harnesses, budget and scoring. `run22.sh` ran it and `score22.s
 - **k023 not run.** nats-server's workspace passed 3.6 GB, and the build cache grew at the same time, so the disk filled twice. Each time the run was stopped and the case's output removed.
 - **One toolchain from k023 on.** Until then each case ran the Go that its `go.mod` asked for: a downloaded go1.25.x or go1.26.x, or the system go1.24.7 for older `go` lines. The container held eight toolchains, plus their build caches. From k023 on, `GOTOOLCHAIN=go1.26.6+auto` (`go env -w`) runs every case on go1.26.6, which every case's `go` line allows. k001 to k018 kept their earlier toolchain.
 - **Toolchain comparison: k001 only.** The rerun of k001 to k018 on go1.26.6 got through k001 (the same counterexample, confirmed) before the disk filled in k004.
+
+## Rerun of the fuel cases after in-place arrays (2026-11-05)
+
+**rerun 6**: arm A on k009, k016, k023 and k042 at #156's head (`a0a56a2`, merged as `41b0e4b`). #156 made heap arrays of more than 256 elements an `Array` updated in place, and raised the fuel up to 256 times the first (#71). Same harnesses, flags and budget as rerun 5, on a fresh machine. `run23.sh` ran it and `score23.sh` scored it. The bench was rebuilt from `pool.jsonl`, each parent being the fix's first parent, and every case ran on go1.26.6 (k009 and k016 ran on their own toolchain in rerun 5). Per case: the "rerun 6" columns of [results-rerun.tsv](conc-recent/results-rerun.tsv); the other cases were not run.
+
+| case | rerun 5 | rerun 6 | secs (5 → 6) |
+|---|---|---|---|
+| k016 | missed, all trials out of fuel | **found, adjudicated** | 1342 → 1258 |
+| k042 | missed, out of fuel | no result: stopped at the run's 2400 s limit | 1709 → 2400 |
+| k009 | none, trials stuck | none, 970 of 2000 out of fuel | 342 → 435 |
+| k023 | not run (disk) | spurious | – → 1245 |
+
+- **k016 found.** All 182 trials ran out of fuel at 64000. At 256000, the random search finds the violation at trial 3: two appends of one label set give two series. The replay at the parent confirms it (`ret: false`). At the fix, the real runs return true, and the model's schedule does not replay (`schedule_not_reproduced`). The fix replaces the separate `GetByHash` and `Set` with one `SetUnlessAlreadySet` under the stripe lock: new synchronisation, so k016 counts as adjudicated, like k010.
+- **k042 slower.** Each fuel raise starts a new random search with the full 300 s budget, and the budget is checked between trials only. The fifth search, at 256000, took the hunt past the run's 2400 s limit, and nothing was recorded. The setup reads `os.MkdirTemp`, which the model does not know, so it is not snapshotted and every trial redoes the 16384-stripe fill.
+- **k009 is not a fuel case.** The same 970 trials run out at 256000 as at 64000, inside one goroutine step from `registry.load`. The harness sets `OTEL_TRACES_EXPORTER=none`, but `os.Getenv` is havoc in the model (`docs/semantics.md`). otel's `autoexport` then falls back to `otlp`, and `registry.load` builds `otlptracehttp.New` while it holds its mutex, one long step.
+- **k023 fits.** nats-server's workspace and build fitted in 19 GB free, with one toolchain. The random search finds a nil dereference at trial 4. The replay calls it spurious: it rests on the result the model chose for `os.MkdirTemp` (the harness's `StoreDir`), and the real run returns true.
+- **Next.** `os.MkdirTemp` (k023, k042) and `os.Getenv`/`os.Setenv` (k009) are what block three of the four cases. Bounding the fuel raises by one budget per property would keep k042's cost in check, but k016 needs about 1250 s at the 300 s budget.
