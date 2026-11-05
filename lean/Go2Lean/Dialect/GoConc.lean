@@ -237,42 +237,45 @@ def findOther {α : Type} (gs : Array Gor) (i : Nat) (w : Gor → Option α) : O
 /-- The outcome of trying goroutine `i`'s pending operation. -/
 inductive Fire where
   | done (gs : Array Gor) (heap : Heap Val)
-  | blocked
-  | panic (k : PanicKind)
+  /-- Blocked or panicking: the heap comes back unchanged, so that the
+  caller can hand `fire` the heap unshared and keep it on every outcome
+  (a store into a shared heap copies it whole). -/
+  | blocked (heap : Heap Val)
+  | panic (k : PanicKind) (heap : Heap Val)
 
-instance : Inhabited Fire := ⟨.blocked⟩
+instance : Inhabited Fire := ⟨.blocked #[]⟩
 
 def setChan (heap : Heap Val) (ref : Nat) (cap : BitVec 64) (buf : List Val) (closed : Bool) (z : Val) : Heap Val :=
   heap.set! ref (chanObj cap buf closed z)
 
 /-- A send of `v` on `ch` by goroutine `i`, completed with `res`. -/
 def fireSend (heap : Heap Val) (gs : Array Gor) (i : Nat) (ch v res : Val) : Fire :=
-  if chanIsNil ch then .blocked else
+  if chanIsNil ch then .blocked heap else
   match chanGet heap ch with
-  | none => .panic .modelStuck
+  | none => .panic .modelStuck heap
   | some (ref, cap, buf, closed, z) =>
-    if closed then .panic .closedChannel
+    if closed then .panic .closedChannel heap
     else if cap.toNat > 0 then
       if buf.length < cap.toNat then
         .done (gs.modify i (complete · res)) (setChan heap ref cap (buf ++ [v]) false z)
-      else .blocked
+      else .blocked heap
     else
       match findOther gs i (recvWaiter heap ref) with
       | some (j, k) => .done ((gs.modify j (complete · (k v))).modify i (complete · res)) heap
-      | none => .blocked
+      | none => .blocked heap
 
 /-- A receive on `ch` by goroutine `i`; `res v ok` is its result. -/
 def fireRecv (heap : Heap Val) (gs : Array Gor) (i : Nat) (ch : Val) (res : Val → Bool → Val) : Fire :=
-  if chanIsNil ch then .blocked else
+  if chanIsNil ch then .blocked heap else
   match chanGet heap ch with
-  | none => .panic .modelStuck
+  | none => .panic .modelStuck heap
   | some (ref, cap, buf, closed, z) =>
     match buf with
     | v :: rest => .done (gs.modify i (complete · (res v true))) (setChan heap ref cap rest closed z)
     | [] =>
       match (if cap.toNat = 0 then findOther gs i (sendWaiter heap ref) else none) with
       | some (j, (v, sres)) => .done ((gs.modify j (complete · sres)).modify i (complete · (res v true))) heap
-      | none => if closed then .done (gs.modify i (complete · (res z false))) heap else .blocked
+      | none => if closed then .done (gs.modify i (complete · (res z false))) heap else .blocked heap
 
 /-- The lock word at `ptr`: any value these operations did not store is the
 zero state. -/
@@ -358,58 +361,59 @@ def fire (heap : Heap Val) (gs : Array Gor) (i : Nat) (choice : Nat) : Fire :=
   let done1 := fun (r : Val) (heap : Heap Val) => Fire.done (gs.modify i (complete · r)) heap
   let withWord := fun (o : Option (Heap Val)) (r : Val) => match o with
     | some heap => done1 r heap
-    | none => Fire.panic .modelStuck
+    -- The store itself failed: the run is stuck, its heap is not read.
+    | none => Fire.panic .modelStuck #[]
   match gs[i]? >>= pendingSync with
-  | none => .blocked
+  | none => .blocked heap
   | some (op, args) =>
     match op, args with
     | .send, [ch, v] => fireSend heap gs i ch v .unit
     | .recv withOk, [ch] => fireRecv heap gs i ch fun v ok => if withOk then .tuple [v, .bool ok] else v
     | .close, [ch] =>
-      if chanIsNil ch then .panic .closedChannel else
+      if chanIsNil ch then .panic .closedChannel heap else
       match chanGet heap ch with
-      | none => .panic .modelStuck
+      | none => .panic .modelStuck heap
       | some (ref, cap, buf, closed, z) =>
-        if closed then .panic .closedChannel else done1 .unit (setChan heap ref cap buf true z)
+        if closed then .panic .closedChannel heap else done1 .unit (setChan heap ref cap buf true z)
     | .select sends blocking, args =>
       let cases := selectCases sends args
       let tries := (cases.zipIdx).filterMap fun ((send, ch, v), k) =>
         let r := if send then fireSend heap gs i ch v (selectResult heap cases k false .unit)
           else fireRecv heap gs i ch fun x ok => selectResult heap cases k ok x
         match r with
-        | .blocked => none
+        | .blocked _ => none
         | r => some r
       match tries with
-      | [] => if blocking then .blocked else done1 (selectResult heap cases (-1) false .unit) heap
+      | [] => if blocking then .blocked heap else done1 (selectResult heap cases (-1) false .unit) heap
       | _ => tries[choice % tries.length]!
     | .setupEnd, [] => done1 .unit heap
-    | .lock, [ptr] => if wordAt heap ptr = 1 then .blocked else withWord (setWord heap ptr 1) .unit
+    | .lock, [ptr] => if wordAt heap ptr = 1 then .blocked heap else withWord (setWord heap ptr 1) .unit
     | .tryLock, [ptr] =>
       if wordAt heap ptr = 1 then done1 (.bool false) heap else withWord (setWord heap ptr 1) (.bool true)
-    | .unlock, [ptr] => if wordAt heap ptr = 1 then withWord (setWord heap ptr 0) .unit else .panic .syncFatal
+    | .unlock, [ptr] => if wordAt heap ptr = 1 then withWord (setWord heap ptr 0) .unit else .panic .syncFatal heap
     | .wLock, [ptr] =>
       let (r, w) := rwAt heap ptr
-      if r = 0 && !w then withWord (setRW heap ptr 0 true) .unit else .blocked
+      if r = 0 && !w then withWord (setRW heap ptr 0 true) .unit else .blocked heap
     | .wUnlock, [ptr] =>
       let (r, w) := rwAt heap ptr
-      if w then withWord (setRW heap ptr r false) .unit else .panic .syncFatal
+      if w then withWord (setRW heap ptr r false) .unit else .panic .syncFatal heap
     | .rLock, [ptr] =>
       let (r, w) := rwAt heap ptr
       -- Writer preference: a writer waiting for the readers to leave stops
       -- new readers, as in Go. With no reader in, a writer at its `Lock` is
       -- not waiting yet (it could take the lock): either may go first.
-      if !w && (r = 0 || !writerWaiting gs i ptr) then withWord (setRW heap ptr (r + 1) false) .unit else .blocked
+      if !w && (r = 0 || !writerWaiting gs i ptr) then withWord (setRW heap ptr (r + 1) false) .unit else .blocked heap
     | .rUnlock, [ptr] =>
       let (r, w) := rwAt heap ptr
-      if r > 0 then withWord (setRW heap ptr (r - 1) w) .unit else .panic .syncFatal
+      if r > 0 then withWord (setRW heap ptr (r - 1) w) .unit else .panic .syncFatal heap
     | .wgAdd, [ptr, .int _ d] =>
       let n := (wordAt heap ptr : Int) + d.toInt
-      if n < 0 then .panic .explicit else withWord (setWord heap ptr n) .unit
-    | .wgWait, [ptr] => if wordAt heap ptr = 0 then done1 .unit heap else .blocked
+      if n < 0 then .panic .explicit heap else withWord (setWord heap ptr n) .unit
+    | .wgWait, [ptr] => if wordAt heap ptr = 0 then done1 .unit heap else .blocked heap
     | .onceEnter, [ptr] =>
       match wordAt heap ptr with
       | 0 => withWord (setWord heap ptr 1) (.bool true)
-      | 1 => .blocked
+      | 1 => .blocked heap
       | _ => done1 (.bool false) heap
     | .yield, [.int _ d] =>
       -- A sleep (#59): time moves on to this goroutine's waking only when
@@ -421,7 +425,7 @@ def fire (heap : Heap Val) (gs : Array Gor) (i : Nat) (choice : Nat) : Fire :=
         j != i && match gs[j]? >>= sleepLeft with
           | some r => r < mine
           | none => false
-      if mine > 0 && earlier then .blocked else
+      if mine > 0 && earlier then .blocked heap else
       let step := max mine 0
       let gs := gs.mapIdx fun j g =>
         if j == i then complete g .unit
@@ -431,26 +435,81 @@ def fire (heap : Heap Val) (gs : Array Gor) (i : Nat) (choice : Nat) : Fire :=
       Fire.done gs (advanceClock heap step)
     | .yield, _ => done1 .unit heap
     | .condWait, [c, .int _ t] =>
-      if (condState heap c).2.contains t.toNat then .blocked else done1 .unit heap
+      if (condState heap c).2.contains t.toNat then .blocked heap else done1 .unit heap
     | .lockL tag rtag, [l] =>
       match lockerTarget tag rtag l with
       | (1, ptr) =>
         let (r, w) := rwAt heap ptr
-        if r = 0 && !w then withWord (setRW heap ptr 0 true) .unit else .blocked
+        if r = 0 && !w then withWord (setRW heap ptr 0 true) .unit else .blocked heap
       | (2, ptr) =>
         let (r, w) := rwAt heap ptr
-        if !w && (r = 0 || !writerWaiting gs i ptr) then withWord (setRW heap ptr (r + 1) false) .unit else .blocked
-      | (_, ptr) => if wordAt heap ptr = 1 then .blocked else withWord (setWord heap ptr 1) .unit
+        if !w && (r = 0 || !writerWaiting gs i ptr) then withWord (setRW heap ptr (r + 1) false) .unit else .blocked heap
+      | (_, ptr) => if wordAt heap ptr = 1 then .blocked heap else withWord (setWord heap ptr 1) .unit
     | .unlockL tag rtag, [l] =>
       match lockerTarget tag rtag l with
       | (1, ptr) =>
         let (r, w) := rwAt heap ptr
-        if w then withWord (setRW heap ptr r false) .unit else .panic .syncFatal
+        if w then withWord (setRW heap ptr r false) .unit else .panic .syncFatal heap
       | (2, ptr) =>
         let (r, w) := rwAt heap ptr
-        if r > 0 then withWord (setRW heap ptr (r - 1) w) .unit else .panic .syncFatal
-      | (_, ptr) => if wordAt heap ptr = 1 then withWord (setWord heap ptr 0) .unit else .panic .syncFatal
-    | _, _ => .panic .modelStuck
+        if r > 0 then withWord (setRW heap ptr (r - 1) w) .unit else .panic .syncFatal heap
+      | (_, ptr) => if wordAt heap ptr = 1 then withWord (setWord heap ptr 0) .unit else .panic .syncFatal heap
+    | _, _ => .panic .modelStuck heap
+
+/-- A send on `ch` by goroutine `i` blocks: `fireSend`'s `.blocked`. -/
+def sendBlocks (heap : Heap Val) (gs : Array Gor) (i : Nat) (ch : Val) : Bool :=
+  if chanIsNil ch then true else
+  match chanGet heap ch with
+  | none => false
+  | some (ref, cap, buf, closed, _) =>
+    if closed then false
+    else if cap.toNat > 0 then !(buf.length < cap.toNat)
+    else (findOther gs i (recvWaiter heap ref)).isNone
+
+/-- A receive on `ch` by goroutine `i` blocks: `fireRecv`'s `.blocked`. -/
+def recvBlocks (heap : Heap Val) (gs : Array Gor) (i : Nat) (ch : Val) : Bool :=
+  if chanIsNil ch then true else
+  match chanGet heap ch with
+  | none => false
+  | some (ref, cap, buf, closed, _) =>
+    match buf with
+    | _ :: _ => false
+    | [] => !(cap.toNat = 0 && (findOther gs i (sendWaiter heap ref)).isSome) && !closed
+
+/-- Whether goroutine `i`'s pending operation is blocked: exactly when
+`fire` gives `.blocked`, read from the heap without firing it. `ready`
+asks it of every goroutine at every scheduling point, and firing (with its
+stores into the shared heap) copied the heap each time. -/
+def wouldBlock (heap : Heap Val) (gs : Array Gor) (i : Nat) : Bool :=
+  let rwBlocks := fun (ptr : Val) => let (r, w) := rwAt heap ptr; !(r = 0 && !w)
+  let rBlocks := fun (ptr : Val) => let (r, w) := rwAt heap ptr; !(!w && (r = 0 || !writerWaiting gs i ptr))
+  match gs[i]? >>= pendingSync with
+  | none => true
+  | some (op, args) =>
+    match op, args with
+    | .send, [ch, _] => sendBlocks heap gs i ch
+    | .recv _, [ch] => recvBlocks heap gs i ch
+    | .select sends blocking, args =>
+      blocking && (selectCases sends args).all fun (send, ch, _) =>
+        if send then sendBlocks heap gs i ch else recvBlocks heap gs i ch
+    | .lock, [ptr] => wordAt heap ptr = 1
+    | .wLock, [ptr] => rwBlocks ptr
+    | .rLock, [ptr] => rBlocks ptr
+    | .wgWait, [ptr] => wordAt heap ptr != 0
+    | .onceEnter, [ptr] => wordAt heap ptr = 1
+    | .yield, [.int _ d] =>
+      let mine := (gs[i]? >>= sleepLeft).getD d.toInt
+      mine > 0 && (List.range gs.size).any fun j =>
+        j != i && match gs[j]? >>= sleepLeft with
+          | some r => r < mine
+          | none => false
+    | .condWait, [c, .int _ t] => (condState heap c).2.contains t.toNat
+    | .lockL tag rtag, [l] =>
+      match lockerTarget tag rtag l with
+      | (1, ptr) => rwBlocks ptr
+      | (2, ptr) => rBlocks ptr
+      | (_, ptr) => wordAt heap ptr = 1
+    | _, _ => false
 
 /-! ## The scheduler -/
 
@@ -467,7 +526,7 @@ def ready (heap : Heap Val) (gs : Array Gor) (i : Nat) : Bool :=
       | some blk =>
         match blk.term with
         | .spawn .. => true
-        | .sync .. => match fire heap gs i 0 with | .blocked => false | _ => true
+        | .sync .. => !wouldBlock heap gs i
         | _ => false
       | none => false
     | [] => false
@@ -542,6 +601,14 @@ def schedChoice (p : Prog) (h : Havoc Val) (s : HState Val) (arity : Nat) : Nat 
     (valNat v, { s with conc.arity := s.conc.arity.push arity })
   | none => (0, s)
 
+/-- The choice `schedChoice` would draw next, without drawing it: a draw
+pushes onto the state's log, and on a state still in use that copies the
+log, which grows with the run. -/
+def schedPeek (p : Prog) (h : Havoc Val) (s : HState Val) : Nat :=
+  match p.schedSite with
+  | some site => valNat (h site (s.counts[site]?.getD 0))
+  | none => 0
+
 /-- How many ways goroutine `i`'s pending operation can fire: the ready
 cases of a `select`, else one. -/
 def fireArity (heap : Heap Val) (gs : Array Gor) (i : Nat) : Nat :=
@@ -552,7 +619,7 @@ def fireArity (heap : Heap Val) (gs : Array Gor) (i : Nat) : Nat :=
       let r := if send then fireSend heap gs i ch v (selectResult heap cases k false .unit)
         else fireRecv heap gs i ch fun x ok => selectResult heap cases k ok x
       match r with
-      | .blocked => false
+      | .blocked _ => false
       | _ => true
     max ready 1
   | _ => 1
@@ -568,39 +635,43 @@ def goroutineBound : Nat := 128
 /-- Run goroutine `i` (now able to move) to its next scheduling point. -/
 def stepGor (p : Prog) (or : Oracle) (h : Havoc Val) (gs : Array Gor) (i : Nat) (s : HState Val)
     (fuel : Nat) : Except PanicKind (Array Gor × HState Val) × HState Val :=
-  -- First the pending terminator, if any.
-  let started : Except PanicKind (Array Gor × HState Val) :=
+  -- First the pending terminator, if any. The state comes back with every
+  -- outcome, so that the heap `fire` stores into is not shared with a
+  -- state kept for the error cases (a store would copy it whole).
+  let started : Except PanicKind (Array Gor) × HState Val :=
     match gs[i]? with
-    | none => .error .modelStuck
+    | none => (.error .modelStuck, s)
     | some g =>
       match g.frames with
       | f :: _ =>
-        if !f.atTerm then .ok (gs, s) else
+        if !f.atTerm then (.ok gs, s) else
         match f.fn.blocks[f.bid]? with
         | some blk =>
           match blk.term with
           | .spawn fv args _ =>
             let gs := gs.modify i (complete · .unit)
             match Dialect.callee (Op := Go2Lean.GoSSA.Op) f.env[fv]! with
-            | .nil => .error .nilDereference
-            | .unknown => .ok (gs, s.assume "a goroutine running a function value the model does not know is not modelled")
+            | .nil => (.error .nilDereference, s)
+            | .unknown => (.ok gs, s.assume "a goroutine running a function value the model does not know is not modelled")
             | .known fid bound =>
               match p.funcs[fid]? with
               | some callee =>
-                if gs.size ≥ goroutineBound then .error .other else
-                .ok (gs.push { frames := [entryFrame callee (bound ++ args.map (f.env[·]!))], daemon := callee.daemon }, s)
-              | none => .error .modelStuck
+                if gs.size ≥ goroutineBound then (.error .other, s) else
+                (.ok (gs.push { frames := [entryFrame callee (bound ++ args.map (f.env[·]!))], daemon := callee.daemon }), s)
+              | none => (.error .modelStuck, s)
           | .sync op .. =>
             let (c, s) := if op == .setupEnd then (0, s) else schedChoice p h s (fireArity s.heap gs i)
-            match fire s.heap gs i c with
-            | .done gs heap => .ok (gs, { s with heap })
-            | .blocked => .error .modelStuck
-            | .panic k => .error k
-          | _ => .error .modelStuck
-        | none => .error .modelStuck
-      | [] => .error .modelStuck
+            let heap := s.heap
+            let s := { s with heap := #[] }
+            match fire heap gs i c with
+            | .done gs heap => (.ok gs, { s with heap })
+            | .blocked heap => (.error .modelStuck, { s with heap })
+            | .panic k heap => (.error k, { s with heap })
+          | _ => (.error .modelStuck, s)
+        | none => (.error .modelStuck, s)
+      | [] => (.error .modelStuck, s)
   match started with
-  | .error .modelStuck =>
+  | (.error .modelStuck, s) =>
     -- Say which operation: a channel or lock word the model does not know.
     let note := match gs[i]? >>= pendingSync with
       | some (op, args) => (s!"{repr op} on {repr args}".take 200).toString
@@ -611,11 +682,11 @@ def stepGor (p : Prog) (or : Oracle) (h : Havoc Val) (gs : Array Gor) (i : Nat) 
       | none => none
     let s := if s.stuck.isNone then { s with panicAt := place <|> s.panicAt } else s
     (.error .modelStuck, { s with stuck := s.stuck <|> some note })
-  | .error .other =>
+  | (.error .other, s) =>
     -- Past the bound on goroutines: no behaviour of the program.
     (.error .other, { s with stuck := s.stuck <|> some s!"more than {goroutineBound} goroutines (the model's bound)" })
-  | .error k => (.error k, s)
-  | .ok (gs, s) =>
+  | (.error k, s) => (.error k, s)
+  | (.ok gs, s) =>
     match gs[i]? with
     | none => (.error .modelStuck, s)
     | some g =>
@@ -855,7 +926,7 @@ def scheduleS (p : Prog) (or : Oracle) (h : Havoc Val) (stepFuel : Nat) (stop : 
       let i := cands[c % cands.length]!
       let s := if !movesNow gs i && cands.any (fun j => j != i && movesNow gs j) then s.assume slowNote else s
       -- The case a select takes: stepGor draws the same choice from `s`.
-      let name := (selectTaken s.heap gs i (schedChoice p h s 1).1).getD (pendingName gs[i]!)
+      let name := (selectTaken s.heap gs i (schedPeek p h s)).getD (pendingName gs[i]!)
       let pkg := pendingPkg gs[i]!
       match stepGor p or h gs i { s with conc.acc := #[] } stepFuel with
       | (.ok (gs', s), _) =>
