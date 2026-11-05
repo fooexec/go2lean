@@ -273,14 +273,14 @@ theorem heapLoad_arr {h : Heap Val} {r k : Nat} {es : List Val} (hr : r ≠ 0)
     heapLoad h (.ptr r [k]) = .ok es[k] := by
   cases r with
   | zero => exact absurd rfl hr
-  | succ r => simp [heapLoad, he, getPath, hk]
+  | succ r => simp [heapLoad, heapLoad.heapLoadP, normPtr, he, getPath, hk]
 
 theorem heapStore_arr {h : Heap Val} {r k : Nat} {es : List Val} (hr : r ≠ 0)
     (he : h[r]? = some (.arr es)) (hk : k < es.length) (v : Val) :
     heapStore h (.ptr r [k]) v = .ok (h.setIfInBounds r (.arr (es.set k v))) := by
   cases r with
   | zero => exact absurd rfl hr
-  | succ r => simp [heapStore, he, setPath, hk, Array.set!]
+  | succ r => simp [heapStore, heapStoreP, normPtr, he, setPath, hk, Array.set!]
 
 /-! Signed and unsigned views of a 64-bit index. -/
 

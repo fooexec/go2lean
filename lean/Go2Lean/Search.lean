@@ -802,7 +802,7 @@ partial def renderObj (heap : Heap Val) (signed : Bool) : Val → Json
     | some bs => bytesToJson bs
     | none => Json.str "?"
   | .slice ref off len _ =>
-    match heap[ref]? with
+    match objAt heap ref with
     | some (.arr es) => Json.arr ((es.drop off.toNat).take len.toNat |>.map (renderObj heap signed)).toArray
     | some (.arrA es) => Json.arr ((es.extract off.toNat (off.toNat + len.toNat)).map (renderObj heap signed))
     | _ => Json.str "?"
@@ -845,6 +845,7 @@ partial def renderVal : Val → Json
   | .slice ref off len cap =>
     Json.str s!"slice(ref={ref}, off={off.toNat}, len={len.toNat}, cap={cap.toNat})"
   | .tuple vs => Json.arr (vs.map renderVal).toArray
+  | .view ref path => Json.str s!"view(ref={ref}, path={path})"
   | .err nonNil => Json.str (if nonNil then "error" else "nil")
   | .ptr 0 _ => Json.str "nil"
   | .ptr ref path => Json.str s!"ptr(ref={ref}, path={path})"

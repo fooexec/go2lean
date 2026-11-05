@@ -260,6 +260,21 @@ func SeqTestErrorsIsWrapped() bool { return testErrorsIsWrapped() }
 // go2lean:sequence testExplicitBlockStmt
 func SeqTestExplicitBlockStmt() bool { return testExplicitBlockStmt() }
 
+// go2lean:sequence testFieldSliceAlias
+func SeqTestFieldSliceAlias() bool { return testFieldSliceAlias() }
+
+// go2lean:sequence testFieldSliceAppend
+func SeqTestFieldSliceAppend() bool { return testFieldSliceAppend() }
+
+// go2lean:sequence testFieldSliceSeesField
+func SeqTestFieldSliceSeesField() bool { return testFieldSliceSeesField() }
+
+// go2lean:sequence testFieldSliceStructCopy
+func SeqTestFieldSliceStructCopy() bool { return testFieldSliceStructCopy() }
+
+// go2lean:sequence testFieldSliceThreeIndex
+func SeqTestFieldSliceThreeIndex() bool { return testFieldSliceThreeIndex() }
+
 // go2lean:sequence testFirstClassFunction
 func SeqTestFirstClassFunction() bool { return testFirstClassFunction() }
 
