@@ -668,6 +668,9 @@ type Prog struct {
 	Funcs      []*Func
 	// SchedSite is the havoc site the concurrent machine reads its schedule
 	// from (HasSched false: the package has no concurrency).
+	// Generic names the package's generic functions and types, which get
+	// no properties of their own: a model needs concrete type arguments.
+	Generic     []string
 	SchedSite   int
 	HasSched    bool
 	HavocWidths []int

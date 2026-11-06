@@ -4028,9 +4028,24 @@ theorem denoteH_spec (or : Oracle) (heap : Heap Val) (o : Op) (args : List Val) 
     · simp [denote, hc, h]
   · rfl
 
+/-- `denoteH` for fast mode (`HState.fast`): an op that fails gives back
+an empty heap, so `denote` owns the heap it is handed and its allocations
+and stores update it in place; `denoteH` keeps it for the failure, which
+made every allocation copy the whole heap. A run that fails is rerun in the
+default mode (`GoConc.runAny`), where `denoteH` is used. -/
+def denoteF (or : Oracle) (heap : Heap Val) (o : Op) (args : List Val) : Res Val × Heap Val :=
+  match o with
+  | .alloc _ | .makeMap | .storePath => denoteH or heap o args
+  | _ =>
+    match denote or heap o args with
+    | .ok (v, heap') => (.ok v, heap')
+    | .panic k => (.panic k, #[])
+    | .outOfFuel => (.outOfFuel, #[])
+
 instance : Dialect Op Val Oracle where
   denote := denote
   denoteH := denoteH
+  denoteF := denoteF
   accesses := accesses
   stuckSite := stuckSite
   assumption := assumption

@@ -27,6 +27,13 @@ deliver, in [docs/limitations.md](../docs/limitations.md). There are no
 releases yet: the CLI, the workspace formats and the model's semantics
 still change from one pull request to the next.
 
+A [first run on four unseen projects](../docs/eval/first-run.md)
+(go-humanize, golang-lru, cast, gjson), as a new user runs it with the
+default flags, gave real panics with PoCs in two of them. It also showed
+what got in the way: dependencies not translated by default, no
+end-of-run summary, generic packages skipped silently, and `doctor`
+misreading `GOTOOLCHAIN`, all fixed since.
+
 Evidence beyond the codebase it was built on comes from blind runs with a
 protocol committed before each run and the tool frozen:
 [Masterminds/semver](../docs/eval/semver.md) (templates alone found no bug;

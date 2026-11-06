@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -67,5 +68,37 @@ func TestDoctorRejectsOldGoWithoutDownloads(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("local-only probe did not execute: %v", err)
+	}
+}
+
+// An old local Go is fine when GOTOOLCHAIN selects a Go 1.26 that is
+// already downloaded; one not downloaded is reported, and not fetched.
+func TestDoctorAcceptsCachedToolchain(t *testing.T) {
+	bin, cache := t.TempDir(), t.TempDir()
+	script := "#!/bin/sh\n[ \"$GOTOOLCHAIN\" = local ] || exit 1\n" +
+		"[ \"$1\" = env ] && { echo '" + cache + "'; exit 0; }\n" +
+		"echo go version go1.24.7 linux/amd64\n"
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	tc := filepath.Join(cache, "golang.org", "toolchain@v0.0.1-go1.26.6."+runtime.GOOS+"-"+runtime.GOARCH, "bin")
+	if err := os.MkdirAll(tc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tc, "go"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	t.Setenv("GOTOOLCHAIN", "go1.26.6+auto")
+	diagnose(&out)
+	if !strings.Contains(out.String(), "ok    Go version      go1.26.6 via GOTOOLCHAIN") {
+		t.Fatalf("cached toolchain not accepted: %s", out.String())
+	}
+	out.Reset()
+	t.Setenv("GOTOOLCHAIN", "go1.26.9")
+	diagnose(&out)
+	if !strings.Contains(out.String(), "selects go1.26.9, which is not downloaded yet") {
+		t.Fatalf("missing toolchain not reported: %s", out.String())
 	}
 }

@@ -167,3 +167,40 @@ func (s *Summary) WriteMarkdown(out io.Writer) {
 	section("Spurious", s.Spurious)
 	section("Inconclusive", s.Inconclusive)
 }
+
+// WriteBrief is the end of a run's output: the counts, the tier-1
+// findings (an input a caller can pass) with where they panicked and their
+// PoC, and how many depend on callers. The rest is in the summary file at
+// path (WriteMarkdown).
+func (s *Summary) WriteBrief(out io.Writer, path string) {
+	byTier := map[int][]Finding{}
+	for _, f := range s.Confirmed {
+		byTier[tier(f)] = append(byTier[tier(f)], f)
+	}
+	fmt.Fprintf(out, "== Summary\n  %d properties; %d confirmed (%d a caller can reach, %d that depend on the callers or on package state), %d spurious, %d inconclusive\n",
+		s.Properties, len(s.Confirmed), len(byTier[1]), len(s.Confirmed)-len(byTier[1]), len(s.Spurious), len(s.Inconclusive))
+	const most = 10
+	for i, f := range byTier[1] {
+		if i == most {
+			fmt.Fprintf(out, "  ... and %d more\n", len(byTier[1])-most)
+			break
+		}
+		name := f.Verdict.Counterexample
+		if f.Property != nil {
+			name = f.Property.NL
+		}
+		fmt.Fprintf(out, "  confirmed: %s\n", name)
+		if site := f.Verdict.Evidence.PanicSite; site != "" {
+			fmt.Fprintf(out, "    at %s: %v\n", site, f.Verdict.Observed)
+		} else {
+			fmt.Fprintf(out, "    real: %v\n", f.Verdict.Observed)
+		}
+		if f.Verdict.PocDir != "" {
+			fmt.Fprintf(out, "    PoC: %s\n", f.Verdict.PocDir)
+		}
+	}
+	if len(s.Confirmed) > len(byTier[1]) {
+		fmt.Fprintf(out, "  %d other confirmed findings depend on inputs the callers may never pass: ranked in %s\n", len(s.Confirmed)-len(byTier[1]), path)
+	}
+	fmt.Fprintf(out, "  full summary: %s\n", path)
+}

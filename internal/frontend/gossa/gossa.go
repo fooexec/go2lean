@@ -269,6 +269,11 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			return nil, "", err
 		}
 		p.Dependency = !mainPaths[u.path]
+		if !p.Dependency {
+			if spkg := sprog.ImportedPackage(u.path); spkg != nil {
+				p.Generic = genericNames(spkg)
+			}
+		}
 		progs = append(progs, p)
 	}
 	markSyncAcross(progs)
@@ -1550,6 +1555,26 @@ func candidates(spkg *ssa.Package, tests bool) []*ssa.Function {
 	}
 	sort.Slice(fns, func(i, j int) bool { return funcName(fns[i]) < funcName(fns[j]) })
 	return fns
+}
+
+// genericNames lists a package's generic functions and generic types (whose
+// methods are generic too), which candidates leaves out.
+func genericNames(spkg *ssa.Package) []string {
+	var out []string
+	for name, m := range spkg.Members {
+		switch m := m.(type) {
+		case *ssa.Function:
+			if m.TypeParams().Len() > 0 {
+				out = append(out, name)
+			}
+		case *ssa.Type:
+			if n, ok := m.Type().(*types.Named); ok && n.TypeParams().Len() > 0 {
+				out = append(out, name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan, subtest string) (*ir.Prog, error) {

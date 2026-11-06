@@ -124,6 +124,10 @@ class Dialect (Op : Type) (Val Oracle : outParam Type) where
       | .ok (v, heap') => (.ok v, heap')
       | .panic k => (.panic k, heap)
       | .outOfFuel => (.outOfFuel, heap)
+  /-- `denoteH` for the fast interpreter (`execInstrsF`): the heap on
+  failure is not kept (an empty heap comes back), so the op owns it. -/
+  denoteF : Oracle → Heap Val → Op → List Val → Res Val × Heap Val :=
+    fun or heap o vals => denoteH or heap o vals
   toBool : Val → Option Bool
   /-- The function a func value calls. -/
   callee : Val → Callee Val := fun _ => .unknown
@@ -321,6 +325,9 @@ structure HState (Val : Type) where
   /-- The concurrent machine's state (schedule, race detector): one field,
   so the sequential interpreter's state updates stay small for the prover. -/
   conc : ConcState Val := {}
+  /-- The run is in fast mode (`runF`): the concurrent machine calls the
+  fast interpreter (`runFuncF`) for the functions it runs big-step. -/
+  fast : Bool := false
 
 namespace HState
 
@@ -480,5 +487,125 @@ end
 def run (p : Prog Op) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
     (heap : Heap Val := #[]) : Res Val × HState Val :=
   runFunc p or h false fid args { heap := heap } fuel
+
+
+/-! ## The fast interpreter
+
+The engines' trials run this copy of `execInstrs`, `runBlock` and
+`runFunc` first (`GoConc.runAny`). It differs in two places only: a call
+does not keep the caller's state to roll back a stuck callee, which then
+ends the run stuck, and an op is denoted by `denoteF`, which keeps no heap
+for a failure. Keeping them made every call and allocation copy the heap.
+A run that ends in a panic is rerun with `run`, whose result it then is;
+on every other run the two agree. The proofs are about `run`. -/
+
+def execInstrsF (or : Oracle) (h : Havoc Val) (track : Bool) :
+    List (Instr Op) → Env Val → HState Val → Res (Env Val) × HState Val
+  | [], env, s => (.ok env, s)
+  | .op dst o args :: rest, env, s =>
+    let vals := args.map (env[·]!)
+    let s := match Dialect.assumption s.heap o vals with
+      | some note => s.assume note
+      | none => s
+    -- Taken out of `s` before it grows, so it is unique and grows in place.
+    let s := if track then
+        let acc := s.conc.acc
+        let s := { s with conc.acc := #[] }
+        { s with conc.acc := (Dialect.accesses o vals).foldl (·.push ·) acc }
+      else s
+    -- The heap is taken out of `s`, so that the op owns it and the ones
+    -- that write it do so in place (#71).
+    let heap := s.heap
+    let s := { s with heap := #[] }
+    match Dialect.denoteF or heap o vals with
+    | (.ok v, heap) => execInstrsF or h track rest (env.set! dst v) { s with heap := heap }
+    | (.panic .modelStuck, heap) =>
+      -- Record where (op and operand shapes, truncated) for the engines.
+      let site := match Dialect.stuckSite heap o vals with
+        | some d => (d.take 300).toString
+        | none => (s!"{repr o} {repr vals}".take 160).toString
+      (.panic .modelStuck, { s with heap := heap, stuck := s.stuck <|> some site })
+    | (.panic k, heap) => (.panic k, { s with heap := heap, panicAt := s.panicAt <|> some (s!"{repr o}".take 160).toString })
+    | (.outOfFuel, heap) => (.outOfFuel, { s with heap := heap })
+  | .probe label v :: rest, env, s =>
+    execInstrsF or h track rest env { s with probes := s.probes.push (label, env[v]!) }
+  | .havoc dst site :: rest, env, s =>
+    let (v, s) := s.take h site
+    execInstrsF or h track rest (env.set! dst v) s
+  | .assume note :: rest, env, s => execInstrsF or h track rest env (s.assume note)
+
+mutual
+
+/-- Run block `bid` of `fn` in environment `env`. Each block entry and each
+call consumes one unit of fuel. `track` as in `execInstrs`. -/
+def runBlockF (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fn : Func Op) (bid : BlockId)
+    (env : Env Val) (s : HState Val) : (fuel : Nat) → Res Val × HState Val
+  | 0 => (.outOfFuel, s)
+  | fuel + 1 =>
+    match fn.blocks[bid]? with
+    | none => (.panic .modelStuck, s)
+    | some blk =>
+      match execInstrsF or h track blk.instrs.toList env s with
+      | (.panic k, s) =>
+        -- Name the function and block of the op the instructions recorded
+        -- (once: callers see the innermost site).
+        let s := match s.panicAt with
+          | some site => if site.startsWith "@" then s else { s with panicAt := some s!"@{fn.name}#{bid}: {site}" }
+          | none => { s with panicAt := some s!"@{fn.name}#{bid}" }
+        (.panic k, s)
+      | (.outOfFuel, s) => (.outOfFuel, s)
+      | (.ok env, s) =>
+        match blk.term with
+        | .ret v => (.ok env[v]!, { s with exit := some (fn.name, bid) })
+        | .panic k => (.panic k, { s with panicAt := s.panicAt <|> some s!"@{fn.name}#{bid}: panic" })
+        | .jump b args =>
+          runBlockF p or h track fn b (enter fn b env args) s fuel
+        | .br c t targs f fargs =>
+          match Dialect.toBool (Op := Op) env[c]! with
+          | some true => runBlockF p or h track fn t (enter fn t env targs) s fuel
+          | some false => runBlockF p or h track fn f (enter fn f env fargs) s fuel
+          | none => (.panic .modelStuck, s)
+        | .call f args dst next nargs fb =>
+          match runFuncF p or h track f (args.map (env[·]!)) s fuel with
+          | (.ok v, s') =>
+            let env := env.set! dst v
+            runBlockF p or h track fn next (enter fn next env nargs) s' fuel
+          | (.panic k, s') => (.panic k, s')
+          | (.outOfFuel, s') => (.outOfFuel, s')
+        | .callv fv args dst next nargs fb =>
+          match Dialect.callee (Op := Op) env[fv]! with
+          | .nil => (.panic .nilDereference, s)
+          | .unknown => runBlockF p or h track fn fb (enter fn fb env []) (s.assume "a call through a function value the model does not know: its effects are not modelled") fuel
+          | .known f bound =>
+            match runFuncF p or h track f (bound ++ args.map (env[·]!)) s fuel with
+            | (.ok v, s') =>
+              let env := env.set! dst v
+              runBlockF p or h track fn next (enter fn next env nargs) s' fuel
+            | (.panic k, s') => (.panic k, s')
+            | (.outOfFuel, s') => (.outOfFuel, s')
+        | .spawn .. | .sync .. =>
+          -- Concurrency needs the machine; run alone, the function is stuck.
+          (.panic .modelStuck, { s with stuck := s.stuck <|> some s!"{fn.name}: a goroutine or synchronisation operation outside the concurrent machine" })
+        | .xcall _ _ _ _ _ _ fb =>
+          -- Not linked (the package was not compiled alongside): unmodelled.
+          runBlockF p or h track fn fb (enter fn fb env []) (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
+
+/-- Run function `fid` on `args`. -/
+def runFuncF (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fid : FuncId) (args : List Val)
+    (s : HState Val) : (fuel : Nat) → Res Val × HState Val
+  | 0 => (.outOfFuel, s)
+  | fuel + 1 =>
+    match p.funcs[fid]? with
+    | none => (.panic .modelStuck, s)
+    | some fn =>
+      let env := bindParams (Array.replicate fn.nvals default) fn.params args
+      runBlockF p or h track fn fn.entry env s fuel
+
+end
+
+/-- `run` with the fast interpreter. -/
+def runF (p : Prog Op) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
+    (heap : Heap Val := #[]) : Res Val × HState Val :=
+  runFuncF p or h false fid args { heap := heap, fast := true } fuel
 
 end Go2Lean.SSA
