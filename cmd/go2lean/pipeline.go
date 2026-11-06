@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -149,7 +151,7 @@ func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	ws := workspaceFlag(fs)
 	opts := searchFlags(fs, 10)
-	deps := fs.Bool("deps", false, "also model the functions of dependency packages the compiled packages call")
+	deps := fs.Bool("deps", true, "also model the functions of dependency packages the compiled packages call, and the standard-library code the model translates from source (-deps=false: only the compiled packages; dependency calls are havoc)")
 	resume := fs.Bool("resume", false, "skip properties already searched and counterexamples already verified in the workspace")
 	fuzzSpecs := fs.Bool("fuzz-specs", true, "read the packages' Go fuzz targets (FuzzXxx) as specs")
 	tests := fs.Bool("tests", false, "make the packages' test functions (TestXxx(t *testing.T)) targets")
@@ -195,5 +197,27 @@ func cmdRun(args []string) error {
 		fmt.Fprintln(os.Stdout, "compare-order opt-in: asserting a pure, deterministic, total three-way ordering over all byte strings")
 	}
 	_, err = pipeline.RunAll(w, env, opts.get(), os.Stdout, fs.Args()...)
-	return err
+	if err != nil {
+		return err
+	}
+	// The findings of every package at the end: a run over ./... prints a
+	// section per package, and the last one is not the run's result.
+	return writeSummary(w, os.Stdout)
+}
+
+// writeSummary writes the workspace's summary.md and its brief to out.
+func writeSummary(w contract.Workspace, out io.Writer) error {
+	s, err := pipeline.Summarize(w)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(w.Root, "summary.md")
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	s.WriteMarkdown(f)
+	s.WriteBrief(out, path)
+	return nil
 }

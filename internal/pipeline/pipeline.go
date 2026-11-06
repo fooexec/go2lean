@@ -218,6 +218,13 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 				fmt.Fprintf(out, "      - %s\n", is)
 			}
 		}
+		if g := prog.Generic; len(g) > 0 {
+			names := g
+			if len(names) > 8 {
+				names = append(names[:8:8], fmt.Sprintf("and %d more", len(g)-8))
+			}
+			fmt.Fprintf(out, "  %d generic functions and types not searched (a model needs concrete type arguments: a spec, or a test with -tests, that instantiates them is): %s\n", len(g), strings.Join(names, ", "))
+		}
 		reports = append(reports, report)
 	}
 	if env.compareSources != nil {

@@ -139,12 +139,20 @@ go2lean props   [-workspace out] -package <path>  template properties from the m
 go2lean hunt    [-workspace out] [-property id] [-engine random|exhaustive|all] [-jobs n] [-budget s]
                 [-seed n] [-trials n] [-fuel n] [-maxlen n] [-exhaust-len n] [-exhaust-limit n]
 go2lean poc     [-workspace out] -counterexample id [more ids...]   one go test per package
-go2lean run     [-workspace out] [-nil-inputs] [-deps] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
+go2lean run     [-workspace out] [-nil-inputs] [-deps=false] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking]
                 [-repairs n] [-report] <package>
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]
                 [-rounds n] [-lean-tools] [-paranoid] [-deps] [-out proofs.json] <package>
 ```
+
+`run` and `compile` model the dependencies the packages call by default
+(`-deps`): the dependency packages' functions, and the standard-library
+code the model translates from source (`strings`, `strconv`, `math`'s
+portable code, `slices`, the encodings, the environment and
+`crypto/rand`). `-deps=false` models only the compiled packages; their
+calls into anything else are then unmodelled, and their results havoc,
+which gives more spurious counterexamples.
 
 `-run` selects targets as `go test -run` selects tests, and a suite's
 method is a target of its own (`-run 'TestY'`). `-run 'TestX/sub'` selects

@@ -1,0 +1,41 @@
+package pipeline
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/andreasfoo/go2lean/internal/contract"
+)
+
+// The end of a run: tier-1 findings with their PoC, the rest counted.
+func TestWriteBrief(t *testing.T) {
+	v := func(id string, tier int) Finding {
+		return Finding{
+			Verdict: &contract.Verdict{Counterexample: id, PocDir: "out/poc/" + id,
+				Observed: map[string]string{"panic": "index out of range"},
+				Evidence: contract.Evidence{PanicSite: "a.go:3"},
+				Rank:     &contract.Rank{Tier: tier}},
+			Property: &contract.Property{NL: id + " does not panic on any input"},
+		}
+	}
+	s := &Summary{Properties: 9, Confirmed: []Finding{v("F", 1), v("g", 2), v("h", 2)}, Spurious: []Finding{v("s", 0)}}
+	var out bytes.Buffer
+	s.WriteBrief(&out, "out/summary.md")
+	got := out.String()
+	for _, want := range []string{
+		"9 properties; 3 confirmed (1 a caller can reach, 2 that depend on the callers or on package state), 1 spurious",
+		"confirmed: F does not panic on any input",
+		"at a.go:3: map[panic:index out of range]",
+		"PoC: out/poc/F",
+		"2 other confirmed findings depend on inputs the callers may never pass",
+		"full summary: out/summary.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("brief misses %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "confirmed: g") {
+		t.Errorf("a tier-2 finding is listed:\n%s", got)
+	}
+}

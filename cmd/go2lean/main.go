@@ -124,7 +124,7 @@ func openWorkspace(cf *commonFlags) (contract.Workspace, pipeline.Env, error) {
 func cmdCompile(args []string) error {
 	fs := flag.NewFlagSet("compile", flag.ExitOnError)
 	ws := workspaceFlag(fs)
-	deps := fs.Bool("deps", false, "also model the functions of dependency packages the compiled packages call")
+	deps := fs.Bool("deps", true, "also model the functions of dependency packages the compiled packages call, and the standard-library code the model translates from source (-deps=false: only the compiled packages; dependency calls are havoc)")
 	tests := fs.Bool("tests", false, "make the packages' test functions (TestXxx(t *testing.T)) targets")
 	compareOrder := fs.String("compare-order", "", "explicitly select a pure, deterministic, total func(string,string) int ordering comparator (experimental; one package)")
 	fs.Parse(args)

@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -72,7 +74,18 @@ func diagnose(out io.Writer) error {
 	fields := strings.Fields(goDetail)
 	goOK := goErr == nil && len(fields) >= 3 && fields[0] == "go" && fields[1] == "version" && version.IsValid(fields[2]) && version.Compare(fields[2], "go1.26") >= 0
 	if !goOK {
-		goDetail += "; Go 1.26 or newer is required (local toolchain; no downloads)"
+		// The local Go is older, but GOTOOLCHAIN may select a newer one that
+		// is already downloaded: the go command then runs that one, with no
+		// download either.
+		if v, ok := selectedToolchain(os.Getenv("GOTOOLCHAIN")); ok && toolchainCached(goCtx, v) {
+			goOK = true
+			goDetail = v + " via GOTOOLCHAIN (already downloaded); local toolchain: " + goDetail
+		} else {
+			goDetail += "; Go 1.26 or newer is required (local toolchain; no downloads)"
+			if ok {
+				goDetail += "; GOTOOLCHAIN=" + os.Getenv("GOTOOLCHAIN") + " selects " + v + ", which is not downloaded yet: `go version` in the module downloads it"
+			}
+		}
 	}
 	check(goOK, "Go version", goDetail)
 	pinned, err := leanassets.Core.ReadFile("lean-toolchain")
@@ -118,4 +131,34 @@ func diagnose(out io.Writer) error {
 		return fmt.Errorf("doctor: prerequisites missing or isolation disabled; see diagnostics above")
 	}
 	return nil
+}
+
+// selectedToolchain is the Go 1.26 or newer that GOTOOLCHAIN names
+// ("go1.26.6", "go1.26.6+auto", "go1.26.6+path"), if it names one.
+func selectedToolchain(gotoolchain string) (string, bool) {
+	v, _, _ := strings.Cut(gotoolchain, "+")
+	if !version.IsValid(v) || version.Compare(v, "go1.26") < 0 {
+		return "", false
+	}
+	return v, true
+}
+
+// toolchainCached says whether toolchain v is in the module cache, where
+// the go command keeps the toolchains it downloaded. It asks the local go
+// for GOMODCACHE, so nothing is downloaded.
+func toolchainCached(ctx context.Context, v string) bool {
+	cmd := exec.CommandContext(ctx, "go", "env", "GOMODCACHE")
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOTOOLCHAIN=") {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GOTOOLCHAIN=local")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	dir := filepath.Join(strings.TrimSpace(string(out)), "golang.org", "toolchain@v0.0.1-"+v+"."+runtime.GOOS+"-"+runtime.GOARCH)
+	_, err = os.Stat(filepath.Join(dir, "bin", "go"))
+	return err == nil
 }
