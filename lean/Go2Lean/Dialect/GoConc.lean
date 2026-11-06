@@ -103,6 +103,12 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
           | some callee =>
             if callee.sync then
               advance p or h ({ entryFrame callee vals with dst, next, nargs } :: { fr with env } :: rest) s fuel
+            else if s.fast then
+              -- No copy of the state kept for a rollback (`HState.fast`).
+              match runFunc p or h true f vals s fuel with
+              | (.ok v, s') => advance p or h (goto next (env.set! dst v) nargs) s' fuel
+              | (.panic k, s') => (.panicked k, s')
+              | (.outOfFuel, s') => (.outOfFuel, s')
             else
               match runFunc p or h true f vals s fuel with
               | (.ok v, s') => advance p or h (goto next (env.set! dst v) nargs) s' fuel
@@ -954,10 +960,10 @@ def schedule (p : Prog) (or : Oracle) (h : Havoc Val) (stepFuel : Nat)
 /-- Run function `fid` on `args` in the concurrent machine: the main
 goroutine and every goroutine it starts. -/
 def runConc (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
-    (heap : Heap Val := #[]) : Res Val × HState Val :=
+    (heap : Heap Val := #[]) (fast : Bool := false) : Res Val × HState Val :=
   match p.funcs[fid]? with
   | none => (.panic .modelStuck, { heap })
-  | some fn => schedule p or h fuel #[{ frames := [entryFrame fn args], vc := #[1] }] { heap } fuel 0
+  | some fn => schedule p or h fuel #[{ frames := [entryFrame fn args], vc := #[1] }] { heap, fast } fuel 0
 
 /-- Does function `fid` mark where its setup ends? -/
 def hasSetupEnd (p : Prog) (fid : FuncId) : Bool :=
@@ -999,23 +1005,35 @@ def captureSetup (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (fuel :
 /-- Continue `fid` from snapshot `snap` with the trial's arguments, whose
 objects the trial allocated in `heap` (on top of the snapshot's heap). -/
 def resumeConc (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
-    (heap : Heap Val) (snap : Snap) : Res Val × HState Val :=
+    (heap : Heap Val) (snap : Snap) (fast : Bool := false) : Res Val × HState Val :=
   match p.funcs[fid]?, snap.gs[0]? with
   | some fn, some g0 =>
     match g0.frames with
     | [fr] =>
       let g0 := { g0 with frames := [{ fr with env := bindParams fr.env fn.params args }] }
-      schedule p or h fuel (snap.gs.set! 0 g0) { snap.s with heap } snap.n snap.idle
+      schedule p or h fuel (snap.gs.set! 0 g0) { snap.s with heap, fast } snap.n snap.idle
     | _ => (.panic .modelStuck, { heap })
   | _, _ => (.panic .modelStuck, { heap })
 
 /-- Run `fid`: in the concurrent machine when it can synchronise, else with
 the big-step interpreter. -/
-def runAny (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
+def runAnyMode (fast : Bool) (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
     (heap : Heap Val := #[]) (snap : Option Snap := none) : Res Val × HState Val :=
   match p.funcs[fid]?, snap with
-  | some fn, some snap => if fn.sync then resumeConc p or h fid args fuel heap snap else run p or h fid args fuel heap
-  | some fn, none => if fn.sync then runConc p or h fid args fuel heap else run p or h fid args fuel heap
+  | some fn, some snap => if fn.sync then resumeConc p or h fid args fuel heap snap fast else run p or h fid args fuel heap fast
+  | some fn, none => if fn.sync then runConc p or h fid args fuel heap fast else run p or h fid args fuel heap fast
   | none, _ => run p or h fid args fuel heap
+
+/-- Run `fid` the engines' way: in fast mode (`HState.fast`), then, if the
+run ended in a panic (a stuck callee among them, which fast mode does not
+roll back), again in the default mode, whose result it then is. A run is a
+function of its inputs, havoc and schedule draws, so the rerun is the run
+the default mode makes from the start, and the two modes agree on every
+run that does not panic. -/
+def runAny (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
+    (heap : Heap Val := #[]) (snap : Option Snap := none) : Res Val × HState Val :=
+  match runAnyMode true p or h fid args fuel heap snap with
+  | (.panic _, _) => runAnyMode false p or h fid args fuel heap snap
+  | r => r
 
 end Go2Lean.GoConc

@@ -188,9 +188,11 @@ theorem wpPtN_of_block {n fid b : Nat} {fn : GoSSA.Func} {blk : GoSSA.Block}
         | ok v =>
           dsimp only at hc ⊢
           unfold wpPtN at hc; simp only [hf] at hc
+          -- Fast mode and the default make the same call (`HState.fast`).
+          simp only [ite_self]
           exact hc m hm
         | panic k => exact hc.elim
-        | outOfFuel => simp
+        | outOfFuel => cases s'.fast <;> simp
       | _ => rw [ht] at h; exact h.elim
 
 /-- One block of a walk whose fuel is a variable: out of fuel, or the block

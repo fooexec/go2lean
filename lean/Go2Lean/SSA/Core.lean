@@ -124,6 +124,10 @@ class Dialect (Op : Type) (Val Oracle : outParam Type) where
       | .ok (v, heap') => (.ok v, heap')
       | .panic k => (.panic k, heap)
       | .outOfFuel => (.outOfFuel, heap)
+  /-- `denoteH` for fast mode: the heap on failure is not kept (an empty
+  heap comes back), so the op can own it. -/
+  denoteF : Oracle → Heap Val → Op → List Val → Res Val × Heap Val :=
+    fun or heap o vals => denoteH or heap o vals
   toBool : Val → Option Bool
   /-- The function a func value calls. -/
   callee : Val → Callee Val := fun _ => .unknown
@@ -321,6 +325,13 @@ structure HState (Val : Type) where
   /-- The concurrent machine's state (schedule, race detector): one field,
   so the sequential interpreter's state updates stay small for the prover. -/
   conc : ConcState Val := {}
+  /-- Fast mode (the engines' trials): a call does not keep the heap from
+  before it, and a failed op gives back no heap, so the run updates the
+  heap in place (keeping it copied it at every call and allocation). A
+  stuck callee then cannot be rolled back, so it ends the run stuck: the
+  engines rerun any trial that ends in a panic in the default (safe) mode,
+  which gives the same result as running safe from the start (`runAny`). -/
+  fast : Bool := false
 
 namespace HState
 
@@ -368,8 +379,9 @@ def execInstrs (or : Oracle) (h : Havoc Val) (track : Bool) :
     -- The heap is taken out of `s`, so that the op owns it and the ones
     -- that write it do so in place (#71).
     let heap := s.heap
+    let fast := s.fast
     let s := { s with heap := #[] }
-    match Dialect.denoteH or heap o vals with
+    match (if fast then Dialect.denoteF or heap o vals else Dialect.denoteH or heap o vals) with
     | (.ok v, heap) => execInstrs or h track rest (env.set! dst v) { s with heap := heap }
     | (.panic .modelStuck, heap) =>
       -- Record where (op and operand shapes, truncated) for the engines.
@@ -428,6 +440,14 @@ def runBlock (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fn : Fu
           | some false => runBlock p or h track fn f (enter fn f env fargs) s fuel
           | none => (.panic .modelStuck, s)
         | .call f args dst next nargs fb =>
+          if s.fast then
+            -- No copy of the state kept for a rollback (`HState.fast`).
+            match runFunc p or h track f (args.map (env[·]!)) s fuel with
+            | (.ok v, s') =>
+              let env := env.set! dst v
+              runBlock p or h track fn next (enter fn next env nargs) s' fuel
+            | r => r
+          else
           match runFunc p or h track f (args.map (env[·]!)) s fuel with
           | (.ok v, s') =>
             let env := env.set! dst v
@@ -445,6 +465,13 @@ def runBlock (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fn : Fu
           | .nil => (.panic .nilDereference, s)
           | .unknown => runBlock p or h track fn fb (enter fn fb env []) (s.assume "a call through a function value the model does not know: its effects are not modelled") fuel
           | .known f bound =>
+            if s.fast then
+              match runFunc p or h track f (bound ++ args.map (env[·]!)) s fuel with
+              | (.ok v, s') =>
+                let env := env.set! dst v
+                runBlock p or h track fn next (enter fn next env nargs) s' fuel
+              | r => r
+            else
             match runFunc p or h track f (bound ++ args.map (env[·]!)) s fuel with
             | (.ok v, s') =>
               let env := env.set! dst v
@@ -478,7 +505,7 @@ end
 /-- Entry point: run a function with fresh havoc state and an initial heap
 (the objects the arguments point to; `#[]` when there are none). -/
 def run (p : Prog Op) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
-    (heap : Heap Val := #[]) : Res Val × HState Val :=
-  runFunc p or h false fid args { heap := heap } fuel
+    (heap : Heap Val := #[]) (fast : Bool := false) : Res Val × HState Val :=
+  runFunc p or h false fid args { heap := heap, fast := fast } fuel
 
 end Go2Lean.SSA
