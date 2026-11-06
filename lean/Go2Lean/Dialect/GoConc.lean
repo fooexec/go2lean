@@ -84,7 +84,8 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
     match fr.fn.blocks[fr.bid]? with
     | none => (.panicked .modelStuck, s)
     | some blk =>
-      match execInstrs (Op := Go2Lean.GoSSA.Op) or h true blk.instrs.toList fr.env s with
+      match (if s.fast then execInstrsF (Op := Go2Lean.GoSSA.Op) or h true blk.instrs.toList fr.env s
+          else execInstrs (Op := Go2Lean.GoSSA.Op) or h true blk.instrs.toList fr.env s) with
       | (.panic k, s) =>
         -- Name the function and block (once: the innermost site).
         let s := match s.panicAt with
@@ -104,8 +105,9 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
             if callee.sync then
               advance p or h ({ entryFrame callee vals with dst, next, nargs } :: { fr with env } :: rest) s fuel
             else if s.fast then
-              -- No copy of the state kept for a rollback (`HState.fast`).
-              match runFunc p or h true f vals s fuel with
+              -- The fast interpreter: no copy of the state kept for a
+              -- rollback (`SSA.runFuncF`).
+              match runFuncF p or h true f vals s fuel with
               | (.ok v, s') => advance p or h (goto next (env.set! dst v) nargs) s' fuel
               | (.panic k, s') => (.panicked k, s')
               | (.outOfFuel, s') => (.outOfFuel, s')
@@ -1015,13 +1017,18 @@ def resumeConc (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : L
     | _ => (.panic .modelStuck, { heap })
   | _, _ => (.panic .modelStuck, { heap })
 
+/-- The sequential interpreter, fast (`SSA.runF`) or not (`SSA.run`). -/
+def runSeq (fast : Bool) (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
+    (heap : Heap Val) : Res Val × HState Val :=
+  if fast then runF p or h fid args fuel heap else run p or h fid args fuel heap
+
 /-- Run `fid`: in the concurrent machine when it can synchronise, else with
-the big-step interpreter. -/
+the big-step interpreter, fast or not. -/
 def runAnyMode (fast : Bool) (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val) (fuel : Nat)
     (heap : Heap Val := #[]) (snap : Option Snap := none) : Res Val × HState Val :=
   match p.funcs[fid]?, snap with
-  | some fn, some snap => if fn.sync then resumeConc p or h fid args fuel heap snap fast else run p or h fid args fuel heap fast
-  | some fn, none => if fn.sync then runConc p or h fid args fuel heap fast else run p or h fid args fuel heap fast
+  | some fn, some snap => if fn.sync then resumeConc p or h fid args fuel heap snap fast else runSeq fast p or h fid args fuel heap
+  | some fn, none => if fn.sync then runConc p or h fid args fuel heap fast else runSeq fast p or h fid args fuel heap
   | none, _ => run p or h fid args fuel heap
 
 /-- Run `fid` the engines' way: in fast mode (`HState.fast`), then, if the
