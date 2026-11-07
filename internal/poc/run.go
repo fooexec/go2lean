@@ -156,23 +156,26 @@ func VerifyAll(ws contract.Workspace, root string, cxIDs []string, overlay map[s
 		if err != nil {
 			return nil, err
 		}
-		results, cmd, exit, out, errOut, err := runBatch(root, pkgDir, pkgName, pkg, batch, overlay)
+		// Built once, each test run in a process of its own: package
+		// state one PoC leaves (pflag's flag registry: a second BoolP of
+		// the same name panics) must not make the next one fail.
+		runs, err := runEach(root, pkgDir, pkgName, pkg, batch, overlay)
 		if err != nil {
 			return nil, err
 		}
-		// A test without a result in the batch (the batch did not compile,
-		// or an earlier test ended the process with log.Fatal) is run on
-		// its own, so one target's exit does not hide the others.
+		// A test without a result (the batch did not compile, or the test
+		// ended its process with log.Fatal) is built and run on its own.
 		for _, p := range batch {
-			if _, ok := results[p.cx.ID]; ok || len(batch) == 1 {
-				p.v = verdictOf(p, results, cmd, exit, out, errOut, root)
+			r := runs[p.cx.ID]
+			if _, ok := r.results[p.cx.ID]; ok || len(batch) == 1 {
+				p.v = verdictOf(p, r.results, r.cmd, r.exit, r.out, r.errOut, root)
 				continue
 			}
-			r, c, e, o, eo, err := runBatch(root, pkgDir, pkgName, pkg, []*prepared{p}, overlay)
+			res, c, e, o, eo, err := runBatch(root, pkgDir, pkgName, pkg, []*prepared{p}, overlay)
 			if err != nil {
 				return nil, err
 			}
-			p.v = verdictOf(p, r, c, e, o, eo, root)
+			p.v = verdictOf(p, res, c, e, o, eo, root)
 		}
 		// A data race: under Go's race detector, then with the model's
 		// schedule replayed.
@@ -492,7 +495,96 @@ func prepare(ws contract.Workspace, cxID string) (*prepared, error) {
 // runBatch builds one test file holding every test of the batch into the
 // package's test binary, runs it in the sandbox, and returns the parsed results keyed by counterexample
 // id (nil when the file did not compile).
+// oneRun is the outcome of running one PoC test (runEach).
+type oneRun struct {
+	results     map[string]result
+	cmd         string
+	exit        int
+	out, errOut string
+}
+
+// runEach builds the batch's tests once and runs each in a process of its
+// own; a batch that does not build gives every test the build's output.
+func runEach(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[string][]byte) (map[string]oneRun, error) {
+	out := map[string]oneRun{}
+	if len(batch) == 1 {
+		results, cmd, exit, o, e, err := runBatch(root, pkgDir, pkgName, pkg, batch, overlay)
+		if err != nil {
+			return nil, err
+		}
+		out[batch[0].cx.ID] = oneRun{results, cmd, exit, o, e}
+		return out, nil
+	}
+	err := withBatchBinary(root, pkgDir, pkgName, pkg, batch, overlay, func(bin string, flags []string, buildOut string, buildExit int) error {
+		for _, p := range batch {
+			if buildExit != 0 {
+				out[p.cx.ID] = oneRun{nil, testCmd(pkg, flags, testRun([]*prepared{p})), buildExit, "", buildOut}
+				continue
+			}
+			run := testRun([]*prepared{p})
+			stdout, stderr, exit, err := sandbox.Run(bin, pkgDir, []string{"-test.count=1", "-test.v", "-test.run", run}, nil, sandbox.Default)
+			if err != nil {
+				return err
+			}
+			out[p.cx.ID] = oneRun{parseResults(stdout), testCmd(pkg, flags, run), exit, stdout, stderr}
+		}
+		return nil
+	})
+	return out, err
+}
+
+// testRun is the -test.run pattern of a batch's PoC tests.
+func testRun(batch []*prepared) string {
+	run := "^TestGo2LeanPoC_"
+	if len(batch) == 1 {
+		run += batch[0].cx.ID + "$"
+	}
+	if sub := batch[0].prop.Subtest; sub != "" {
+		// The subtests the model ran (#48): a batch shares one pattern.
+		run += "/" + sub
+	}
+	return run
+}
+
+// testCmd is the go test command a PoC run stands for.
+func testCmd(pkg string, flags []string, run string) string {
+	if len(flags) > 0 {
+		return "go test -race -count=1 -v -run '" + run + "' " + testPath(pkg)
+	}
+	return "go test -count=1 -v -run '" + run + "' " + testPath(pkg)
+}
+
 func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[string][]byte) (map[string]result, string, int, string, string, error) {
+	var results map[string]result
+	var cmdLine, stdout, stderr string
+	var exit int
+	run := testRun(batch)
+	err := withBatchBinary(root, pkgDir, pkgName, pkg, batch, overlay, func(bin string, flags []string, buildOut string, buildExit int) error {
+		cmdLine, exit = testCmd(pkg, flags, run), buildExit
+		if buildExit != 0 {
+			stderr = buildOut
+			return nil
+		}
+		var err error
+		stdout, stderr, exit, err = sandbox.Run(bin, pkgDir, []string{"-test.count=1", "-test.v", "-test.run", run}, nil, sandbox.Default)
+		if err != nil {
+			return err
+		}
+		results = parseResults(stdout)
+		return nil
+	})
+	if err != nil {
+		return nil, "", 0, "", "", err
+	}
+	if len(results) == 0 {
+		return nil, cmdLine, exit, stdout, stderr, nil
+	}
+	return results, cmdLine, exit, stdout, stderr, nil
+}
+
+// withBatchBinary builds the batch's PoC tests into a test binary and calls
+// f with it (or with the build's output and exit when it did not build).
+func withBatchBinary(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[string][]byte, f func(bin string, flags []string, buildOut string, buildExit int) error) error {
 	imports := map[string]bool{}
 	var funcs []string
 	for _, p := range batch {
@@ -510,22 +602,14 @@ func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[
 	// Copied/legacy harnesses may redeclare this test. Never delete source
 	// files to make a build pass, even files carrying our naming prefix.
 	if stale, _ := filepath.Glob(filepath.Join(pkgDir, "zz_go2lean_poc_*_test.go")); len(stale) > 0 {
-		return nil, "", 0, "", "", fmt.Errorf("replay refused: package contains copied/generated observation tests; move them out of the scratch clone before retrying (no files were removed): %s", strings.Join(stale, ", "))
+		return fmt.Errorf("replay refused: package contains copied/generated observation tests; move them out of the scratch clone before retrying (no files were removed): %s", strings.Join(stale, ", "))
 	}
 	// The harness joins the package through an overlay and runs in the
 	// sandbox: nothing is written to the package, and a target that writes
 	// files, dials out or eats memory meets the sandbox's limits.
-	run := "^TestGo2LeanPoC_"
-	if len(batch) == 1 {
-		run += batch[0].cx.ID + "$"
-	}
-	if sub := batch[0].prop.Subtest; sub != "" {
-		// The subtests the model ran (#48): a batch shares one pattern.
-		run += "/" + sub
-	}
 	tmp, err := os.MkdirTemp("", "go2lean-poc-")
 	if err != nil {
-		return nil, "", 0, "", "", err
+		return err
 	}
 	defer os.RemoveAll(tmp)
 	bin := filepath.Join(tmp, "poc.test")
@@ -533,11 +617,11 @@ func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[
 	files := map[string][]byte{name: []byte(src)}
 	helpers, err := packageOverlayFiles(pkgDir, overlay)
 	if err != nil {
-		return nil, "", 0, "", "", err
+		return err
 	}
 	for helper, b := range helpers {
 		if helper == name {
-			return nil, "", 0, "", "", fmt.Errorf("package overlay replaces the generated test harness: %s", name)
+			return fmt.Errorf("package overlay replaces the generated test harness: %s", name)
 		}
 		files[helper] = b
 	}
@@ -549,26 +633,9 @@ func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[
 	}
 	buildOut, exit, err := sandbox.BuildTest(root, testPath(pkg), pkgDir, files, bin, flags...)
 	if err != nil {
-		return nil, "", 0, "", "", err
+		return err
 	}
-	var stdout, stderr string
-	if exit != 0 {
-		stderr = buildOut
-	} else {
-		stdout, stderr, exit, err = sandbox.Run(bin, pkgDir, []string{"-test.count=1", "-test.v", "-test.run", run}, nil, sandbox.Default)
-		if err != nil {
-			return nil, "", 0, "", "", err
-		}
-	}
-	cmdLine := "go test -count=1 -v -run '" + run + "' " + testPath(pkg)
-	if len(flags) > 0 {
-		cmdLine = "go test -race -count=1 -v -run '" + run + "' " + testPath(pkg)
-	}
-	results := parseResults(stdout)
-	if len(results) == 0 {
-		return nil, cmdLine, exit, stdout, stderr, nil
-	}
-	return results, cmdLine, exit, stdout, stderr, nil
+	return f(bin, flags, buildOut, exit)
 }
 
 func verdictOf(p *prepared, results map[string]result, cmd string, exit int, stdout, stderr, root string) *contract.Verdict {
