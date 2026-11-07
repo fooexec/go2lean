@@ -261,7 +261,7 @@ confirmed portable_finish_nopanic
 exhausted portable_first_nopanic
 inconclusive portable_group_nopanic
 confirmed portable_head_nopanic
-exhausted_assuming portable_initencoder_nopanic
+exhausted portable_initencoder_nopanic
 exhausted portable_intpart_nopanic
 exhausted portable_kind_string_nopanic
 confirmed portable_label2_nopanic

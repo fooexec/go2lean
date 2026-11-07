@@ -923,6 +923,11 @@ def havocReport (p : GoSSA.Prog) (or : Oracle) (h : Havoc Val) (prop : Property)
   else report or heap gens args trial seed o s ret p.siteOrigin
     (relevantHavoc p or h prop args fuel heap s snap) (perturbable p s)
 
+/-- The fuel of a package initializer's slice: it runs once per search,
+not once per trial, and builds tables (decimal's 128 powers of ten as
+`big.Int`s, #176) that a trial's fuel does not cover. -/
+def initFuel : Nat := 2000000
+
 /-- The heap the package initializers' slices leave (#55), run once, in
 order, for all trials: every trial starts from it. A slice that panics,
 gets stuck or runs out of fuel is skipped (the heap is the one before it),
@@ -939,7 +944,7 @@ def initHeap (p : GoSSA.Prog) (extra : List Nat) (fuel : Nat) :
     fun (heap, ran, reads, errs, spawned) f =>
       let pkg := (p.funcs[f]?.map (·.pkg)).getD s!"#{f}"
       let at_ := fun (s : HState Val) => ((s.panicAt <|> s.stuck).map (" at " ++ ·)).getD ""
-      match GoConc.runAny p or h f [] fuel heap with
+      match GoConc.runAny p or h f [] (max fuel initFuel) heap with
       -- The schedule's draws (a ticker the slice started moving beside
       -- it) are no data the slice read.
       | (.ok _, s) => (s.heap, ran + 1, reads + (s.log.toList.filter fun (site, _, _) => some site != p.schedSite).length,
