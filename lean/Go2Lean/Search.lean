@@ -926,7 +926,7 @@ def havocReport (p : GoSSA.Prog) (or : Oracle) (h : Havoc Val) (prop : Property)
 /-- The fuel of a package initializer's slice: it runs once per search,
 not once per trial, and builds tables (decimal's 128 powers of ten as
 `big.Int`s, #176) that a trial's fuel does not cover. -/
-def initFuel : Nat := 2000000
+def initFuel : Nat := 200000
 
 /-- The heap the package initializers' slices leave (#55), run once, in
 order, for all trials: every trial starts from it. A slice that panics,
