@@ -41,7 +41,8 @@ package state.
   loop or allocate without bound: arithmetic on a huge exponent. Each PoC
   runs in its own process, and each held its process until the sandbox's
   5 CPU minutes ran out. PoCs now run under Go's test timeout, 30 s for a
-  sequential one and 3 min for a concurrent one. A run past it is
+  sequential one (10 s since the `math/big` rerun below) and 3 min for a
+  concurrent one. A run past it is
   `inconclusive` (`real_run_timeout`): 6 in decimal.
 - **A run out of memory was confirmed.** Go's `fatal error: out of memory`
   in the sandbox counted as the panic the model found, an index out of

@@ -553,7 +553,7 @@ func testRun(batch []*prepared) string {
 // arithmetic on a huge exponent). A concurrent harness repeats the call up
 // to concRuns times, each under its own 2s watchdog, so it gets longer.
 const (
-	pocTimeout     = 30 * time.Second
+	pocTimeout     = 10 * time.Second
 	pocConcTimeout = 3 * time.Minute
 )
 
