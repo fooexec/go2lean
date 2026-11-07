@@ -154,13 +154,15 @@ func (t *fnState) floatMathCall(x *ssa.Call, callee *ssa.Function) (bool, error)
 			}
 		}
 		return false, nil
-	case "math.Float64bits":
+	// internal/strconv's own copies, which reinterpret the float through
+	// unsafe so as not to import math (FormatFloat's genericFtoa).
+	case "math.Float64bits", "internal/strconv.float64bits":
 		w, toBits = 64, true
-	case "math.Float32bits":
+	case "math.Float32bits", "internal/strconv.float32bits":
 		w, toBits = 32, true
-	case "math.Float64frombits":
+	case "math.Float64frombits", "internal/strconv.float64frombits":
 		w = 64
-	case "math.Float32frombits":
+	case "math.Float32frombits", "internal/strconv.float32frombits":
 		w = 32
 	default:
 		return false, nil
