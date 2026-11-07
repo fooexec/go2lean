@@ -285,6 +285,10 @@ func TestVerdictTestTimeout(t *testing.T) {
 	if v.Status != contract.VerdictInconclusive || v.Diagnosis == nil || v.Diagnosis.Reason != "real_run_timeout" || v.Observed["timeout"] != "30s" {
 		t.Fatalf("verdict %+v, diagnosis %+v", v, v.Diagnosis)
 	}
+	oom := "runtime: out of memory: cannot allocate 4194304-byte block (8589934592 in use)\nfatal error: out of memory\n\ngoroutine 6 [running]:\n"
+	if v := verdictOf(p, nil, "go test", 2, "=== RUN   TestGo2LeanPoC_cx1\n", oom, ""); v.Status != contract.VerdictInconclusive || v.Diagnosis == nil || v.Diagnosis.Reason != "real_run_out_of_memory" {
+		t.Fatalf("out of memory: verdict %+v, diagnosis %+v", v, v.Diagnosis)
+	}
 	if got := testArgs([]*prepared{p}, "^X$"); !slices.Contains(got, "-test.timeout=30s") {
 		t.Fatalf("sequential PoC args %v", got)
 	}

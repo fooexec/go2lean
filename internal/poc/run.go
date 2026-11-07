@@ -677,6 +677,14 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 			"Go's run of the call had not returned after " + m[1] + " (the PoC's test timeout); the input may make the real code very slow"}}
 		return v
 	}
+	if m := goCrash.FindStringSubmatch(stderr); m != nil && !ok && m[1] == "fatal error" && strings.Contains(m[2], "out of memory") {
+		// The run used up the sandbox's memory: a resource limit, not the
+		// panic the model found (decimal's arithmetic on a huge exponent).
+		v.Status, v.Observed = contract.VerdictInconclusive, map[string]string{"fatal": m[2]}
+		v.Diagnosis = &contract.Diagnosis{Reason: "real_run_out_of_memory", Notes: []string{
+			"Go's run of the call ran out of memory in the sandbox; the input may make the real code allocate without bound"}}
+		return v
+	}
 	if m := goCrash.FindStringSubmatch(stderr); m != nil && exit != 0 && harnessCrash(stderr) {
 		// The goroutine that panicked stopped in go2lean's own code (the
 		// replay controller): the harness failed, which says nothing about
