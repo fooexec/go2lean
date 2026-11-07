@@ -16,7 +16,7 @@ func TestWriteBrief(t *testing.T) {
 				Observed: map[string]string{"panic": "index out of range"},
 				Evidence: contract.Evidence{PanicSite: "a.go:3"},
 				Rank:     &contract.Rank{Tier: tier}},
-			Property: &contract.Property{NL: id + " does not panic on any input"},
+			Property: &contract.Property{Target: id, NL: id + " does not panic on any input"},
 		}
 	}
 	s := &Summary{Properties: 9, Confirmed: []Finding{v("F", 1), v("g", 2), v("h", 2)}, Spurious: []Finding{v("s", 0)}}
@@ -25,7 +25,7 @@ func TestWriteBrief(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"9 properties; 3 confirmed (1 a caller can reach, 2 that depend on the callers or on package state), 1 spurious",
-		"confirmed: F does not panic on any input",
+		"confirmed: F",
 		"at a.go:3: map[panic:index out of range]",
 		"PoC: out/poc/F",
 		"2 other confirmed findings depend on inputs the callers may never pass",
@@ -37,5 +37,19 @@ func TestWriteBrief(t *testing.T) {
 	}
 	if strings.Contains(got, "confirmed: g") {
 		t.Errorf("a tier-2 finding is listed:\n%s", got)
+	}
+}
+
+// Findings that panic at the same line are one entry.
+func TestWriteBriefGroupsBySite(t *testing.T) {
+	f := func(id string) Finding {
+		return Finding{Verdict: &contract.Verdict{Counterexample: id, Evidence: contract.Evidence{PanicSite: "flag.go:950"},
+			Rank: &contract.Rank{Tier: 1}}, Property: &contract.Property{Target: id}}
+	}
+	s := &Summary{Confirmed: []Finding{f("BoolP"), f("IntP"), f("StringP")}}
+	var out bytes.Buffer
+	s.WriteBrief(&out, "summary.md")
+	if got := out.String(); strings.Count(got, "confirmed: ") != 1 || !strings.Contains(got, "confirmed: BoolP, IntP, StringP") {
+		t.Errorf("not grouped by site:\n%s", got)
 	}
 }

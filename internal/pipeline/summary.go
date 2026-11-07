@@ -179,17 +179,42 @@ func (s *Summary) WriteBrief(out io.Writer, path string) {
 	}
 	fmt.Fprintf(out, "== Summary\n  %d properties; %d confirmed (%d a caller can reach, %d that depend on the callers or on package state), %d spurious, %d inconclusive\n",
 		s.Properties, len(s.Confirmed), len(byTier[1]), len(s.Confirmed)-len(byTier[1]), len(s.Spurious), len(s.Inconclusive))
+	// One entry per place the program fails: findings that panic at the
+	// same line are one bug reached from several functions.
+	type group struct {
+		first Finding
+		names []string
+	}
+	var groups []*group
+	bySite := map[string]*group{}
+	for _, f := range byTier[1] {
+		name := f.Verdict.Counterexample
+		if f.Property != nil && f.Property.Target != "" {
+			name = f.Property.Target
+		}
+		site := f.Verdict.Evidence.PanicSite
+		if g := bySite[site]; site != "" && g != nil {
+			g.names = append(g.names, name)
+			continue
+		}
+		g := &group{first: f, names: []string{name}}
+		groups = append(groups, g)
+		if site != "" {
+			bySite[site] = g
+		}
+	}
 	const most = 10
-	for i, f := range byTier[1] {
+	for i, g := range groups {
 		if i == most {
-			fmt.Fprintf(out, "  ... and %d more\n", len(byTier[1])-most)
+			fmt.Fprintf(out, "  ... and %d more places\n", len(groups)-most)
 			break
 		}
-		name := f.Verdict.Counterexample
-		if f.Property != nil {
-			name = f.Property.NL
+		f := g.first
+		names := g.names
+		if len(names) > 5 {
+			names = append(names[:5:5], fmt.Sprintf("%d more", len(g.names)-5))
 		}
-		fmt.Fprintf(out, "  confirmed: %s\n", name)
+		fmt.Fprintf(out, "  confirmed: %s\n", strings.Join(names, ", "))
 		if site := f.Verdict.Evidence.PanicSite; site != "" {
 			fmt.Fprintf(out, "    at %s: %v\n", site, f.Verdict.Observed)
 		} else {
