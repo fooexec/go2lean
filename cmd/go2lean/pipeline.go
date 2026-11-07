@@ -169,6 +169,9 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := requireModule(env); err != nil {
+		return err
+	}
 	env.Deps, env.Resume, env.FuzzSpecs, env.Tests, env.SpecsOnly = *deps, *resume, *fuzzSpecs, *tests, *specsOnly
 	env.RunBudget = time.Duration(*runBudget) * time.Second
 	env.Changed = *changed

@@ -121,6 +121,31 @@ func openWorkspace(cf *commonFlags) (contract.Workspace, pipeline.Env, error) {
 	return w, env, w.Init()
 }
 
+// requireModule says, before the packages load, when the analysed
+// directory is in no Go module: Go's loader would only report "directory
+// prefix . does not contain main module" (kballard/go-shellquote has no
+// go.mod).
+func requireModule(env pipeline.Env) error {
+	dir := env.Module
+	if dir == "" {
+		var err error
+		if dir, err = os.Getwd(); err != nil {
+			return err
+		}
+	}
+	for d := dir; ; d = filepath.Dir(d) {
+		for _, f := range []string{"go.mod", "go.work"} {
+			if _, err := os.Stat(filepath.Join(d, f)); err == nil {
+				return nil
+			}
+		}
+		if filepath.Dir(d) == d {
+			break
+		}
+	}
+	return fmt.Errorf("no go.mod in %s or a directory above it: go2lean analyses a Go module; create one with `go mod init <module path>` and `go mod tidy`", dir)
+}
+
 func cmdCompile(args []string) error {
 	fs := flag.NewFlagSet("compile", flag.ExitOnError)
 	ws := workspaceFlag(fs)
@@ -133,6 +158,9 @@ func cmdCompile(args []string) error {
 	}
 	w, env, err := openWorkspace(ws)
 	if err != nil {
+		return err
+	}
+	if err := requireModule(env); err != nil {
 		return err
 	}
 	env.Deps, env.Tests = *deps, *tests
