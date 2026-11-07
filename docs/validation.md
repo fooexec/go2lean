@@ -33,6 +33,12 @@ default flags, gave real panics with PoCs in two of them. It also showed
 what got in the way: dependencies not translated by default, no
 end-of-run summary, generic packages skipped silently, and `doctor`
 misreading `GOTOOLCHAIN`, all fixed since.
+A [second run on seven more](../docs/eval/second-run.md) (pflag, toml,
+mux, backoff, decimal, go-shellquote, xid) confirmed panics in five. It
+also fixed what stopped two of them at the hour cap: exhaustive domains
+built whole before the budget check, and PoCs whose real run never ends.
+Its open problems are `math/big`, which is unmodelled, and the noise from
+unexported functions.
 
 Evidence beyond the codebase it was built on comes from blind runs with a
 protocol committed before each run and the tool frozen:
