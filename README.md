@@ -79,7 +79,9 @@ go run ./cmd/go2lean run ./examples/overflow
 
 The example checks that adding non-negative integers produces a non-negative
 result. It finds an overflow counterexample, replays it in Go, and writes a
-runnable test plus reproduction instructions to `out/poc/`.
+runnable test plus reproduction instructions to `out/poc/`. A run ends with
+a summary: the violated specs and the panics a caller can reach, with their
+PoCs, then a count of the rest (ranked in `out/summary.md`).
 
 **Run against a scratch clone:** replay executes real code and may have side
 effects. On Linux, [bubblewrap](https://github.com/containers/bubblewrap) is

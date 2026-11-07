@@ -177,8 +177,6 @@ func (s *Summary) WriteBrief(out io.Writer, path string) {
 	for _, f := range s.Confirmed {
 		byTier[tier(f)] = append(byTier[tier(f)], f)
 	}
-	fmt.Fprintf(out, "== Summary\n  %d properties; %d confirmed (%d a caller can reach, %d that depend on the callers or on package state), %d spurious, %d inconclusive\n",
-		s.Properties, len(s.Confirmed), len(byTier[1]), len(s.Confirmed)-len(byTier[1]), len(s.Spurious), len(s.Inconclusive))
 	// One entry per place the program fails: findings that panic at the
 	// same line are one bug reached from several functions.
 	type group struct {
@@ -187,7 +185,17 @@ func (s *Summary) WriteBrief(out io.Writer, path string) {
 	}
 	var groups []*group
 	bySite := map[string]*group{}
-	for _, f := range byTier[1] {
+	// Listed: what a caller can reach, and every spec the user (or the
+	// agent) wrote that fails, whatever its rank: the ranking keeps a spec
+	// violation below tier 1 because the spec may be wrong, but it is the
+	// finding the user asked for.
+	var listed []Finding
+	for _, f := range s.Confirmed {
+		if tier(f) == 1 || specFinding(f) {
+			listed = append(listed, f)
+		}
+	}
+	for _, f := range listed {
 		name := findingName(f)
 		site := f.Verdict.Evidence.PanicSite
 		if g := bySite[site]; site != "" && g != nil {
@@ -204,6 +212,15 @@ func (s *Summary) WriteBrief(out io.Writer, path string) {
 	// explicit panic of the package is often its documented check of an
 	// argument (pflag's "shorthand is more than one ASCII character").
 	sort.SliceStable(groups, func(i, j int) bool { return !explicitPanic(groups[i].first) && explicitPanic(groups[j].first) })
+	// The headline is what a caller can reach: on toml, 6 of 111 confirmed
+	// findings; the others are in unexported functions or rest on package
+	// state, and counted after.
+	fmt.Fprintf(out, "== Summary\n  %d properties checked\n", s.Properties)
+	if len(groups) == 0 {
+		fmt.Fprintf(out, "  no confirmed finding a caller can reach, and no spec violated\n")
+	} else {
+		fmt.Fprintf(out, "  %s a caller can reach or that violate a spec, %s:\n", plural(len(listed), "confirmed finding"), plural(len(groups), "place"))
+	}
 	const most = 10
 	for i, g := range groups {
 		if i == most {
@@ -216,6 +233,9 @@ func (s *Summary) WriteBrief(out io.Writer, path string) {
 			names = append(names[:5:5], fmt.Sprintf("%d more", len(g.names)-5))
 		}
 		fmt.Fprintf(out, "  confirmed: %s\n", strings.Join(names, ", "))
+		if specFinding(f) {
+			fmt.Fprintf(out, "    spec violated: %s\n", f.Property.NL)
+		}
 		if explicitPanic(f) {
 			fmt.Fprintf(out, "    an explicit panic of the package: check whether its documentation says it panics there\n")
 		}
@@ -228,10 +248,26 @@ func (s *Summary) WriteBrief(out io.Writer, path string) {
 			fmt.Fprintf(out, "    PoC: %s\n", f.Verdict.PocDir)
 		}
 	}
-	if len(s.Confirmed) > len(byTier[1]) {
-		fmt.Fprintf(out, "  %d other confirmed findings depend on inputs the callers may never pass: ranked in %s\n", len(s.Confirmed)-len(byTier[1]), path)
+	if n := len(s.Confirmed) - len(listed); n > 0 {
+		fmt.Fprintf(out, "  %d more confirmed that depend on what callers pass or on package state (unexported functions, nil arguments, forged state): ranked in %s\n", n, path)
 	}
+	fmt.Fprintf(out, "  %d spurious, %d inconclusive\n", len(s.Spurious), len(s.Inconclusive))
 	fmt.Fprintf(out, "  full summary: %s\n", path)
+}
+
+// specFinding says whether a finding violates a spec, not a template
+// (no_panic, no_hang).
+func specFinding(f Finding) bool {
+	p := f.Property
+	return p != nil && p.Kind != "" && p.Kind != contract.KindNoPanic && p.Kind != contract.KindNoHang
+}
+
+// plural is "1 place", "2 places".
+func plural(n int, what string) string {
+	if n == 1 {
+		return "1 " + what
+	}
+	return fmt.Sprintf("%d %ss", n, what)
 }
 
 // findingName is the Go function a finding is about, as its property names
