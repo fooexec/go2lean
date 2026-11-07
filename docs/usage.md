@@ -102,7 +102,24 @@ compiled github.com/andreasfoo/go2lean/examples/overflow -> out/lean/Go2Lean/Gen
 == Replay stage: generate PoC and verify
   cx_overflow_sum_specsum_random_s42  confirmed    real: map[ret:-9223372036854775808]
       PoC: out/poc/cx_overflow_sum_specsum_random_s42
+== Summary
+  2 properties checked
+  1 confirmed finding a caller can reach or that violate a spec, 1 place:
+  confirmed: Sum
+    spec violated: Sum satisfies the spec-in-Go oracle SpecSum
+    real: map[ret:-9223372036854775808]
+    PoC: out/poc/cx_overflow_sum_specsum_random_s42
+  0 spurious, 0 inconclusive
+  full summary: out/summary.md
 ```
+
+Read the summary at the end first. It lists every
+violated spec, and the confirmed findings a caller of the package's API can
+reach, one entry per line where the program fails, with runtime errors before the package's own
+`panic` calls. The other confirmed findings are only counted. They are in
+unexported functions, need a nil no caller passes, or rest on package state
+the test forged. `out/summary.md` ranks every finding by how plausible its
+input is.
 
 The PoC directory holds a ready-to-run Go test and a README with the
 reproduction command. Everything the modules exchange is a JSON record under
