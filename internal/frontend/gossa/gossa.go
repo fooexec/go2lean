@@ -122,8 +122,11 @@ func modelTags(goflags string) []string {
 			tags = append(tags, strings.Split(v, ",")...)
 		}
 	}
-	if !slices.Contains(tags, "purego") {
-		tags = append(tags, "purego")
+	// math/big's portable Go has its own tag (#171).
+	for _, t := range []string{"purego", "math_big_pure_go"} {
+		if !slices.Contains(tags, t) {
+			tags = append(tags, t)
+		}
 	}
 	return slices.DeleteFunc(tags, func(t string) bool { return t == "" })
 }
@@ -1532,6 +1535,9 @@ var modelledStdlib = map[string]bool{
 	// Less: otel sorts attribute sets with SortStableFunc (eval 7's k009).
 	"slices": true,
 	"cmp":    true,
+	// Arbitrary precision (#171), its portable Go (math_big_pure_go):
+	// shopspring/decimal keeps a Decimal's value in a *big.Int.
+	"math/big": true,
 }
 
 // modelledTime are the functions of package time translated from source
@@ -9279,7 +9285,17 @@ func (ab *abiBuilder) param(name string, t types.Type, stack []*types.Named) (co
 		w, _ := floatWidth(t)
 		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, Width: w, Model: []string{name}, Kind: contract.ABIFloat}, nil
 	case isOpaqueType(t) || isForeignOpaqueStruct(pkg, t) || isForeignUnexported(pkg, t):
-		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIOpaque, Zero: zeroLit(t, src)}, nil
+		p := contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIOpaque, Zero: zeroLit(t, src)}
+		if n, ok := types.Unalias(t).(*types.Named); ok && n.Obj().Pkg() != nil && modelledStdlib[n.Obj().Pkg().Path()] {
+			// A struct of a package translated from source (a big.Int): the
+			// test passes its zero value, and the translated methods read
+			// its fields, so the model holds that zero, not an unknown
+			// value they would dereference (#171).
+			if z, ok := zeroVal(t); ok {
+				p.ZeroModel = zeroModel(z)
+			}
+		}
+		return p, nil
 	case isBool(t):
 		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, Model: []string{name}, Kind: contract.ABIBool}, nil
 	case isError(t):

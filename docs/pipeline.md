@@ -101,7 +101,7 @@ wrong), or `inconclusive`. This is the only source of trust: a bug is
 reported only with a verdict from here. A package's tests are built once,
 and each counterexample's test runs in a process of its own, so state one
 leaves in the package (a registry, a flag set) does not decide the next
-one's verdict. Each runs under Go's test timeout, 30 s (3 min for a
+one's verdict. Each runs under Go's test timeout, 10 s (3 min for a
 concurrent harness): a call that has not returned by then is
 `inconclusive` (`real_run_timeout`), since a real run that never ends
 neither shows nor refutes the panic the model found. A run that uses up

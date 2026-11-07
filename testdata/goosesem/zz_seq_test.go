@@ -68,6 +68,9 @@ func SeqTestBase64RoundTrip() bool { return testBase64RoundTrip() }
 // go2lean:sequence testBasicInterface
 func SeqTestBasicInterface() bool { return testBasicInterface() }
 
+// go2lean:sequence testBigAddSubCmp
+func SeqTestBigAddSubCmp() bool { return testBigAddSubCmp() }
+
 // go2lean:sequence testBigArrayConstLen
 func SeqTestBigArrayConstLen() bool { return testBigArrayConstLen() }
 
@@ -76,6 +79,18 @@ func SeqTestBigArrayEqual() bool { return testBigArrayEqual() }
 
 // go2lean:sequence testBigBytesString
 func SeqTestBigBytesString() bool { return testBigBytesString() }
+
+// go2lean:sequence testBigExpAbsNeg
+func SeqTestBigExpAbsNeg() bool { return testBigExpAbsNeg() }
+
+// go2lean:sequence testBigMulString
+func SeqTestBigMulString() bool { return testBigMulString() }
+
+// go2lean:sequence testBigQuoRemDivMod
+func SeqTestBigQuoRemDivMod() bool { return testBigQuoRemDivMod() }
+
+// go2lean:sequence testBigSetString
+func SeqTestBigSetString() bool { return testBigSetString() }
 
 // go2lean:sequence testBigSliceAppendCopy
 func SeqTestBigSliceAppendCopy() bool { return testBigSliceAppendCopy() }

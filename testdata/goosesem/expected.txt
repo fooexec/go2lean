@@ -1,3 +1,6 @@
+testbigexpabsneg exhausted_assuming  # by design: math/big's String sizes its buffer with math.Log (portable Go), and its scratch stack comes from a sync.Pool, whose Get gives a fresh one and Put is ignored (#105); results are exact (#171)
+testbigmulstring exhausted_assuming  # by design: math/big's String sizes its buffer with math.Log (portable Go), and its scratch stack comes from a sync.Pool, whose Get gives a fresh one and Put is ignored (#105); results are exact (#171)
+testbigsetstring exhausted_assuming  # by design: math/big's String sizes its buffer with math.Log (portable Go), and its scratch stack comes from a sync.Pool, whose Get gives a fresh one and Put is ignored (#105); results are exact (#171)
 testinittickerdaemon exhausted_assuming  # by design: a goroutine waits on a ticker a package initializer started, which the trials do not keep (#129)
 testmkdirtempfresh exhausted_assuming  # by design: os.RemoveAll of the directories is not modelled (osmodel models MkdirTemp only)
 testnetlistendialecho exhausted_havoc  # sampled: a round trip through Accept and a pipe has more schedules than the exhaustive engine runs (#126)

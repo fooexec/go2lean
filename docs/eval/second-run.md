@@ -41,7 +41,8 @@ package state.
   loop or allocate without bound: arithmetic on a huge exponent. Each PoC
   runs in its own process, and each held its process until the sandbox's
   5 CPU minutes ran out. PoCs now run under Go's test timeout, 30 s for a
-  sequential one and 3 min for a concurrent one. A run past it is
+  sequential one (10 s since the `math/big` rerun below) and 3 min for a
+  concurrent one. A run past it is
   `inconclusive` (`real_run_timeout`): 6 in decimal.
 - **A run out of memory was confirmed.** Go's `fatal error: out of memory`
   in the sandbox counted as the panic the model found, an index out of
@@ -82,10 +83,10 @@ package state.
 
 ## Open
 
-- **`math/big`.** All 48 of decimal's spurious findings rest on results of
-  `math/big` calls that the model chooses freely (`NewInt`, `Sign`, `Abs`,
-  `String`). `math/big` translated from source, or a model of it, would
-  remove them.
+- **Package-variable initializers.** 12 of decimal's 22 remaining spurious
+  findings (after `math/big`, below) panic at `pow10`. Its `pow10Table` is
+  built at init, and the model runs initializers only in concurrent
+  programs (#176).
 - **`regexp` in mux.** mux's spurious findings rest on `regexp.QuoteMeta`
   and `NumSubexp`, which the model does not model when `regexp` comes in
   through a dependency.
@@ -95,3 +96,28 @@ package state.
 - **Unexported functions dominate.** 105 of toml's 111 confirmed findings
   are in unexported functions or depend on package state. The ranking puts
   them below tier 1, but they still make up most of the summary's count.
+
+## Rerun of decimal with `math/big` translated (#171)
+
+All 48 of decimal's spurious findings rested on results of `math/big` calls
+that the model chose freely (`NewInt`, `Sign`, `Abs`, `String`). `math/big`
+is now translated from its portable Go under `-deps`, and a `*big.Int` input
+is its zero value in the model, as in the test.
+
+| | before | after |
+|---|---|---|
+| time | 640 s | 690 s |
+| confirmed (listed in the summary) | 21 (10) | 22 (10) |
+| spurious | 48 | 22 |
+| inconclusive | 11 | 26 |
+
+- **Spurious.** None of the 22 rests on an unmodelled `math/big` call any
+  more. 12 come from `pow10Table` (#176).
+- **Inconclusive.** All 26 are real runs past the PoC timeout. With exact
+  arithmetic, the model now reaches more calls that are very slow in Go
+  (`Exp` with a huge exponent, `Atan`), and it finds the explicit panics
+  behind them, which Go does not reach in 10 s.
+- **Time.** The sequential PoC timeout went down from 30 s to 10 s: a
+  replay that panics does so at once, and at 30 s each, the 26 timeouts
+  made the run take 1,729 s.
+
