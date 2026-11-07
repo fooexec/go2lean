@@ -6334,6 +6334,19 @@ func (plan *cellPlan) dropUntranslatable(units []unit, xrefs map[string]contract
 func trialInit(pkgPath string, fns []*ssa.Function, initFn *ssa.Function, keep map[ssa.Instruction]bool, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan) (ssa.Instruction, bool) {
 	st := newProgState(pkgPath, fns, xrefs, zeros, sprog, boxed, plan)
 	for _, f := range initFuncs(initFn) {
+		// As translatePackage: a func init() with nothing in the slice is
+		// not part of it (decimal's test-file init, whose loop over its
+		// test table made the trial fail and every cell drop, #176).
+		in := false
+		for k := range keep {
+			if k.Parent() == f {
+				in = true
+				break
+			}
+		}
+		if !in {
+			continue
+		}
 		out := &ir.Func{Name: f.Name(), GoSig: goSig(f), Init: true}
 		st.prog.Funcs = append(st.prog.Funcs, out)
 		t := &fnState{prog: st, f: f, out: out, vars: map[ssa.Value]ir.Var{}, blockID: map[*ssa.BasicBlock]int{}, keep: keep}
