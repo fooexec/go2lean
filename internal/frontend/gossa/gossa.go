@@ -122,8 +122,11 @@ func modelTags(goflags string) []string {
 			tags = append(tags, strings.Split(v, ",")...)
 		}
 	}
-	if !slices.Contains(tags, "purego") {
-		tags = append(tags, "purego")
+	// math/big's portable Go has its own tag (#171).
+	for _, t := range []string{"purego", "math_big_pure_go"} {
+		if !slices.Contains(tags, t) {
+			tags = append(tags, t)
+		}
 	}
 	return slices.DeleteFunc(tags, func(t string) bool { return t == "" })
 }
@@ -1532,6 +1535,9 @@ var modelledStdlib = map[string]bool{
 	// Less: otel sorts attribute sets with SortStableFunc (eval 7's k009).
 	"slices": true,
 	"cmp":    true,
+	// Arbitrary precision (#171), its portable Go (math_big_pure_go):
+	// shopspring/decimal keeps a Decimal's value in a *big.Int.
+	"math/big": true,
 }
 
 // modelledTime are the functions of package time translated from source

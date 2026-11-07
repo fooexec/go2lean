@@ -39,10 +39,10 @@ func TestTranslateForced(t *testing.T) {
 // The model is translated with purego added to the tags GOFLAGS sets.
 func TestModelTags(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
-		{"", "purego"},
-		{"-mod=mod", "purego"},
-		{"-tags=netgo,osusergo -mod=mod", "netgo,osusergo,purego"},
-		{"-tags=purego", "purego"},
+		{"", "purego,math_big_pure_go"},
+		{"-mod=mod", "purego,math_big_pure_go"},
+		{"-tags=netgo,osusergo -mod=mod", "netgo,osusergo,purego,math_big_pure_go"},
+		{"-tags=purego", "purego,math_big_pure_go"},
 	} {
 		if got := strings.Join(modelTags(c.in), ","); got != c.want {
 			t.Errorf("modelTags(%q) = %q, want %q", c.in, got, c.want)
