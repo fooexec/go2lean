@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andreasfoo/go2lean/internal/builtin"
 	"github.com/andreasfoo/go2lean/internal/contract"
@@ -522,7 +523,7 @@ func runEach(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[s
 				continue
 			}
 			run := testRun([]*prepared{p})
-			stdout, stderr, exit, err := sandbox.Run(bin, pkgDir, []string{"-test.count=1", "-test.v", "-test.run", run}, nil, sandbox.Default)
+			stdout, stderr, exit, err := sandbox.Run(bin, pkgDir, testArgs([]*prepared{p}, run), nil, sandbox.Default)
 			if err != nil {
 				return err
 			}
@@ -546,6 +547,30 @@ func testRun(batch []*prepared) string {
 	return run
 }
 
+// The longest a PoC test may run before Go's test timeout ends it: a call
+// that has not returned by then says nothing about a panic the model found,
+// and an unbounded one held the replay of a whole package (decimal's
+// arithmetic on a huge exponent). A concurrent harness repeats the call up
+// to concRuns times, each under its own 2s watchdog, so it gets longer.
+const (
+	pocTimeout     = 30 * time.Second
+	pocConcTimeout = 3 * time.Minute
+)
+
+// testArgs are the test binary's flags for running the batch's PoC tests.
+func testArgs(batch []*prepared, run string) []string {
+	t := pocTimeout
+	for _, p := range batch {
+		if strings.Contains(p.fn, "go2leanDone := make(chan struct{})") {
+			t = pocConcTimeout
+		}
+	}
+	return []string{"-test.count=1", "-test.v", "-test.timeout=" + t.String(), "-test.run", run}
+}
+
+// testTimedOut matches Go's report of a test binary past -test.timeout.
+var testTimedOut = regexp.MustCompile(`(?m)^panic: test timed out after (\S+)`)
+
 // testCmd is the go test command a PoC run stands for.
 func testCmd(pkg string, flags []string, run string) string {
 	if len(flags) > 0 {
@@ -566,7 +591,7 @@ func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[
 			return nil
 		}
 		var err error
-		stdout, stderr, exit, err = sandbox.Run(bin, pkgDir, []string{"-test.count=1", "-test.v", "-test.run", run}, nil, sandbox.Default)
+		stdout, stderr, exit, err = sandbox.Run(bin, pkgDir, testArgs(batch, run), nil, sandbox.Default)
 		if err != nil {
 			return err
 		}
@@ -644,6 +669,14 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 		Evidence:       contract.Evidence{Cmd: cmd, Exit: exit, StdoutTail: tail(stdout), StderrTail: tail(stderr)},
 	}
 	res, ok := results[p.cx.ID]
+	if m := testTimedOut.FindStringSubmatch(stderr); m != nil && !ok {
+		// The call did not return before the test timeout: Go's run neither
+		// panicked nor returned, so it does not judge the model's finding.
+		v.Status, v.Observed = contract.VerdictInconclusive, map[string]string{"timeout": m[1]}
+		v.Diagnosis = &contract.Diagnosis{Reason: "real_run_timeout", Notes: []string{
+			"Go's run of the call had not returned after " + m[1] + " (the PoC's test timeout); the input may make the real code very slow"}}
+		return v
+	}
 	if m := goCrash.FindStringSubmatch(stderr); m != nil && exit != 0 && harnessCrash(stderr) {
 		// The goroutine that panicked stopped in go2lean's own code (the
 		// replay controller): the harness failed, which says nothing about
