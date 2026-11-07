@@ -398,20 +398,21 @@ backing array; a map or slice is one location, a field or element through
 a pointer its own) are checked against the location's last write and the
 reads since (FastTrack); two accesses, one a write, neither ordered before
 the other, end the run with `data_race`. Within a step the machine is
-sequentially consistent: no weak-memory reorderings. In a package that
-starts goroutines, or in a dependency package (`-deps`) of a program whose
-compiled packages do, the package variables that the functions of any
+sequentially consistent: no weak-memory reorderings. In every package
+of the program (since #176; before, only in packages that start goroutines
+and their dependencies), the package variables that the functions of any
 linked package write are shared cells, so their races are seen. Which
 variables are cells is decided once for the whole program, so every
 package reads and writes a variable the same way (#55). A cell starts at the variable's zero
 value, at the one constant its initializer stores, or, for an interface
 its initializer builds (`var logger Logger = &std{}`, or a call of a
 function that returns one), at an opaque
-non-nil value whose method calls are havoc (#55). In those packages, a
+non-nil value whose method calls are havoc (#55). A
 variable that linked functions use and that the package initializer sets once to a value
 it builds (a new object, map, slice or channel, made in place or by a call
-of a function of the package, or of a standard-library package translated
-from source (nkeys' `var b32Enc = base32.StdEncoding.WithPadding(...)`,
+of a function of the package, or of a function literal called where it is
+written (decimal's `var pow10Table = func() []*big.Int {...}()`, #176), or of a
+standard-library package translated from source (nkeys' `var b32Enc = base32.StdEncoding.WithPadding(...)`,
 whose callees are then translated too): `var reg = &registry{m: map[string]int{}}`;
 or a struct literal, whose fields may then be locked and written:
 go-metrics' `var arbiter = meterArbiter{meters: make(...)}`, #129)

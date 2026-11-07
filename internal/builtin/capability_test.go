@@ -219,7 +219,10 @@ func TestCapabilityOnStatefulCompilerOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := AssessCompareOrder(b, ps)
-	if c.Status != "unsupported" || !hasIssue(c, "reported-model-issue") {
+	// The counter is a cell (every package's variables are, #176), whose
+	// address the capability does not accept; before, its write was an
+	// ignored effect the model reported. Either way it is rejected.
+	if c.Status != "unsupported" || !(hasIssue(c, "reported-model-issue") || hasIssue(c, "unsupported-operation")) {
 		t.Fatalf("ignored shared-state effect accepted: %+v", c)
 	}
 }
