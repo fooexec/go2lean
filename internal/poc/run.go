@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andreasfoo/go2lean/internal/builtin"
 	"github.com/andreasfoo/go2lean/internal/contract"
@@ -156,23 +157,26 @@ func VerifyAll(ws contract.Workspace, root string, cxIDs []string, overlay map[s
 		if err != nil {
 			return nil, err
 		}
-		results, cmd, exit, out, errOut, err := runBatch(root, pkgDir, pkgName, pkg, batch, overlay)
+		// Built once, each test run in a process of its own: package
+		// state one PoC leaves (pflag's flag registry: a second BoolP of
+		// the same name panics) must not make the next one fail.
+		runs, err := runEach(root, pkgDir, pkgName, pkg, batch, overlay)
 		if err != nil {
 			return nil, err
 		}
-		// A test without a result in the batch (the batch did not compile,
-		// or an earlier test ended the process with log.Fatal) is run on
-		// its own, so one target's exit does not hide the others.
+		// A test without a result (the batch did not compile, or the test
+		// ended its process with log.Fatal) is built and run on its own.
 		for _, p := range batch {
-			if _, ok := results[p.cx.ID]; ok || len(batch) == 1 {
-				p.v = verdictOf(p, results, cmd, exit, out, errOut, root)
+			r := runs[p.cx.ID]
+			if _, ok := r.results[p.cx.ID]; ok || len(batch) == 1 {
+				p.v = verdictOf(p, r.results, r.cmd, r.exit, r.out, r.errOut, root)
 				continue
 			}
-			r, c, e, o, eo, err := runBatch(root, pkgDir, pkgName, pkg, []*prepared{p}, overlay)
+			res, c, e, o, eo, err := runBatch(root, pkgDir, pkgName, pkg, []*prepared{p}, overlay)
 			if err != nil {
 				return nil, err
 			}
-			p.v = verdictOf(p, r, c, e, o, eo, root)
+			p.v = verdictOf(p, res, c, e, o, eo, root)
 		}
 		// A data race: under Go's race detector, then with the model's
 		// schedule replayed.
@@ -492,7 +496,120 @@ func prepare(ws contract.Workspace, cxID string) (*prepared, error) {
 // runBatch builds one test file holding every test of the batch into the
 // package's test binary, runs it in the sandbox, and returns the parsed results keyed by counterexample
 // id (nil when the file did not compile).
+// oneRun is the outcome of running one PoC test (runEach).
+type oneRun struct {
+	results     map[string]result
+	cmd         string
+	exit        int
+	out, errOut string
+}
+
+// runEach builds the batch's tests once and runs each in a process of its
+// own; a batch that does not build gives every test the build's output.
+func runEach(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[string][]byte) (map[string]oneRun, error) {
+	out := map[string]oneRun{}
+	if len(batch) == 1 {
+		results, cmd, exit, o, e, err := runBatch(root, pkgDir, pkgName, pkg, batch, overlay)
+		if err != nil {
+			return nil, err
+		}
+		out[batch[0].cx.ID] = oneRun{results, cmd, exit, o, e}
+		return out, nil
+	}
+	err := withBatchBinary(root, pkgDir, pkgName, pkg, batch, overlay, func(bin string, flags []string, buildOut string, buildExit int) error {
+		for _, p := range batch {
+			if buildExit != 0 {
+				out[p.cx.ID] = oneRun{nil, testCmd(pkg, flags, testRun([]*prepared{p})), buildExit, "", buildOut}
+				continue
+			}
+			run := testRun([]*prepared{p})
+			stdout, stderr, exit, err := sandbox.Run(bin, pkgDir, testArgs([]*prepared{p}, run), nil, sandbox.Default)
+			if err != nil {
+				return err
+			}
+			out[p.cx.ID] = oneRun{parseResults(stdout), testCmd(pkg, flags, run), exit, stdout, stderr}
+		}
+		return nil
+	})
+	return out, err
+}
+
+// testRun is the -test.run pattern of a batch's PoC tests.
+func testRun(batch []*prepared) string {
+	run := "^TestGo2LeanPoC_"
+	if len(batch) == 1 {
+		run += batch[0].cx.ID + "$"
+	}
+	if sub := batch[0].prop.Subtest; sub != "" {
+		// The subtests the model ran (#48): a batch shares one pattern.
+		run += "/" + sub
+	}
+	return run
+}
+
+// The longest a PoC test may run before Go's test timeout ends it: a call
+// that has not returned by then says nothing about a panic the model found,
+// and an unbounded one held the replay of a whole package (decimal's
+// arithmetic on a huge exponent). A concurrent harness repeats the call up
+// to concRuns times, each under its own 2s watchdog, so it gets longer.
+const (
+	pocTimeout     = 30 * time.Second
+	pocConcTimeout = 3 * time.Minute
+)
+
+// testArgs are the test binary's flags for running the batch's PoC tests.
+func testArgs(batch []*prepared, run string) []string {
+	t := pocTimeout
+	for _, p := range batch {
+		if strings.Contains(p.fn, "go2leanDone := make(chan struct{})") {
+			t = pocConcTimeout
+		}
+	}
+	return []string{"-test.count=1", "-test.v", "-test.timeout=" + t.String(), "-test.run", run}
+}
+
+// testTimedOut matches Go's report of a test binary past -test.timeout.
+var testTimedOut = regexp.MustCompile(`(?m)^panic: test timed out after (\S+)`)
+
+// testCmd is the go test command a PoC run stands for.
+func testCmd(pkg string, flags []string, run string) string {
+	if len(flags) > 0 {
+		return "go test -race -count=1 -v -run '" + run + "' " + testPath(pkg)
+	}
+	return "go test -count=1 -v -run '" + run + "' " + testPath(pkg)
+}
+
 func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[string][]byte) (map[string]result, string, int, string, string, error) {
+	var results map[string]result
+	var cmdLine, stdout, stderr string
+	var exit int
+	run := testRun(batch)
+	err := withBatchBinary(root, pkgDir, pkgName, pkg, batch, overlay, func(bin string, flags []string, buildOut string, buildExit int) error {
+		cmdLine, exit = testCmd(pkg, flags, run), buildExit
+		if buildExit != 0 {
+			stderr = buildOut
+			return nil
+		}
+		var err error
+		stdout, stderr, exit, err = sandbox.Run(bin, pkgDir, testArgs(batch, run), nil, sandbox.Default)
+		if err != nil {
+			return err
+		}
+		results = parseResults(stdout)
+		return nil
+	})
+	if err != nil {
+		return nil, "", 0, "", "", err
+	}
+	if len(results) == 0 {
+		return nil, cmdLine, exit, stdout, stderr, nil
+	}
+	return results, cmdLine, exit, stdout, stderr, nil
+}
+
+// withBatchBinary builds the batch's PoC tests into a test binary and calls
+// f with it (or with the build's output and exit when it did not build).
+func withBatchBinary(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[string][]byte, f func(bin string, flags []string, buildOut string, buildExit int) error) error {
 	imports := map[string]bool{}
 	var funcs []string
 	for _, p := range batch {
@@ -510,22 +627,14 @@ func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[
 	// Copied/legacy harnesses may redeclare this test. Never delete source
 	// files to make a build pass, even files carrying our naming prefix.
 	if stale, _ := filepath.Glob(filepath.Join(pkgDir, "zz_go2lean_poc_*_test.go")); len(stale) > 0 {
-		return nil, "", 0, "", "", fmt.Errorf("replay refused: package contains copied/generated observation tests; move them out of the scratch clone before retrying (no files were removed): %s", strings.Join(stale, ", "))
+		return fmt.Errorf("replay refused: package contains copied/generated observation tests; move them out of the scratch clone before retrying (no files were removed): %s", strings.Join(stale, ", "))
 	}
 	// The harness joins the package through an overlay and runs in the
 	// sandbox: nothing is written to the package, and a target that writes
 	// files, dials out or eats memory meets the sandbox's limits.
-	run := "^TestGo2LeanPoC_"
-	if len(batch) == 1 {
-		run += batch[0].cx.ID + "$"
-	}
-	if sub := batch[0].prop.Subtest; sub != "" {
-		// The subtests the model ran (#48): a batch shares one pattern.
-		run += "/" + sub
-	}
 	tmp, err := os.MkdirTemp("", "go2lean-poc-")
 	if err != nil {
-		return nil, "", 0, "", "", err
+		return err
 	}
 	defer os.RemoveAll(tmp)
 	bin := filepath.Join(tmp, "poc.test")
@@ -533,11 +642,11 @@ func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[
 	files := map[string][]byte{name: []byte(src)}
 	helpers, err := packageOverlayFiles(pkgDir, overlay)
 	if err != nil {
-		return nil, "", 0, "", "", err
+		return err
 	}
 	for helper, b := range helpers {
 		if helper == name {
-			return nil, "", 0, "", "", fmt.Errorf("package overlay replaces the generated test harness: %s", name)
+			return fmt.Errorf("package overlay replaces the generated test harness: %s", name)
 		}
 		files[helper] = b
 	}
@@ -549,26 +658,9 @@ func runBatch(root, pkgDir, pkgName, pkg string, batch []*prepared, overlay map[
 	}
 	buildOut, exit, err := sandbox.BuildTest(root, testPath(pkg), pkgDir, files, bin, flags...)
 	if err != nil {
-		return nil, "", 0, "", "", err
+		return err
 	}
-	var stdout, stderr string
-	if exit != 0 {
-		stderr = buildOut
-	} else {
-		stdout, stderr, exit, err = sandbox.Run(bin, pkgDir, []string{"-test.count=1", "-test.v", "-test.run", run}, nil, sandbox.Default)
-		if err != nil {
-			return nil, "", 0, "", "", err
-		}
-	}
-	cmdLine := "go test -count=1 -v -run '" + run + "' " + testPath(pkg)
-	if len(flags) > 0 {
-		cmdLine = "go test -race -count=1 -v -run '" + run + "' " + testPath(pkg)
-	}
-	results := parseResults(stdout)
-	if len(results) == 0 {
-		return nil, cmdLine, exit, stdout, stderr, nil
-	}
-	return results, cmdLine, exit, stdout, stderr, nil
+	return f(bin, flags, buildOut, exit)
 }
 
 func verdictOf(p *prepared, results map[string]result, cmd string, exit int, stdout, stderr, root string) *contract.Verdict {
@@ -577,6 +669,22 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 		Evidence:       contract.Evidence{Cmd: cmd, Exit: exit, StdoutTail: tail(stdout), StderrTail: tail(stderr)},
 	}
 	res, ok := results[p.cx.ID]
+	if m := testTimedOut.FindStringSubmatch(stderr); m != nil && !ok {
+		// The call did not return before the test timeout: Go's run neither
+		// panicked nor returned, so it does not judge the model's finding.
+		v.Status, v.Observed = contract.VerdictInconclusive, map[string]string{"timeout": m[1]}
+		v.Diagnosis = &contract.Diagnosis{Reason: "real_run_timeout", Notes: []string{
+			"Go's run of the call had not returned after " + m[1] + " (the PoC's test timeout); the input may make the real code very slow"}}
+		return v
+	}
+	if m := goCrash.FindStringSubmatch(stderr); m != nil && !ok && m[1] == "fatal error" && strings.Contains(m[2], "out of memory") {
+		// The run used up the sandbox's memory: a resource limit, not the
+		// panic the model found (decimal's arithmetic on a huge exponent).
+		v.Status, v.Observed = contract.VerdictInconclusive, map[string]string{"fatal": m[2]}
+		v.Diagnosis = &contract.Diagnosis{Reason: "real_run_out_of_memory", Notes: []string{
+			"Go's run of the call ran out of memory in the sandbox; the input may make the real code allocate without bound"}}
+		return v
+	}
 	if m := goCrash.FindStringSubmatch(stderr); m != nil && exit != 0 && harnessCrash(stderr) {
 		// The goroutine that panicked stopped in go2lean's own code (the
 		// replay controller): the harness failed, which says nothing about

@@ -2,6 +2,7 @@ package poc
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -271,5 +272,28 @@ func TestVerdictReasonsForBuildFailures(t *testing.T) {
 		if v.Diagnosis == nil || v.Diagnosis.Reason != c.want {
 			t.Errorf("stderr %q: diagnosis %+v, want %s", c.stderr, v.Diagnosis, c.want)
 		}
+	}
+}
+
+// TestVerdictTestTimeout: a PoC past its test timeout is inconclusive with
+// its own reason, not an uncaught panic of the program, and a sequential
+// PoC gets the short timeout.
+func TestVerdictTestTimeout(t *testing.T) {
+	p := &prepared{cx: &contract.Counterexample{ID: "cx1"}, prop: &contract.Property{Kind: contract.KindNoPanic}}
+	stderr := "panic: test timed out after 30s\n\trunning tests:\n\t\tTestGo2LeanPoC_cx1 (30s)\n\ngoroutine 7 [running]:\nexample.com/p.Slow(...)\n"
+	v := verdictOf(p, nil, "go test", 2, "=== RUN   TestGo2LeanPoC_cx1\n", stderr, "")
+	if v.Status != contract.VerdictInconclusive || v.Diagnosis == nil || v.Diagnosis.Reason != "real_run_timeout" || v.Observed["timeout"] != "30s" {
+		t.Fatalf("verdict %+v, diagnosis %+v", v, v.Diagnosis)
+	}
+	oom := "runtime: out of memory: cannot allocate 4194304-byte block (8589934592 in use)\nfatal error: out of memory\n\ngoroutine 6 [running]:\n"
+	if v := verdictOf(p, nil, "go test", 2, "=== RUN   TestGo2LeanPoC_cx1\n", oom, ""); v.Status != contract.VerdictInconclusive || v.Diagnosis == nil || v.Diagnosis.Reason != "real_run_out_of_memory" {
+		t.Fatalf("out of memory: verdict %+v, diagnosis %+v", v, v.Diagnosis)
+	}
+	if got := testArgs([]*prepared{p}, "^X$"); !slices.Contains(got, "-test.timeout=30s") {
+		t.Fatalf("sequential PoC args %v", got)
+	}
+	c := &prepared{fn: "go2leanDone := make(chan struct{})"}
+	if got := testArgs([]*prepared{p, c}, "^X$"); !slices.Contains(got, "-test.timeout=3m0s") {
+		t.Fatalf("concurrent PoC args %v", got)
 	}
 }

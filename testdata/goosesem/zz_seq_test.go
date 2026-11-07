@@ -29,6 +29,9 @@ func SeqTestAnonymousAssign() bool { return testAnonymousAssign() }
 // go2lean:sequence testAnonymousBinding
 func SeqTestAnonymousBinding() bool { return testAnonymousBinding() }
 
+// go2lean:sequence testAppendFloat
+func SeqTestAppendFloat() bool { return testAppendFloat() }
+
 // go2lean:sequence testArithmeticShifts
 func SeqTestArithmeticShifts() bool { return testArithmeticShifts() }
 
@@ -334,6 +337,15 @@ func SeqTestFooBarMutation() bool { return testFooBarMutation() }
 
 // go2lean:sequence testForLoopWait
 func SeqTestForLoopWait() bool { return testForLoopWait() }
+
+// go2lean:sequence testFormatFloatPrecision
+func SeqTestFormatFloatPrecision() bool { return testFormatFloatPrecision() }
+
+// go2lean:sequence testFormatFloatShortest
+func SeqTestFormatFloatShortest() bool { return testFormatFloatShortest() }
+
+// go2lean:sequence testFormatFloatSpecial
+func SeqTestFormatFloatSpecial() bool { return testFormatFloatSpecial() }
 
 // go2lean:sequence testHexRoundTrip
 func SeqTestHexRoundTrip() bool { return testHexRoundTrip() }

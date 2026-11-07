@@ -179,17 +179,46 @@ func (s *Summary) WriteBrief(out io.Writer, path string) {
 	}
 	fmt.Fprintf(out, "== Summary\n  %d properties; %d confirmed (%d a caller can reach, %d that depend on the callers or on package state), %d spurious, %d inconclusive\n",
 		s.Properties, len(s.Confirmed), len(byTier[1]), len(s.Confirmed)-len(byTier[1]), len(s.Spurious), len(s.Inconclusive))
+	// One entry per place the program fails: findings that panic at the
+	// same line are one bug reached from several functions.
+	type group struct {
+		first Finding
+		names []string
+	}
+	var groups []*group
+	bySite := map[string]*group{}
+	for _, f := range byTier[1] {
+		name := findingName(f)
+		site := f.Verdict.Evidence.PanicSite
+		if g := bySite[site]; site != "" && g != nil {
+			g.names = append(g.names, name)
+			continue
+		}
+		g := &group{first: f, names: []string{name}}
+		groups = append(groups, g)
+		if site != "" {
+			bySite[site] = g
+		}
+	}
+	// Runtime errors (an index out of range, a nil dereference) first: an
+	// explicit panic of the package is often its documented check of an
+	// argument (pflag's "shorthand is more than one ASCII character").
+	sort.SliceStable(groups, func(i, j int) bool { return !explicitPanic(groups[i].first) && explicitPanic(groups[j].first) })
 	const most = 10
-	for i, f := range byTier[1] {
+	for i, g := range groups {
 		if i == most {
-			fmt.Fprintf(out, "  ... and %d more\n", len(byTier[1])-most)
+			fmt.Fprintf(out, "  ... and %d more places\n", len(groups)-most)
 			break
 		}
-		name := f.Verdict.Counterexample
-		if f.Property != nil {
-			name = f.Property.NL
+		f := g.first
+		names := g.names
+		if len(names) > 5 {
+			names = append(names[:5:5], fmt.Sprintf("%d more", len(g.names)-5))
 		}
-		fmt.Fprintf(out, "  confirmed: %s\n", name)
+		fmt.Fprintf(out, "  confirmed: %s\n", strings.Join(names, ", "))
+		if explicitPanic(f) {
+			fmt.Fprintf(out, "    an explicit panic of the package: check whether its documentation says it panics there\n")
+		}
 		if site := f.Verdict.Evidence.PanicSite; site != "" {
 			fmt.Fprintf(out, "    at %s: %v\n", site, f.Verdict.Observed)
 		} else {
@@ -203,4 +232,29 @@ func (s *Summary) WriteBrief(out io.Writer, path string) {
 		fmt.Fprintf(out, "  %d other confirmed findings depend on inputs the callers may never pass: ranked in %s\n", len(s.Confirmed)-len(byTier[1]), path)
 	}
 	fmt.Fprintf(out, "  full summary: %s\n", path)
+}
+
+// findingName is the Go function a finding is about, as its property names
+// it ("BoolP does not panic on any input": BoolP), else its target's id.
+func findingName(f Finding) string {
+	if p := f.Property; p != nil {
+		for _, cut := range []string{" does not ", " returns ", " holds ", " satisfies "} {
+			if i := strings.Index(p.NL, cut); i > 0 {
+				return p.NL[:i]
+			}
+		}
+		if p.Target != "" {
+			return p.Target
+		}
+	}
+	return f.Verdict.Counterexample
+}
+
+// explicitPanic says whether a finding is a panic the package's own code
+// raises with panic(...), not a runtime error.
+func explicitPanic(f Finding) bool {
+	if cx := f.Counterexample; cx != nil && cx.ModelOutput != nil && cx.ModelOutput.Panic == "explicit" {
+		return !strings.HasPrefix(f.Verdict.Observed["panic"], "runtime error")
+	}
+	return false
 }

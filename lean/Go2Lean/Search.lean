@@ -1254,6 +1254,10 @@ where
 empty interface. -/
 def anyPerType : Nat := 8
 
+/-- How many of the pool's strings the dynamic types of an interface draw
+from (`enumGen`). -/
+def anyPool : Nat := 8
+
 /-- Enumerate one parameter as a heap-building function: each candidate
 takes the heap so far and returns the value and the extended heap. -/
 partial def enumGen (extra : List Nat) (maxLen : Nat) (pool : List (List Nat)) (table : TypeTable := #[])
@@ -1342,8 +1346,13 @@ partial def enumGen (extra : List Nat) (maxLen : Nat) (pool : List (List Nat)) (
     -- nil and the first `anyPerType` values of each dynamic type: an
     -- interface stays a few dozen values, not the product of every type.
     [fun heap => (.opaqueNil, heap)] ++
+      -- Each dynamic type over a small domain (lists of at most one
+      -- element, the pool's first strings): the list is strict, so taking
+      -- the first values of the whole domain built all of it first, which
+      -- for a []string alternative is the pool cubed (shopspring/decimal's
+      -- Scan(value interface{}) ran for half an hour before its budget).
       alts.flatMap fun (tag, a) =>
-        ((enumGen extra maxLen pool table depth allowNil a).take anyPerType).map fun build heap =>
+        ((enumGen extra (min maxLen 1) (pool.take anyPool) table depth allowNil a).take anyPerType).map fun build heap =>
           let (v, heap) := build heap
           (.boxed tag v, heap)
 where
@@ -1356,8 +1365,12 @@ where
       (allowNil : Bool) : List Gen → List (Heap Val → List Val × Heap Val)
     | [] => [fun heap => ([], heap)]
     | g :: gs =>
+      -- The tail once, not once per value of the head: rebuilding it (and
+      -- the string pool in it) for each made a struct of strings cost the
+      -- domain times the pool.
+      let rests := enumList extra maxLen pool table depth allowNil gs
       (enumGen extra maxLen pool table depth allowNil g).flatMap fun build =>
-        (enumList extra maxLen pool table depth allowNil gs).map fun rest heap =>
+        rests.map fun rest heap =>
           let (v, heap) := build heap
           let (vs, heap) := rest heap
           (v :: vs, heap)
@@ -1421,7 +1434,7 @@ partial def genSize (extra : List Nat) (maxLen : Nat) (pool : List (List Nat)) (
       genSize extra maxLen pool table (depth - 1) allowNil key * genSize extra maxLen pool table (depth - 1) allowNil val)
   | .anyOf _ alts =>
     let alts := if depth == 0 then alts.filter (fun (_, a) => match a with | .mapOf .. | .sliceOf .. => false | _ => true) else alts
-    1 + (alts.map fun (_, a) => min anyPerType (genSize extra maxLen pool table depth allowNil a)).sum
+    1 + (alts.map fun (_, a) => min anyPerType (genSize extra (min maxLen 1) (pool.take anyPool) table depth allowNil a)).sum
 where
   structSize (extra : List Nat) (maxLen : Nat) (pool : List (List Nat)) (table : TypeTable) (depth : Nat)
       (allowNil : Bool) (fields : List Gen) : Nat :=

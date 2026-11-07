@@ -731,6 +731,29 @@ func foldInit(v ssa.Value, inits map[*ssa.Global]ssa.Value) (*ssa.Const, bool) {
 	return ssa.NewConst(r, v.Type()), true
 }
 
+// storedTypes are the types a store through addr writes into: the type of
+// the object addr points into at each step of its field and element path
+// (a store to x.f.g writes x's, x.f's and x.f.g's types).
+func storedTypes(addr ssa.Value) []string {
+	var out []string
+	for v := addr; v != nil; {
+		pt, ok := v.Type().Underlying().(*types.Pointer)
+		if !ok {
+			break
+		}
+		out = append(out, types.TypeString(pt.Elem(), nil))
+		switch x := v.(type) {
+		case *ssa.FieldAddr:
+			v = x.X
+		case *ssa.IndexAddr:
+			v = x.X
+		default:
+			v = nil
+		}
+	}
+	return out
+}
+
 // representable says whether the integer constant c fits the basic type b.
 func representable(c constant.Value, b *types.Basic) bool {
 	if c.Kind() != constant.Int {
@@ -770,6 +793,12 @@ func zeroGlobals(sprog *ssa.Program, spkgs []*ssa.Package, deps bool) map[*ssa.G
 	loads := map[*ssa.Global][]*ssa.UnOp{}
 	alias := map[*ssa.Global]*ssa.Global{} // var B = A, set by an initializer
 	var userStores []*ssa.Store            // made by init functions, on every path
+	// Variables whose address the code takes (other than to load or store
+	// it whole), and the types the code stores through a pointer to (a
+	// field, an element or the whole value): a variable of a type no code
+	// writes stays read-only wherever its address goes.
+	addrTaken := map[*ssa.Global]bool{}
+	writtenTypes := map[string]bool{}
 	for f := range ssautil.AllFunctions(sprog) {
 		if testHelper(f) {
 			continue
@@ -816,6 +845,9 @@ func zeroGlobals(sprog *ssa.Program, spkgs []*ssa.Package, deps bool) map[*ssa.G
 								alias[g] = a
 								continue
 							}
+							// A struct or array literal of constants
+							// (strconv's var float64info = floatInfo{52, 11, -1023}).
+							_, known = constComposite(v)
 						}
 						if known {
 							if _, twice := inits[g]; twice {
@@ -826,12 +858,46 @@ func zeroGlobals(sprog *ssa.Program, spkgs []*ssa.Package, deps bool) map[*ssa.G
 						}
 					}
 				}
+				if st, ok := in.(*ssa.Store); ok {
+					if g, ok := st.Addr.(*ssa.Global); ok {
+						touched[g] = true
+					}
+					if !pkgInit {
+						for _, t := range storedTypes(st.Addr) {
+							writtenTypes[t] = true
+						}
+					}
+				}
 				for _, op := range in.Operands(nil) {
 					if g, ok := (*op).(*ssa.Global); ok {
-						touched[g] = true
+						if _, isStore := in.(*ssa.Store); isStore && in.(*ssa.Store).Addr == g {
+							continue // counted above
+						}
+						if _, isFA := in.(*ssa.FieldAddr); isFA && !pkgInit {
+							addrTaken[g] = true
+							continue
+						}
+						if _, isIA := in.(*ssa.IndexAddr); isIA && !pkgInit {
+							addrTaken[g] = true
+							continue
+						}
+						if pkgInit {
+							touched[g] = true
+							continue
+						}
+						addrTaken[g] = true
 					}
 				}
 			}
+		}
+	}
+	// A variable whose address escapes stays known only if it holds a
+	// literal of constants (inits) and no code stores through a pointer to
+	// its type: then nothing can write it.
+	for g := range addrTaken {
+		_, composite := constComposite(inits[g])
+		if !composite || writtenTypes[types.TypeString(g.Type().(*types.Pointer).Elem(), nil)] {
+			touched[g] = true
 		}
 	}
 	// Stores of init functions, after every initializer: a variable the
@@ -2408,6 +2474,24 @@ func (t *fnState) val(x ssa.Value) (ir.Var, error) {
 			t.emit(ir.Instr{Dst: v, Op: ir.GlobalAddr{Key: key, Zero: zero}})
 			return v, nil
 		}
+		// The address of a variable nothing writes, whose initializer is a
+		// constant (strconv's flt = &float64info, var float64info =
+		// floatInfo{52, 11, -1023}): a fresh object holding that constant.
+		// Loads through it are exact; only its identity is not the
+		// variable's (two such addresses compare unequal).
+		if init, known := t.prog.zeros[fn]; known && init != nil {
+			cv, ok := constComposite(init)
+			if c, isConst := init.(*ssa.Const); !ok && isConst {
+				var err error
+				cv, err = constVal(c)
+				ok = err == nil
+			}
+			if ok {
+				v := t.fresh()
+				t.emit(ir.Instr{Dst: v, Op: ir.Alloc{Zero: cv}})
+				return v, nil
+			}
+		}
 	}
 	c, ok := x.(*ssa.Const)
 	if !ok {
@@ -3640,6 +3724,12 @@ func (t *fnState) unop(x *ssa.UnOp) error {
 						return err
 					}
 					t.vars[x] = t.vars[c]
+					return nil
+				}
+				if cv, ok := constComposite(init); ok {
+					// A literal of constants: its value (the initializer's
+					// instructions are another function's).
+					t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: cv}})
 					return nil
 				}
 				if init != nil {
