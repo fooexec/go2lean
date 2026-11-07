@@ -44,7 +44,7 @@ func TestWriteBrief(t *testing.T) {
 func TestWriteBriefGroupsBySite(t *testing.T) {
 	f := func(id string) Finding {
 		return Finding{Verdict: &contract.Verdict{Counterexample: id, Evidence: contract.Evidence{PanicSite: "flag.go:950"},
-			Rank: &contract.Rank{Tier: 1}}, Property: &contract.Property{Target: id}}
+			Rank: &contract.Rank{Tier: 1}}, Property: &contract.Property{Target: "t_" + id, NL: id + " does not panic on any input"}}
 	}
 	s := &Summary{Confirmed: []Finding{f("BoolP"), f("IntP"), f("StringP")}}
 	var out bytes.Buffer
@@ -53,3 +53,29 @@ func TestWriteBriefGroupsBySite(t *testing.T) {
 		t.Errorf("not grouped by site:\n%s", got)
 	}
 }
+
+// A runtime error comes before an explicit panic, which is labelled.
+func TestWriteBriefRuntimeErrorsFirst(t *testing.T) {
+	f := func(id, site, panic, kind string) Finding {
+		return Finding{
+			Verdict: &contract.Verdict{Counterexample: id, Observed: map[string]string{"panic": panic},
+				Evidence: contract.Evidence{PanicSite: site}, Rank: &contract.Rank{Tier: 1}},
+			Counterexample: &contract.Counterexample{ModelOutput: &contract.ModelOutput{Res: "panic", Panic: contract.PanicKind(kind)}},
+			Property:       &contract.Property{NL: id + " does not panic on any input"},
+		}
+	}
+	s := &Summary{Confirmed: []Finding{
+		f("BoolP", "flag.go:969", "shorthand is more than one ASCII character", "explicit"),
+		f("Error", "errors.go:70", "runtime error: index out of range [0] with length 0", "index_out_of_range"),
+	}}
+	var out bytes.Buffer
+	s.WriteBrief(&out, "summary.md")
+	got := out.String()
+	if strings.Index(got, "confirmed: Error") > strings.Index(got, "confirmed: BoolP") {
+		t.Errorf("the runtime error is not first:\n%s", got)
+	}
+	if strings.Count(got, "an explicit panic of the package") != 1 {
+		t.Errorf("the explicit panic is not labelled once:\n%s", got)
+	}
+}
+
