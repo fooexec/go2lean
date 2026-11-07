@@ -1365,8 +1365,12 @@ where
       (allowNil : Bool) : List Gen → List (Heap Val → List Val × Heap Val)
     | [] => [fun heap => ([], heap)]
     | g :: gs =>
+      -- The tail once, not once per value of the head: rebuilding it (and
+      -- the string pool in it) for each made a struct of strings cost the
+      -- domain times the pool.
+      let rests := enumList extra maxLen pool table depth allowNil gs
       (enumGen extra maxLen pool table depth allowNil g).flatMap fun build =>
-        (enumList extra maxLen pool table depth allowNil gs).map fun rest heap =>
+        rests.map fun rest heap =>
           let (v, heap) := build heap
           let (vs, heap) := rest heap
           (v :: vs, heap)
