@@ -3,6 +3,7 @@ package constraint
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -669,7 +671,7 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 		canRaise := func() bool { return opts.Fuel*4 <= first*maxFuelRaise }
 		spec["stopShort"] = canRaise()
 		res, err := runSearch(leanDir, prop.ID+"_random", spec, "random")
-		if oom, ok := memgov.IsOutOfMemory(err); ok {
+		if oom, ok := searchStopped(err); ok {
 			// Degrade, not die (#45): this property is not searched further.
 			return nil, fmt.Sprintf("random: stopped, %s; not searched further", oom), nil
 		}
@@ -688,7 +690,7 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 			spec["fuel"] = opts.Fuel
 			spec["stopShort"] = canRaise()
 			res, err = runSearch(leanDir, prop.ID+"_random", spec, "random")
-			if oom, ok := memgov.IsOutOfMemory(err); ok {
+			if oom, ok := searchStopped(err); ok {
 				// Keep the last search that finished, at its fuel.
 				opts.Fuel /= 4
 				spec["fuel"] = opts.Fuel
@@ -724,7 +726,7 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 			spec["limit"] = max(opts.ExhaustLimit, seqExhaustLimit)
 		}
 		res, err := runSearch(leanDir, prop.ID+"_exhaustive", spec, "exhaustive")
-		if oom, ok := memgov.IsOutOfMemory(err); ok {
+		if oom, ok := searchStopped(err); ok {
 			summary = append(summary, fmt.Sprintf("exhaustive: stopped, %s; no certificate", oom))
 			return nil, strings.Join(summary, "; "), nil
 		}
@@ -851,7 +853,7 @@ func mutationCheck(ws contract.Workspace, leanDir string, report *contract.Model
 	ms["maxMutants"] = opts.MaxMutants
 	ms["trials"] = min(opts.Trials, 500)
 	res, err := runSearch(leanDir, prop.ID+"_mutate", ms, "mutate")
-	if oom, ok := memgov.IsOutOfMemory(err); ok {
+	if oom, ok := searchStopped(err); ok {
 		return fmt.Sprintf("mutation: stopped, %s", oom), nil
 	}
 	if err != nil {
@@ -1127,11 +1129,29 @@ func runSearch(leanDir, name string, spec map[string]any, engine string) (*searc
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
+	// The engines check their budget between trials, so one trial that
+	// runs on (decimal's expFixed on numbers of thousands of words, #176)
+	// would hold the search for good: past searchWallFactor budgets and a
+	// grace, the process is killed and the search reported as stopped.
+	var killed atomic.Bool
+	if ms, ok := spec["budgetMs"].(int); ok && ms > 0 {
+		limit := time.Duration(ms)*time.Millisecond*searchWallFactor + searchWallGrace
+		t := time.AfterFunc(limit, func() {
+			if cmd.Process != nil {
+				killed.Store(true)
+				cmd.Process.Kill()
+			}
+		})
+		defer t.Stop()
+	}
 	// Under the run's memory limit (#45): a search the governor stops
 	// returns *memgov.OutOfMemory, which Hunt reports as a degraded result.
 	if err := memgov.Run(cmd); err != nil {
 		if _, ok := memgov.IsOutOfMemory(err); ok {
 			return nil, err
+		}
+		if killed.Load() {
+			return nil, &trialTimeout{budget: time.Duration(spec["budgetMs"].(int)) * time.Millisecond}
 		}
 		return nil, fmt.Errorf("go2lean-search %s: %w\n%s", specFile, err, buf.String())
 	}
@@ -1141,6 +1161,35 @@ func runSearch(leanDir, name string, spec map[string]any, engine string) (*searc
 		return nil, fmt.Errorf("parsing search output %q: %w", line, err)
 	}
 	return &res, nil
+}
+
+// A search runs at most searchWallFactor times its budget, plus
+// searchWallGrace for the initializers and the start (runSearch).
+const (
+	searchWallFactor = 3
+	searchWallGrace  = 30 * time.Second
+)
+
+// trialTimeout is a search runSearch killed: one trial ran past its wall
+// clock limit.
+type trialTimeout struct{ budget time.Duration }
+
+func (e *trialTimeout) Error() string {
+	return fmt.Sprintf("one trial ran past %d times the %s budget (killed)", searchWallFactor, e.budget)
+}
+
+// searchStopped says whether a search was stopped (out of memory, or a
+// trial past the wall clock limit) rather than failed, with what stopped
+// it: Hunt reports such a search as a degraded result, not an error.
+func searchStopped(err error) (string, bool) {
+	if oom, ok := memgov.IsOutOfMemory(err); ok {
+		return oom.Error(), true
+	}
+	var tt *trialTimeout
+	if errors.As(err, &tt) {
+		return tt.Error(), true
+	}
+	return "", false
 }
 
 // StoppedForMemory says whether a hunt summary reports a search the memory

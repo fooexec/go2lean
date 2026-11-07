@@ -13,7 +13,7 @@ them.
 | [BurntSushi/toml](https://github.com/BurntSushi/toml) `d733fc5` | a parser and an encoder over `reflect` | 362 s | 320 | 111 (6) | 5 | 7 |
 | [gorilla/mux](https://github.com/gorilla/mux) `db9d1d0` | HTTP routing over `regexp` | 96 s | 133 | 2 (0) | 16 | 6 |
 | [cenkalti/backoff](https://github.com/cenkalti/backoff) `0232ff2` | timers, a ticker goroutine | 17 s | 35 | 0 | 0 | 3 |
-| [shopspring/decimal](https://github.com/shopspring/decimal) `a5eee10` | arbitrary precision over `math/big` | 640 s | 156 | 21 (11) | 48 | 11 |
+| [shopspring/decimal](https://github.com/shopspring/decimal) `a5eee10` | arbitrary precision over `math/big` | 640 s | 156 | 21 (11) | 48 | 11 (577 s, 0 spurious, 0 inconclusive after the reruns below) |
 | [kballard/go-shellquote](https://github.com/kballard/go-shellquote) `95032a8` | string splitting, no `go.mod` | 7 s | 8 | 0 | 0 | 0 |
 | [rs/xid](https://github.com/rs/xid) `34d3905` | ID encoding | 28 s | 32 | 4 (1) | 0 | 0 |
 
@@ -83,10 +83,6 @@ package state.
 
 ## Open
 
-- **Package-variable initializers.** 12 of decimal's 22 remaining spurious
-  findings (after `math/big`, below) panic at `pow10`. Its `pow10Table` is
-  built at init, and the model runs initializers only in concurrent
-  programs (#176).
 - **`regexp` in mux.** mux's spurious findings rest on `regexp.QuoteMeta`
   and `NumSubexp`, which the model does not model when `regexp` comes in
   through a dependency.
@@ -120,4 +116,29 @@ is its zero value in the model, as in the test.
 - **Time.** The sequential PoC timeout went down from 30 s to 10 s: a
   replay that panics does so at once, and at 30 s each, the 26 timeouts
   made the run take 1,729 s.
+
+## And with package initializers run (#176)
+
+The model now runs every package's variable initializers, not only those of
+programs that start goroutines. That includes a function literal called in
+place (`var pow10Table = func() []*big.Int {...}()`). Three more fixes were
+needed:
+- A test file's `func init()` whose loop was not in the slice failed the
+  slice's trial translation, and every variable of the package dropped.
+- Initializers get their own fuel, 200,000 steps.
+- A search is killed past three times its budget. With exact tables, one
+  trial of `expFixed` ran for 45 minutes on numbers of thousands of words,
+  and the engines check the budget only between trials.
+
+| | `math/big` alone | with the initializers |
+|---|---|---|
+| time | 690 s | 577 s |
+| confirmed (listed in the summary) | 22 (10) | 22 (12) |
+| spurious | 22 | 0 |
+| inconclusive | 26 | 0 |
+
+decimal's run now gives no spurious or inconclusive verdict. The index out
+of range in `pow10` on a negative exponent (`pow10Table[n]` with `n < 0`,
+reached from `RoundHalfUp` and `powNegIntApprox`) is now confirmed from the
+table the initializer built. Before, it rested on an assumed table.
 

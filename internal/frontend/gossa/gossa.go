@@ -234,7 +234,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	}
 	// Which package variables are cells: one decision for every linked
 	// package (#55).
-	plan := planCells(units, mainPaths)
+	plan := planCells(units)
 	for k := range units {
 		if plan.concurrent[units[k].path] {
 			units[k].fns = withAnon(withInitCallees(units[k].path, units[k].fns, plan.initUsed()))
@@ -6178,9 +6178,9 @@ type unit struct {
 // cellPlan is which package variables are cells, decided once for every
 // linked package so that they all agree (#55).
 type cellPlan struct {
-	// concurrent: the packages whose code runs in goroutines: the ones
-	// whose functions start one, and, in a program whose compiled
-	// packages start one, every dependency package.
+	// concurrent: the packages whose variables are cells and whose
+	// initializer runs in the model. Once the ones whose code runs in
+	// goroutines; every package since #176.
 	concurrent map[string]bool
 	// used: the package variables some linked package's functions use.
 	used map[*ssa.Global]bool
@@ -6210,25 +6210,16 @@ func (plan *cellPlan) initUsed() map[*ssa.Global]bool {
 	return out
 }
 
-func planCells(units []unit, mainPaths map[string]bool) *cellPlan {
+func planCells(units []unit) *cellPlan {
 	plan := &cellPlan{concurrent: map[string]bool{}, used: map[*ssa.Global]bool{},
 		shared: map[*ssa.Global]bool{}, init: map[*ssa.Global]bool{}, noInit: map[*ssa.Global]bool{}}
-	mainSpawns := false
+	// Every package's variables are cells, its initializer's slice run
+	// once before the trials, with goroutines or without: a table built at
+	// init (decimal's pow10Table) is what the program reads, not an
+	// assumed value (#176). Before, only packages that start goroutines
+	// and the shims had them.
 	for _, u := range units {
-		if sharedGlobals(u.fns) != nil {
-			plan.concurrent[u.path] = true
-			mainSpawns = mainSpawns || mainPaths[u.path]
-		}
-		if shimPaths[u.path] {
-			// The shims' tables (listeners, the environment) are shared by
-			// every caller, with or without goroutines: cells.
-			plan.concurrent[u.path] = true
-		}
-	}
-	for _, u := range units {
-		if mainSpawns && !mainPaths[u.path] {
-			plan.concurrent[u.path] = true
-		}
+		plan.concurrent[u.path] = true
 	}
 	written := map[*ssa.Global]bool{}
 	for _, u := range units {
@@ -6343,6 +6334,19 @@ func (plan *cellPlan) dropUntranslatable(units []unit, xrefs map[string]contract
 func trialInit(pkgPath string, fns []*ssa.Function, initFn *ssa.Function, keep map[ssa.Instruction]bool, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan) (ssa.Instruction, bool) {
 	st := newProgState(pkgPath, fns, xrefs, zeros, sprog, boxed, plan)
 	for _, f := range initFuncs(initFn) {
+		// As translatePackage: a func init() with nothing in the slice is
+		// not part of it (decimal's test-file init, whose loop over its
+		// test table made the trial fail and every cell drop, #176).
+		in := false
+		for k := range keep {
+			if k.Parent() == f {
+				in = true
+				break
+			}
+		}
+		if !in {
+			continue
+		}
 		out := &ir.Func{Name: f.Name(), GoSig: goSig(f), Init: true}
 		st.prog.Funcs = append(st.prog.Funcs, out)
 		t := &fnState{prog: st, f: f, out: out, vars: map[ssa.Value]ir.Var{}, blockID: map[*ssa.BasicBlock]int{}, keep: keep}
@@ -6357,50 +6361,14 @@ func trialInit(pkgPath string, fns []*ssa.Function, initFn *ssa.Function, keep m
 	return nil, true
 }
 
-// sharedGlobals are the package variables written by fns (and the
-// closures in them) when one of them starts a goroutine; none otherwise.
-func sharedGlobals(fns []*ssa.Function) map[*ssa.Global]bool {
-	written := map[*ssa.Global]bool{}
-	spawns := false
-	var visit func(f *ssa.Function)
-	visit = func(f *ssa.Function) {
-		if isInit(f.Name()) && f.Signature.Recv() == nil {
-			return
-		}
-		for _, b := range f.Blocks {
-			for _, in := range b.Instrs {
-				switch x := in.(type) {
-				case *ssa.Go:
-					spawns = true
-				case *ssa.Store:
-					if g, ok := x.Addr.(*ssa.Global); ok {
-						written[g] = true
-					}
-				}
-			}
-		}
-		for _, a := range f.AnonFuncs {
-			visit(a)
-		}
-	}
-	for _, f := range fns {
-		visit(f)
-	}
-	if !spawns {
-		return nil
-	}
-	return written
-}
-
 // isGuard says whether u loads the package initializer's init$guard.
 func isGuard(u *ssa.UnOp) bool {
 	g, ok := u.X.(*ssa.Global)
 	return ok && u.Op == token.MUL && g.Name() == "init$guard"
 }
 
-// initCells finds, in a package whose functions start goroutines, or a
-// dependency of a program whose compiled packages do (concurrent), the
-// package variables its functions use that the package
+// initCells finds, in a package of the program (every one is concurrent,
+// #176), the package variables its functions use that the package
 // initializer sets, once, to a value it builds: a new object, map, slice
 // or channel, made in place or by a call of a function of the package (var
 // reg = &registry{m: map[string]int{}}, var reg = newRegistry()). The
@@ -6600,6 +6568,12 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 		// A function of the package, or of a standard-library package the
 		// model translates from source (nkeys' var b32Enc =
 		// base32.StdEncoding.WithPadding(base32.NoPadding)).
+		if fn != nil && fn.Parent() != nil && len(fn.FreeVars) == 0 && fn.Pkg == spkg {
+			// A function literal called where it is written, the usual way
+			// to build a table (decimal's var pow10Table = func() []*big.Int
+			// {...}(), #176).
+			return true
+		}
 		return fn != nil && fn.Parent() == nil && !isInit(fn.Name()) &&
 			(fn.Pkg == spkg || fn.Pkg != nil && modelledStdlib[fn.Pkg.Pkg.Path()])
 	}

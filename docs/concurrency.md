@@ -82,8 +82,9 @@ projects offer for it (Goose's channel model, Veil, Iris-Lean) is in
   publishes the writes before it. An atomic access is also checked against
   plain ones (since C3: an atomic add and a plain read of the same field
   race, as `go test -race` says).
-- Package variables written by a function other than `init`, in a package
-  that starts goroutines, are cells every goroutine shares (as the
+- Package variables written by a function other than `init` are cells
+  every goroutine shares (once only in packages that start goroutines;
+  in every package since #176) (as the
   sync-holding ones of C1a), starting at their zero value or at a constant
   initializer (`var interval = 10 * time.Second`), so a race on a package
   counter or setting is seen.
