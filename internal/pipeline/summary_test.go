@@ -78,4 +78,3 @@ func TestWriteBriefRuntimeErrorsFirst(t *testing.T) {
 		t.Errorf("the explicit panic is not labelled once:\n%s", got)
 	}
 }
-
