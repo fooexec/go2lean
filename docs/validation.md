@@ -46,6 +46,12 @@ go-runewidth, semver, cron, ulid, go-wordwrap) finished each project within
 six minutes. Its spurious findings point to the next gaps: `recover`,
 interface-typed package variables, `golang.org/x/text`, tables filled by
 `init` functions, and constructors named `New`.
+A [fourth run on seven more](../docs/eval/fourth-run.md) (chi, envconfig,
+msgpack, conc, go-multierror, go-toml, golang-lru) led `run` to search
+only the API's templates by default (`-unexported` for the rest), which
+cut the properties by two thirds and the confirmed count with them, and
+to model `sync/atomic.Pointer`. After the fixes, two verdicts in the seven
+projects are spurious or inconclusive.
 
 Evidence beyond the codebase it was built on comes from blind runs with a
 protocol committed before each run and the tool frozen:
