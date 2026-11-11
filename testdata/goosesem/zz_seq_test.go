@@ -746,6 +746,21 @@ func SeqTestSwitchMultiple() bool { return testSwitchMultiple() }
 // go2lean:sequence testSwitchVal
 func SeqTestSwitchVal() bool { return testSwitchVal() }
 
+// go2lean:sequence testSyncMapDeleteSwap
+func SeqTestSyncMapDeleteSwap() bool { return testSyncMapDeleteSwap() }
+
+// go2lean:sequence testSyncMapEmpty
+func SeqTestSyncMapEmpty() bool { return testSyncMapEmpty() }
+
+// go2lean:sequence testSyncMapGlobal
+func SeqTestSyncMapGlobal() bool { return testSyncMapGlobal() }
+
+// go2lean:sequence testSyncMapLoadOrStore
+func SeqTestSyncMapLoadOrStore() bool { return testSyncMapLoadOrStore() }
+
+// go2lean:sequence testSyncMapStoreLoad
+func SeqTestSyncMapStoreLoad() bool { return testSyncMapStoreLoad() }
+
 // go2lean:sequence testTimeAddSub
 func SeqTestTimeAddSub() bool { return testTimeAddSub() }
 

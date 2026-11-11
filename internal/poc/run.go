@@ -795,7 +795,11 @@ func guessedCalls(ws contract.Workspace, cx *contract.Counterexample) []string {
 		if site.Reason != "unmodeled-call" {
 			continue
 		}
-		if c := calleeOf(site.Site); c != "" && !slices.Contains(out, c) {
+		c := calleeOf(site.Site)
+		if _, m, ok := strings.Cut(site.Site, ": call interface method "); ok {
+			c = m // (reflect.Type).Implements: never translated, only named
+		}
+		if c != "" && !slices.Contains(out, c) {
 			out = append(out, c)
 		}
 	}

@@ -1170,10 +1170,13 @@ def sprintfVerb (heap : Heap Val) (bytesTag : Nat) (unsigned : List Nat) (zero m
         | _, _ => none
 end
 
-/-- Key equality for maps: strings by their bytes, the rest by `eqVal`. -/
+/-- Key equality for maps: strings by their bytes, interface values (an
+`any` key, a `sync.Map`'s) by their dynamic type and then the same way,
+the rest by `eqVal`. -/
 def keyEq (heap : Heap Val) (a b : Val) : Bool :=
   match a, b with
   | .str .., .str .. => strBytes heap a == strBytes heap b
+  | .boxed t x, .boxed t' y => t == t' && keyEq heap x y
   | _, _ => eqVal a b == some true
 
 /-- The entries of the map object `m` (`.boxed 1 p`). -/
