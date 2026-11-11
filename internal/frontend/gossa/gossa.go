@@ -2333,6 +2333,12 @@ type fnState struct {
 	// whose calls are filled in once every defer is known.
 	deferStack *ir.Var
 	dispatches []deferPop
+	// catchB, in a function whose defer recovers (#181): the recovery
+	// block a call's panic, or an explicit panic, goes to (ir.Term.Catch);
+	// 0 when none. noCatch is set while the deferred calls are emitted:
+	// a panic in a deferred call is not recovered.
+	catchB  int
+	noCatch bool
 	// sync: the body starts a goroutine or synchronises (syncTerm).
 	sync bool
 	// setup, for a concurrent sequence harness: its entry block's
@@ -2445,9 +2451,18 @@ func (t *fnState) translate() error {
 			}
 		}
 	}
+	if f.Recover != nil && recoversPanic(f) {
+		t.catchB = len(t.out.Blocks)
+		t.out.Blocks = append(t.out.Blocks, ir.Block{Name: "recover"})
+	}
 	for i, b := range f.Blocks {
 		if err := t.block(i, b); err != nil {
 			return fmt.Errorf("block %d (%s): %w", i, b.Comment, err)
+		}
+	}
+	if t.catchB != 0 {
+		if err := t.recoverBlock(); err != nil {
+			return fmt.Errorf("recover: %w", err)
 		}
 	}
 	t.fillDeferPops()
@@ -3528,6 +3543,11 @@ func (t *fnState) instr(b *ssa.BasicBlock, in ssa.Instruction) error {
 		t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: c, T: t.blockID[b.Succs[0]], TArgs: targs, F: t.blockID[b.Succs[1]], FArgs: fargs}
 		return nil
 	case *ssa.Panic:
+		if t.catchB != 0 && !t.noCatch {
+			// A panic of the function itself, which its defer recovers.
+			t.cur.Term = ir.Term{Kind: ir.TermJump, B: t.catchB}
+			return nil
+		}
 		t.cur.Term = ir.Term{Kind: ir.TermPanic, Panic: contract.PanicExplicit}
 		return nil
 	default:
@@ -3960,15 +3980,32 @@ func (t *fnState) call(x *ssa.Call) error {
 	if bi, ok := x.Call.Value.(*ssa.Builtin); ok {
 		switch bi.Name() {
 		case "recover":
-			// A panic ends the model's run before any deferred call: a
-			// deferred function runs only at a normal return, where Go's
-			// recover returns nil, as it does outside a deferred call
+			// Non-nil while a recovery block runs the deferred calls after
+			// a panic (#181), and it stops the panic; nil elsewhere, as Go's
+			// at a normal return and outside a deferred call
 			// (bytes.growSlice's `if recover() != nil`, #46).
-			cv, err := constVal(ssa.NewConst(nil, x.Type()))
-			if err != nil {
-				return err
-			}
-			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: cv}})
+			// The cell is written only on the recovery path: a write at
+			// every recover() would race between goroutines.
+			p, panicking := t.fresh(), t.fresh()
+			t.emit(ir.Instr{Dst: p, Op: panickingCell()})
+			t.emit(ir.Instr{Dst: panicking, Op: ir.Simple("loadPath"), Args: []ir.Var{p}})
+			yes, no, join := len(t.out.Blocks), len(t.out.Blocks)+1, len(t.out.Blocks)+2
+			res := t.def(x)
+			name := t.cur.Name
+			t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: panicking, T: yes, F: no}
+			t.out.Blocks = append(t.out.Blocks, ir.Block{Name: name + ".recovered"}, ir.Block{Name: name + ".not-panicking"},
+				ir.Block{Name: name + ".recover-join", Params: []ir.Var{res}})
+			t.cur = &t.out.Blocks[yes]
+			off, nonNil := t.fresh(), t.fresh()
+			t.emit(ir.Instr{Dst: off, Op: ir.Const{V: ir.BoolVal(false)}})
+			t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{p, off}})
+			t.emit(ir.Instr{Dst: nonNil, Op: ir.Const{V: ir.OpaqueNonNil{}}})
+			t.cur.Term = ir.Term{Kind: ir.TermJump, B: join, Args: []ir.Var{nonNil}}
+			t.cur = &t.out.Blocks[no]
+			none := t.fresh()
+			t.emit(ir.Instr{Dst: none, Op: ir.Const{V: ir.OpaqueNil{}}})
+			t.cur.Term = ir.Term{Kind: ir.TermJump, B: join, Args: []ir.Var{none}}
+			t.cur = &t.out.Blocks[join]
 			return nil
 		case "String", "Slice":
 			if b, ok := unsafeView(x.Call); ok {
@@ -8165,6 +8202,10 @@ func (t *fnState) deferCall(x *ssa.Defer, callee *ssa.Function, syncOp string, f
 // (Go would run the remaining deferred calls first; their effects are not
 // seen). The calls on the way out of a panic are not made.
 func (t *fnState) runDefers() error {
+	// A panic in a deferred call is not recovered by the function's defer.
+	saved := t.noCatch
+	t.noCatch = true
+	defer func() { t.noCatch = saved }()
 	if t.deferStack != nil {
 		t.popDefers()
 		return nil
@@ -8183,6 +8224,79 @@ func (t *fnState) runDefers() error {
 		t.callDeferred(d, tup, join)
 		t.cur = &t.out.Blocks[join]
 	}
+	return nil
+}
+
+// panickingKey is the cell that says a recovery block is running the
+// deferred calls after a panic: recover() reads and clears it (#181).
+var panickingKey = func() uint32 {
+	h := fnv.New32a()
+	h.Write([]byte("go2lean.panicking"))
+	return h.Sum32()
+}()
+
+func panickingCell() ir.Op {
+	return ir.GlobalAddr{Key: panickingKey, Zero: ir.BoolVal(false)}
+}
+
+// recoversPanic says whether one of f's defer statements defers a function
+// that calls recover() itself (Go recovers only there): a closure, or a
+// function of the program.
+func recoversPanic(f *ssa.Function) bool {
+	calls := func(g *ssa.Function) bool {
+		for _, b := range g.Blocks {
+			for _, in := range b.Instrs {
+				if c, ok := in.(*ssa.Call); ok {
+					if bi, ok := c.Call.Value.(*ssa.Builtin); ok && bi.Name() == "recover" {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	for _, b := range f.Blocks {
+		for _, in := range b.Instrs {
+			d, ok := in.(*ssa.Defer)
+			if !ok {
+				continue
+			}
+			var g *ssa.Function
+			switch v := d.Call.Value.(type) {
+			case *ssa.MakeClosure:
+				g, _ = v.Fn.(*ssa.Function)
+			case *ssa.Function:
+				g = v
+			}
+			if g != nil && calls(g) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// recoverBlock fills the recovery block: the panicking cell set, the
+// deferred calls that ran made (one of them calls recover(), which clears
+// the cell), then, when one did, Go's recover block, which returns the
+// named results; when none did, the panic goes on.
+func (t *fnState) recoverBlock() error {
+	t.cur = &t.out.Blocks[t.catchB]
+	p, yes := t.fresh(), t.fresh()
+	t.emit(ir.Instr{Dst: p, Op: panickingCell()})
+	t.emit(ir.Instr{Dst: yes, Op: ir.Const{V: ir.BoolVal(true)}})
+	t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{p, yes}})
+	if err := t.runDefers(); err != nil {
+		return err
+	}
+	still := t.fresh()
+	p2 := t.fresh()
+	t.emit(ir.Instr{Dst: p2, Op: panickingCell()})
+	t.emit(ir.Instr{Dst: still, Op: ir.Simple("loadPath"), Args: []ir.Var{p2}})
+	repanic := len(t.out.Blocks)
+	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: still, T: repanic, F: t.blockID[t.f.Recover]}
+	t.out.Blocks = append(t.out.Blocks, ir.Block{Name: "recover.unrecovered",
+		Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicOther}})
 	return nil
 }
 
@@ -8484,6 +8598,9 @@ func (t *fnState) emitCallArgs(x *ssa.Call, term ir.Term, name string, args []ir
 	next := len(t.out.Blocks)
 	fb := next + 1
 	term.CArgs, term.Dst, term.Next, term.Fallback = args, dst, next, fb
+	if t.catchB != 0 && !t.noCatch {
+		term.Catch = t.catchB
+	}
 	// Terminate the current block before appending: append may move the
 	// backing array and t.cur would then point at a stale copy.
 	t.cur.Term = term

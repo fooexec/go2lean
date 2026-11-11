@@ -569,6 +569,15 @@ func SeqTestRandReadDiffers() bool { return testRandReadDiffers() }
 // go2lean:sequence testRandReaderReadFull
 func SeqTestRandReaderReadFull() bool { return testRandReaderReadFull() }
 
+// go2lean:sequence testRecoverExplicitPanic
+func SeqTestRecoverExplicitPanic() bool { return testRecoverExplicitPanic() }
+
+// go2lean:sequence testRecoverNilAndCallee
+func SeqTestRecoverNilAndCallee() bool { return testRecoverNilAndCallee() }
+
+// go2lean:sequence testRecoverNilWithoutPanic
+func SeqTestRecoverNilWithoutPanic() bool { return testRecoverNilWithoutPanic() }
+
 // go2lean:sequence testReflectCallIfaceResult
 func SeqTestReflectCallIfaceResult() bool { return testReflectCallIfaceResult() }
 

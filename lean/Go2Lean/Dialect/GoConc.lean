@@ -145,6 +145,43 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
           advance p or h (goto fb env [])
             (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
         | .spawn .. | .sync .. => (.atSync ({ fr with env, atTerm := true } :: rest), s)
+        | .catch inner pb =>
+          -- A recovering frame (#181): a callee's panic, or a nil func
+          -- value, goes on at `pb`. A callee the machine steps (one that
+          -- synchronises) is not caught: its panic ends the goroutine.
+          let caught := fun (s' : HState Val) =>
+            advance p or h (goto pb env []) { s' with panicAt := s.panicAt } fuel
+          let callC := fun (f : FuncId) (vals : List Val) (dst next : BlockId) (nargs : List Var) (fb : BlockId) =>
+            match p.funcs[f]? with
+            | none => (.panicked .modelStuck, s)
+            | some callee =>
+              if callee.sync then call f vals dst next nargs fb
+              else if s.fast then
+                match runFuncF p or h true f vals s fuel with
+                | (.ok v, s') => advance p or h (goto next (env.set! dst v) nargs) s' fuel
+                | (.panic k, s') => if k.isStuck then (.panicked k, s') else caught s'
+                | (.outOfFuel, s') => (.outOfFuel, s')
+              else
+                match runFunc p or h true f vals s fuel with
+                | (.ok v, s') => advance p or h (goto next (env.set! dst v) nargs) s' fuel
+                | (.panic k, s') =>
+                  if k.isStuck then
+                    let s'' := { s' with heap := s.heap, stuck := s.stuck, panicAt := s.panicAt }
+                    advance p or h (goto fb env []) (s''.assume (stuckCallNote p f)) fuel
+                  else caught s'
+                | (.outOfFuel, s') => (.outOfFuel, s')
+          match inner with
+          | .call f args dst next nargs fb => callC f (args.map (env[·]!)) dst next nargs fb
+          | .callv fv args dst next nargs fb =>
+            match Dialect.callee (Op := Go2Lean.GoSSA.Op) env[fv]! with
+            | .nil => caught s
+            | .unknown => advance p or h (goto fb env [])
+                (s.assume "a call through a function value the model does not know: its effects are not modelled") fuel
+            | .known f bound => callC f (bound ++ args.map (env[·]!)) dst next nargs fb
+          | .xcall _ _ _ _ _ _ fb =>
+            advance p or h (goto fb env [])
+              (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
+          | _ => (.panicked .modelStuck, s)
 
 /-! ## Pending operations -/
 

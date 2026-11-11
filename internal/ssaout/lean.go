@@ -41,6 +41,11 @@ func vars(vs []ir.Var) string {
 }
 
 func term(frontend string, t ir.Term) string {
+	if t.Catch != 0 {
+		inner := t
+		inner.Catch = 0
+		return fmt.Sprintf(".catch (%s) %d", term(frontend, inner), t.Catch)
+	}
 	switch t.Kind {
 	case ir.TermRet:
 		return fmt.Sprintf(".ret %d", t.V)

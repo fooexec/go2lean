@@ -222,6 +222,11 @@ inductive Term where
   | spawn (fv : Var) (args : List Var) (next : BlockId)
   /-- `dst := op args`, then `jump next`. Only the concurrent machine runs it. -/
   | sync (op : SyncOp) (args : List Var) (dst : Var) (next : BlockId)
+  /-- The `call`, `callv` or `xcall` `t`, in a function whose `defer`
+  recovers (#181): when its callee panics, or its func value is nil, the
+  frame goes on at block `pb` instead of panicking. A callee that gets stuck
+  takes `t`'s fallback, as for `t`. -/
+  | catch (t : Term) (pb : BlockId)
   deriving Repr
 
 structure Block (Op : Type) where
@@ -468,6 +473,33 @@ def runBlock (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fn : Fu
         | .xcall _ _ _ _ _ _ fb =>
           -- Not linked (the package was not compiled alongside): unmodelled.
           runBlock p or h track fn fb (enter fn fb env []) (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
+        | .catch inner pb =>
+          -- The callee's panic stops here: the frame goes on at `pb`, with
+          -- the heap as the callee left it (Go keeps a panicking call's
+          -- effects), the panic site forgotten.
+          let caught := fun (s' : HState Val) =>
+            runBlock p or h track fn pb (enter fn pb env []) { s' with panicAt := s.panicAt } fuel
+          let callThen := fun (f : FuncId) (vals : List Val) (dst next : BlockId) (nargs : List Var) (fb : BlockId) =>
+            match runFunc p or h track f vals s fuel with
+            | (.ok v, s') =>
+              let env := env.set! dst v
+              runBlock p or h track fn next (enter fn next env nargs) s' fuel
+            | (.panic k, s') =>
+                if k.isStuck then
+                  let s'' := { s' with heap := s.heap, stuck := s.stuck }
+                  runBlock p or h track fn fb (enter fn fb env []) (s''.assume (stuckCallNote p f)) fuel
+                else caught s'
+            | (.outOfFuel, s') => (.outOfFuel, s')
+          match inner with
+          | .call f args dst next nargs fb => callThen f (args.map (env[·]!)) dst next nargs fb
+          | .callv fv args dst next nargs fb =>
+            match Dialect.callee (Op := Op) env[fv]! with
+            | .nil => caught s
+            | .unknown => runBlock p or h track fn fb (enter fn fb env []) (s.assume "a call through a function value the model does not know: its effects are not modelled") fuel
+            | .known f bound => callThen f (bound ++ args.map (env[·]!)) dst next nargs fb
+          | .xcall _ _ _ _ _ _ fb =>
+            runBlock p or h track fn fb (enter fn fb env []) (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
+          | _ => (.panic .modelStuck, s)
 
 /-- Run function `fid` on `args`. -/
 def runFunc (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fid : FuncId) (args : List Val)
@@ -589,6 +621,30 @@ def runBlockF (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fn : F
         | .xcall _ _ _ _ _ _ fb =>
           -- Not linked (the package was not compiled alongside): unmodelled.
           runBlockF p or h track fn fb (enter fn fb env []) (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
+        | .catch inner pb =>
+          -- The callee's panic stops here: the frame goes on at `pb`, with
+          -- the heap as the callee left it (Go keeps a panicking call's
+          -- effects), the panic site forgotten.
+          let caught := fun (s' : HState Val) =>
+            runBlockF p or h track fn pb (enter fn pb env []) { s' with panicAt := s.panicAt } fuel
+          let callThen := fun (f : FuncId) (vals : List Val) (dst next : BlockId) (nargs : List Var) (fb : BlockId) =>
+            match runFuncF p or h track f vals s fuel with
+            | (.ok v, s') =>
+              let env := env.set! dst v
+              runBlockF p or h track fn next (enter fn next env nargs) s' fuel
+            | (.panic k, s') =>
+                if k.isStuck then (.panic k, s') else caught s'
+            | (.outOfFuel, s') => (.outOfFuel, s')
+          match inner with
+          | .call f args dst next nargs fb => callThen f (args.map (env[·]!)) dst next nargs fb
+          | .callv fv args dst next nargs fb =>
+            match Dialect.callee (Op := Op) env[fv]! with
+            | .nil => caught s
+            | .unknown => runBlockF p or h track fn fb (enter fn fb env []) (s.assume "a call through a function value the model does not know: its effects are not modelled") fuel
+            | .known f bound => callThen f (bound ++ args.map (env[·]!)) dst next nargs fb
+          | .xcall _ _ _ _ _ _ fb =>
+            runBlockF p or h track fn fb (enter fn fb env []) (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
+          | _ => (.panic .modelStuck, s)
 
 /-- Run function `fid` on `args`. -/
 def runFuncF (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fid : FuncId) (args : List Val)
