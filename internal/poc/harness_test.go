@@ -297,3 +297,18 @@ func TestVerdictTestTimeout(t *testing.T) {
 		t.Fatalf("concurrent PoC args %v", got)
 	}
 }
+
+// A spurious verdict with no guessed call to name says which assumptions
+// the model's run took (#185).
+func TestSpuriousNamesAssumptions(t *testing.T) {
+	cx := &contract.Counterexample{ID: "cx1", ModelOutput: &contract.ModelOutput{Res: "panic", Panic: contract.PanicIndexOutOfRange},
+		Assumptions: []string{"IsLetter: load Letter: assumed a pointer to a fresh unicode.RangeTable with havoc fields (not modelled)"}}
+	p := &prepared{cx: cx, prop: &contract.Property{Kind: contract.KindNoPanic}}
+	v := verdictOf(p, map[string]result{"cx1": {Ret: "1"}}, "go test", 0, "", "", "")
+	if v.Status != contract.VerdictSpurious || v.Diagnosis == nil {
+		t.Fatalf("verdict %+v", v)
+	}
+	if !slices.ContainsFunc(v.Diagnosis.Notes, func(n string) bool { return strings.Contains(n, "assumed a pointer to a fresh unicode.RangeTable") }) {
+		t.Fatalf("notes %q do not name the assumption", v.Diagnosis.Notes)
+	}
+}

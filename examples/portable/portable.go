@@ -189,8 +189,8 @@ func InitEncoder() { enc = &encoder{perToken: 4} }
 func Tokens(s string) int { return len(s) / enc.perToken }
 
 // ring is built by newRing only (it is unexported): a ring with an empty
-// buffer is a state no caller can make, so push is not a target on a
-// receiver built field by field (newRing is variadic: no wrapper).
+// buffer is a state no caller can make, so push is a target only through
+// newRing, called with no variadic argument (push~newRing, holds, #186).
 type ring struct {
 	buf []int
 	pos int

@@ -52,8 +52,9 @@ findings the summary shows: a caller can reach them, or a spec fails.
   `lo.Try` calls its callback under a `recover`. In the model, `recover()`
   is always nil and a panic ends the run, so a nil callback gives 4
   spurious findings.
-- **Interface-typed package variables**
-  ([#182](https://github.com/fooexec/go2lean/issues/182)). In uuid,
+- **Interface-typed package variables** (fixed,
+  [#182](https://github.com/fooexec/go2lean/issues/182): uuid now has 0
+  spurious findings). In uuid,
   `var rander = rand.Reader` starts as an unknown non-nil reader. The model
   never builds an initializer cell of interface type (#55), so
   `io.ReadFull(rander, …)` may fail there and `Must` panic: 23 spurious
@@ -70,9 +71,13 @@ findings the summary shows: a caller can reach them, or a spec fails.
 - **The reason for a spurious finding.** Its diagnosis names the unmodelled
   calls the model chose results for, but not an assumption or a callee the
   model got stuck in. 47 of this run's 48 spurious findings came with no
-  stated reason ([#185](https://github.com/fooexec/go2lean/issues/185)).
-- **A constructor named `New`**
-  ([#186](https://github.com/fooexec/go2lean/issues/186)). A package's `New`
+  stated reason ([#185](https://github.com/fooexec/go2lean/issues/185);
+  fixed: such a verdict now lists the run's assumptions, in `run`'s output
+  and in `summary.md`).
+- **A constructor named `New`** (fixed,
+  [#186](https://github.com/fooexec/go2lean/issues/186): `cron.New` was
+  recognised but skipped as variadic; it is now called with no options, and
+  cron's 4 false findings and 7 inconclusive ones go). A package's `New`
   that returns its main type (`cron.New() *Cron`) is not taken for that
   type's constructor, so the type's methods run on receivers that no caller
   can build.

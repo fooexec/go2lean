@@ -280,6 +280,7 @@ proved portable_permb_nopanic
 confirmed portable_pick_nopanic
 confirmed portable_port_nopanic
 exhausted portable_release_nopanic
+exhausted portable_ring_push_newring_nopanic
 confirmed portable_shrink_nopanic
 exhausted portable_sumfirst_nohang
 confirmed portable_sumfirst_nopanic

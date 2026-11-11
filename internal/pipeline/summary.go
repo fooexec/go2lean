@@ -155,6 +155,12 @@ func (s *Summary) WriteMarkdown(out io.Writer) {
 				fmt.Fprintf(out, " — %s %s", d.Reason, d.ModelVsReal)
 			}
 			fmt.Fprintln(out)
+			if d := f.Verdict.Diagnosis; d != nil && f.Verdict.Status != contract.VerdictConfirmed {
+				// Why the model and Go disagree (#185).
+				for _, n := range d.Notes {
+					fmt.Fprintf(out, "- why: %s\n", n)
+				}
+			}
 			if f.Verdict.PocDir != "" {
 				fmt.Fprintf(out, "- PoC: `%s`\n", f.Verdict.PocDir)
 			}
