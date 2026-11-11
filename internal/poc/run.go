@@ -1374,10 +1374,14 @@ func panicSite(stack, root string) string {
 
 // scheduleDependent: the model's run of cx had more than one goroutine, so
 // what it found (a panic, a false result) may need the model's
-// interleaving, which one run under Go's scheduler need not take.
+// interleaving, which one run under Go's scheduler need not take. A run
+// that started a goroutine counts even when the schedule records no step
+// of it: go-multierror's Group.Go(nil) panics in the goroutine it starts,
+// after the call returned, which a sequential PoC sees only if the
+// goroutine runs before the test binary exits (#197).
 func scheduleDependent(cx *contract.Counterexample) bool {
 	for _, s := range cx.Schedule {
-		if s.G != 0 {
+		if s.G != 0 || s.Op == "spawn" {
 			return true
 		}
 	}

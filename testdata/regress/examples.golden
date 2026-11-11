@@ -261,7 +261,7 @@ exhausted portable_fill_nopanic
 confirmed portable_finish_nopanic
 exhausted portable_first_nopanic
 confirmed portable_go2leangen_must__int_nopanic
-inconclusive portable_group_nopanic
+confirmed portable_group_nopanic
 confirmed portable_head_nopanic
 exhausted portable_initencoder_nopanic
 exhausted portable_intpart_nopanic
@@ -310,8 +310,8 @@ none recs_total_nohang
 none recs_total_nopanic
 none mut=3/4 recs_total_spectotal
 exhausted refine_digit_nopanic
-none replaydep_dispatcher_close_nopanic
-none replaydep_dispatcher_write_nopanic
+confirmed replaydep_dispatcher_close_nopanic
+exhausted replaydep_dispatcher_write_nopanic
 exhausted replaydep_queue_queue_len_nopanic
 exhausted_havoc replaydep_queue_queue_push_nopanic
 confirmed replaydep_writewhileclosing_nopanic

@@ -7746,6 +7746,12 @@ func (t *fnState) atomicCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 	return true, nil
 }
 
+// isStruct says whether t is a struct type.
+func isStruct(t types.Type) bool {
+	_, ok := t.Underlying().(*types.Struct)
+	return ok
+}
+
 // atomicPointer says whether u is the layout of sync/atomic's Pointer[T]
 // (`_ [0]*T; _ noCopy; v unsafe.Pointer`). The model keeps a *T in v, nil
 // at first, so Load gives back the pointer Store put (#192).
@@ -9718,11 +9724,13 @@ func (ab *abiBuilder) param(name string, t types.Type, stack []*types.Named) (co
 		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, Width: w, Model: []string{name}, Kind: contract.ABIFloat}, nil
 	case isOpaqueType(t) || isForeignOpaqueStruct(pkg, t) || isForeignUnexported(pkg, t):
 		p := contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIOpaque, Zero: zeroLit(t, src)}
-		if n, ok := types.Unalias(t).(*types.Named); ok && n.Obj().Pkg() != nil && modelledStdlib[n.Obj().Pkg().Path()] {
+		if n, ok := types.Unalias(t).(*types.Named); ok && n.Obj().Pkg() != nil && isStruct(n) {
 			// A struct of a package translated from source (a big.Int): the
 			// test passes its zero value, and the translated methods read
 			// its fields, so the model holds that zero, not an unknown
-			// value they would dereference (#171).
+			// value they would dereference (#171). The same holds for any
+			// struct the test cannot fill in: conc's WaitGroup in a Pool,
+			// whose Catcher's atomic.Pointer is nil at first (#192).
 			if z, ok := zeroVal(t); ok {
 				p.ZeroModel = zeroModel(z)
 			}
