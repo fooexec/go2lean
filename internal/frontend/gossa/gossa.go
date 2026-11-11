@@ -178,7 +178,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		// ones (#148).
 		portableMath(sprog)
 	}
-	zeros := zeroGlobals(sprog, spkgs, opts.Deps)
+	zeros := zeroGlobals(sprog, spkgs, opts.Deps, opts.Tests)
 
 	modPath := ""
 	if pkgs[0].Module != nil {
@@ -790,7 +790,7 @@ func representable(c constant.Value, b *types.Basic) bool {
 // initStore) counts as the initializer's, when the initializer does not
 // set the variable too: init functions run after the variable
 // initializers and before any other code.
-func zeroGlobals(sprog *ssa.Program, spkgs []*ssa.Package, deps bool) map[*ssa.Global]ssa.Value {
+func zeroGlobals(sprog *ssa.Program, spkgs []*ssa.Package, deps, tests bool) map[*ssa.Global]ssa.Value {
 	touched := map[*ssa.Global]bool{}
 	inits := map[*ssa.Global]ssa.Value{}
 	loads := map[*ssa.Global][]*ssa.UnOp{}
@@ -803,7 +803,7 @@ func zeroGlobals(sprog *ssa.Program, spkgs []*ssa.Package, deps bool) map[*ssa.G
 	addrTaken := map[*ssa.Global]bool{}
 	writtenTypes := map[string]bool{}
 	for f := range ssautil.AllFunctions(sprog) {
-		if testHelper(f) {
+		if testHelper(f) || (!tests && testEntry(sprog, f)) {
 			continue
 		}
 		pkgInit := f.Name() == "init" && f.Synthetic != ""
@@ -1159,6 +1159,20 @@ func testHelper(f *ssa.Function) bool {
 		return true
 	}
 	return strings.HasSuffix(name, "ForTest") || strings.HasSuffix(name, "ForTesting")
+}
+
+// testEntry says whether f is a Test function of a _test.go file, or a
+// closure inside one. Without -tests no property runs one (google/uuid's
+// TestClockSeq swaps timeNow), so its writes to package variables never
+// happen in the model.
+func testEntry(sprog *ssa.Program, f *ssa.Function) bool {
+	for f.Parent() != nil {
+		f = f.Parent()
+	}
+	if f.Signature.Recv() != nil || !strings.HasPrefix(f.Name(), "Test") {
+		return false
+	}
+	return strings.HasSuffix(sprog.Fset.Position(f.Pos()).Filename, "_test.go")
 }
 
 // addCtorWrappers adds, for each method of a type T whose package has a

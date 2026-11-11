@@ -37,8 +37,15 @@ A [second run on seven more](../docs/eval/second-run.md) (pflag, toml,
 mux, backoff, decimal, go-shellquote, xid) confirmed panics in five. It
 also fixed what stopped two of them at the hour cap: exhaustive domains
 built whole before the budget check, and PoCs whose real run never ends.
-Its open problems are `math/big`, which is unmodelled, and the noise from
-unexported functions.
+Since then, `math/big`, package initializers, run-time regexps and calls
+through a nil interface are modelled (#177 to #180). decimal, mux and
+backoff now run with no spurious or inconclusive verdict. The noise from
+unexported functions remains.
+A [third run on seven more](../docs/eval/third-run.md) (uuid, lo,
+go-runewidth, semver, cron, ulid, go-wordwrap) finished each project within
+six minutes. Its spurious findings point to the next gaps: `recover`,
+interface-typed package variables, `golang.org/x/text`, tables filled by
+`init` functions, and constructors named `New`.
 
 Evidence beyond the codebase it was built on comes from blind runs with a
 protocol committed before each run and the tool frozen:

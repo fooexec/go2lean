@@ -55,5 +55,10 @@ func FuzzOuter(f *testing.F) {
 		if !strings.Contains(string(src), `"strings"`) || strings.Contains(string(src), `"bytes"`) {
 			t.Fatalf("generated file:\n%s", src)
 		}
+		// No any: a module without a go directive (google/uuid) is Go 1.16,
+		// and the whole package would fail to load.
+		if strings.Contains(string(src), "...any") {
+			t.Fatalf("generated file uses any:\n%s", src)
+		}
 	}
 }
