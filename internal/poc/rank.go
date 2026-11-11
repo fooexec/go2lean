@@ -99,6 +99,10 @@ func baseFunc(f string) string {
 	return f
 }
 
+// APIFunc says whether a target function (`F`, `T.M~NewT`, `F[int]`) is
+// part of its package's API.
+func APIFunc(target string) bool { return exportedFunc(baseFunc(target)) }
+
 // exportedFunc says whether a function (`F`) or method (`T.M`) is part of
 // its package's API; closures (`F$1`) are not.
 func exportedFunc(f string) bool {

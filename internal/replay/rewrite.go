@@ -120,6 +120,15 @@ func (r *rewriter) fail(format string, args ...any) {
 	}
 }
 
+// chanString spells a channel's type by its underlying type: the gate
+// wraps the channel as func(c T) T, and a named channel type's name may be
+// shadowed where the channel is used (conc's `for callbackCh := range
+// s.queue`, of type chan callbackCh). A value of the named type is
+// assignable to its unnamed underlying type.
+func (r *rewriter) chanString(t types.Type) string {
+	return r.typeString(t.Underlying())
+}
+
 // typeString spells t in this file, importing the packages it needs.
 func (r *rewriter) typeString(t types.Type) string {
 	return types.TypeString(t, func(p *types.Package) string {
@@ -323,18 +332,18 @@ func (r *rewriter) pre(c *astutil.Cursor) bool {
 		}
 	case *ast.UnaryExpr:
 		if n.Op == token.ARROW {
-			r.chanType[n.X] = r.typeString(r.info.TypeOf(n.X))
+			r.chanType[n.X] = r.chanString(r.info.TypeOf(n.X))
 		}
 	case *ast.SendStmt:
-		r.chanType[n.Chan] = r.typeString(r.info.TypeOf(n.Chan))
+		r.chanType[n.Chan] = r.chanString(r.info.TypeOf(n.Chan))
 	case *ast.RangeStmt:
 		if r.isChan(n.X) {
-			r.chanType[n.X] = r.typeString(r.info.TypeOf(n.X))
+			r.chanType[n.X] = r.chanString(r.info.TypeOf(n.X))
 		}
 	case *ast.CallExpr:
 		if id, ok := n.Fun.(*ast.Ident); ok && id.Name == "close" && len(n.Args) == 1 {
 			if _, builtin := r.info.Uses[id].(*types.Builtin); builtin {
-				r.chanType[n.Args[0]] = r.typeString(r.info.TypeOf(n.Args[0]))
+				r.chanType[n.Args[0]] = r.chanString(r.info.TypeOf(n.Args[0]))
 			}
 		}
 		// Calls are rewritten bottom-up: classify them now, while the

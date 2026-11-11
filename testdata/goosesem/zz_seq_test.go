@@ -53,6 +53,15 @@ func SeqTestAtomicInt32Swap() bool { return testAtomicInt32Swap() }
 // go2lean:sequence testAtomicInt64AndOr
 func SeqTestAtomicInt64AndOr() bool { return testAtomicInt64AndOr() }
 
+// go2lean:sequence testAtomicPointerStoreLoad
+func SeqTestAtomicPointerStoreLoad() bool { return testAtomicPointerStoreLoad() }
+
+// go2lean:sequence testAtomicPointerSwapCAS
+func SeqTestAtomicPointerSwapCAS() bool { return testAtomicPointerSwapCAS() }
+
+// go2lean:sequence testAtomicPointerZero
+func SeqTestAtomicPointerZero() bool { return testAtomicPointerZero() }
+
 // go2lean:sequence testAtomicUint32CompareAndSwap
 func SeqTestAtomicUint32CompareAndSwap() bool { return testAtomicUint32CompareAndSwap() }
 

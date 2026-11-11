@@ -15,6 +15,14 @@ func TestExportedFunc(t *testing.T) {
 			t.Errorf("exportedFunc(%q) = %v", f, got)
 		}
 	}
+	for f, want := range map[string]bool{
+		"Mux.Use~NewMux": true, "Mux.routeHTTP~NewMux": false, "Go2LeanGen_Map__int__string": true,
+		"tag.Remove": false, "Map[int]": true,
+	} {
+		if got := APIFunc(f); got != want {
+			t.Errorf("APIFunc(%q) = %v", f, got)
+		}
+	}
 	if got := baseFunc("Counter.Share~NewCounter"); got != "Counter.Share" {
 		t.Errorf("baseFunc = %q", got)
 	}

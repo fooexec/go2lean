@@ -1792,7 +1792,12 @@ func goSig(f *ssa.Function) string {
 }
 
 // funcName is the model name of a function: its Go name, or Type.Method
-// for a method (the same for value and pointer receivers).
+// for a method (the same for value and pointer receivers). A method of an
+// instantiated generic type names the type arguments, Type[int, int].Method:
+// two instances of a type (golang-lru's LRU[int, int] and LRU[int,
+// struct{}]) would otherwise share one name, and a target or model looked
+// up by it would run the wrong instance (#196). Like a generic function's
+// instance (Map[int]), it is modelled for its callers, not a target.
 func funcName(f *ssa.Function) string {
 	if recv := f.Signature.Recv(); recv != nil {
 		t := recv.Type()
@@ -1800,7 +1805,16 @@ func funcName(f *ssa.Function) string {
 			t = p.Elem()
 		}
 		if n, ok := t.(*types.Named); ok {
-			return n.Obj().Name() + "." + f.Name()
+			name := n.Obj().Name()
+			if targs := n.TypeArgs(); targs.Len() > 0 {
+				qual := func(p *types.Package) string { return p.Name() }
+				var args []string
+				for i := 0; i < targs.Len(); i++ {
+					args = append(args, types.TypeString(targs.At(i), qual))
+				}
+				name += "[" + strings.Join(args, ", ") + "]"
+			}
+			return name + "." + f.Name()
 		}
 	}
 	return f.Name()
@@ -6848,7 +6862,7 @@ func holdsSync(t types.Type) bool {
 	// strictWidthLUTLimit atomic.Int32 (#184).
 	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "sync/atomic" {
 		switch n.Obj().Name() {
-		case "Bool", "Int32", "Int64", "Uint32", "Uint64":
+		case "Bool", "Int32", "Int64", "Uint32", "Uint64", "Pointer":
 			return true
 		}
 	}
@@ -7597,20 +7611,25 @@ func (t *fnState) atomicFuncCall(x *ssa.Call, callee *ssa.Function) (bool, error
 // are one atomic step (#67).
 func (t *fnState) atomicCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 	recv := callee.Signature.Recv()
-	if recv == nil || callee.Pkg == nil || callee.Pkg.Pkg.Path() != "sync/atomic" {
+	if recv == nil {
 		return false, nil
 	}
 	pt, ok := recv.Type().(*types.Pointer)
 	if !ok {
 		return false, nil
 	}
+	// An instance's Pkg is nil (Pointer[T]'s methods): the receiver's type
+	// names the package.
 	named, ok := pt.Elem().(*types.Named)
-	if !ok {
+	if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "sync/atomic" {
 		return false, nil
 	}
 	st, ok := named.Underlying().(*types.Struct)
 	if !ok {
 		return false, nil
+	}
+	if atomicPointer(st) {
+		return t.atomicPointerCall(x, callee, st)
 	}
 	field := -1
 	for i := 0; i < st.NumFields(); i++ {
@@ -7722,6 +7741,79 @@ func (t *fnState) atomicCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 			t.emit(ir.Instr{Dst: nv, Op: ir.Simple(strings.ToLower(callee.Name())), Args: []ir.Var{cur, m}})
 			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("add"), Args: []ir.Var{cur, konst("0")}})
 		}
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{addr, nv}})
+	}
+	return true, nil
+}
+
+// isStruct says whether t is a struct type.
+func isStruct(t types.Type) bool {
+	_, ok := t.Underlying().(*types.Struct)
+	return ok
+}
+
+// atomicPointer says whether u is the layout of sync/atomic's Pointer[T]
+// (`_ [0]*T; _ noCopy; v unsafe.Pointer`). The model keeps a *T in v, nil
+// at first, so Load gives back the pointer Store put (#192).
+func atomicPointer(u *types.Struct) bool {
+	if u.NumFields() != 3 || u.Field(2).Name() != "v" || u.Field(0).Name() != "_" {
+		return false
+	}
+	a, ok := u.Field(0).Type().(*types.Array)
+	if !ok || a.Len() != 0 {
+		return false
+	}
+	if _, ok := a.Elem().(*types.Pointer); !ok {
+		return false
+	}
+	b, ok := u.Field(2).Type().(*types.Basic)
+	return ok && b.Kind() == types.UnsafePointer && u.Field(2).Pkg() != nil && u.Field(2).Pkg().Path() == "sync/atomic"
+}
+
+// atomicPointerCall lowers Load, Store, Swap and CompareAndSwap of a
+// sync/atomic Pointer[T]: reads and writes of the pointer it holds in v.
+func (t *fnState) atomicPointerCall(x *ssa.Call, callee *ssa.Function, st *types.Struct) (bool, error) {
+	switch callee.Name() {
+	case "Load", "Store", "Swap", "CompareAndSwap":
+	default:
+		return false, nil
+	}
+	p, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return true, err
+	}
+	addr := t.fresh()
+	t.emit(ir.Instr{Dst: addr, Op: ir.FieldAddr{I: 2}, Args: []ir.Var{p}})
+	switch callee.Name() {
+	case "Load":
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("atomicLoad"), Args: []ir.Var{addr}})
+	case "Store":
+		v, err := t.val(x.Call.Args[1])
+		if err != nil {
+			return true, err
+		}
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{addr, v}})
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
+	case "Swap":
+		v, err := t.val(x.Call.Args[1])
+		if err != nil {
+			return true, err
+		}
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("atomicLoad"), Args: []ir.Var{addr}})
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{addr, v}})
+	case "CompareAndSwap":
+		old, err := t.val(x.Call.Args[1])
+		if err != nil {
+			return true, err
+		}
+		v, err := t.val(x.Call.Args[2])
+		if err != nil {
+			return true, err
+		}
+		cur, nv, r := t.fresh(), t.fresh(), t.def(x)
+		t.emit(ir.Instr{Dst: cur, Op: ir.Conc("atomicLoad"), Args: []ir.Var{addr}})
+		t.emit(ir.Instr{Dst: r, Op: ir.Simple("eq"), Args: []ir.Var{cur, old}})
+		t.emit(ir.Instr{Dst: nv, Op: ir.Simple("ite"), Args: []ir.Var{r, v, cur}})
 		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{addr, nv}})
 	}
 	return true, nil
@@ -9220,6 +9312,10 @@ func zeroVal(t types.Type) (ir.Val, bool) {
 	case *types.Struct:
 		var fields []ir.Val
 		for i := 0; i < u.NumFields(); i++ {
+			if i == 2 && atomicPointer(u) {
+				fields = append(fields, ir.NilPtr{}) // a nil *T (atomicPointerCall)
+				continue
+			}
 			z, ok := zeroVal(u.Field(i).Type())
 			if !ok {
 				return nil, false
@@ -9438,7 +9534,9 @@ func (ab *abiBuilder) fields(u *types.Struct, foreign bool, stack []*types.Named
 		}
 		if foreign && !fld.Exported() {
 			p := contract.ABIParam{Go: fld.Name(), GoType: types.TypeString(fld.Type(), nil), Model: []string{fld.Name()}, Kind: contract.ABIOpaque, Zero: zeroLit(fld.Type(), types.TypeString(fld.Type(), nil))}
-			if z, ok := zeroVal(fld.Type()); ok {
+			if i == 2 && atomicPointer(u) {
+				p.ZeroModel = zeroModel(ir.NilPtr{}) // a nil *T (atomicPointerCall)
+			} else if z, ok := zeroVal(fld.Type()); ok {
 				p.ZeroModel = zeroModel(z)
 			}
 			fields = append(fields, p)
@@ -9626,11 +9724,13 @@ func (ab *abiBuilder) param(name string, t types.Type, stack []*types.Named) (co
 		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, Width: w, Model: []string{name}, Kind: contract.ABIFloat}, nil
 	case isOpaqueType(t) || isForeignOpaqueStruct(pkg, t) || isForeignUnexported(pkg, t):
 		p := contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIOpaque, Zero: zeroLit(t, src)}
-		if n, ok := types.Unalias(t).(*types.Named); ok && n.Obj().Pkg() != nil && modelledStdlib[n.Obj().Pkg().Path()] {
+		if n, ok := types.Unalias(t).(*types.Named); ok && n.Obj().Pkg() != nil && isStruct(n) {
 			// A struct of a package translated from source (a big.Int): the
 			// test passes its zero value, and the translated methods read
 			// its fields, so the model holds that zero, not an unknown
-			// value they would dereference (#171).
+			// value they would dereference (#171). The same holds for any
+			// struct the test cannot fill in: conc's WaitGroup in a Pool,
+			// whose Catcher's atomic.Pointer is nil at first (#192).
 			if z, ok := zeroVal(t); ok {
 				p.ZeroModel = zeroModel(z)
 			}

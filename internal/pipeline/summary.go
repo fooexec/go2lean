@@ -61,7 +61,18 @@ func Summarize(w contract.Workspace) (*Summary, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Summary{Proofs: map[contract.ProofStatus]int{}, Properties: len(props)}
+	// The properties searched: run leaves some unsearched (-unexported,
+	// -run, -run-budget), and a workspace with no search yet counts all.
+	searched := 0
+	for _, p := range props {
+		if w.HuntRecord(p.ID) != nil {
+			searched++
+		}
+	}
+	if searched == 0 {
+		searched = len(props)
+	}
+	s := &Summary{Proofs: map[contract.ProofStatus]int{}, Properties: searched}
 	for _, p := range proofs {
 		s.Proofs[p.Status]++
 	}
@@ -268,10 +279,13 @@ func specFinding(f Finding) bool {
 	return p != nil && p.Kind != "" && p.Kind != contract.KindNoPanic && p.Kind != contract.KindNoHang
 }
 
-// plural is "1 place", "2 places".
+// plural is "1 place", "2 places", "2 properties".
 func plural(n int, what string) string {
 	if n == 1 {
 		return "1 " + what
+	}
+	if strings.HasSuffix(what, "y") {
+		return fmt.Sprintf("%d %sies", n, strings.TrimSuffix(what, "y"))
 	}
 	return fmt.Sprintf("%d %ss", n, what)
 }

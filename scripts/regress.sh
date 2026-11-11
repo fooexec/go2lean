@@ -14,7 +14,7 @@ rm -rf "$WS"; mkdir -p "$WS"
 go build -o "$WS/g2l" ./cmd/go2lean
 PROVE=${PROVE:-1}
 prove=true; [ "$PROVE" = 0 ] && prove=false
-"$WS/g2l" run -deps -budget 0 -prove=$prove -workspace "$WS" ./examples/... > "$WS/run.log" 2>&1 || {
+"$WS/g2l" run -deps -unexported -budget 0 -prove=$prove -workspace "$WS" ./examples/... > "$WS/run.log" 2>&1 || {
   tail -40 "$WS/run.log"; echo "regress: go2lean run failed (log: $WS/run.log)"; exit 1; }
 python3 - "$WS" > "$WS/outcomes.txt" <<'EOF'
 import glob, json, os, sys
