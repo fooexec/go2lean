@@ -17,7 +17,7 @@ go build -o "$OUT/g2l" ./cmd/go2lean
 run_one() {
   k=$1; name=$(echo "$k" | sed 's|gobench/goker/||; s|/|_|g')
   ws=$OUT/ws/$name; rm -rf "${ws:?}"
-  (cd "$ROOT" && timeout 900 "$OUT/g2l" run -tests -module "$GB" -workspace "$ws" "./$k") > "$OUT/logs/$name.log" 2>&1
+  (cd "$ROOT" && timeout 900 "$OUT/g2l" run -tests -unexported -module "$GB" -workspace "$ws" "./$k") > "$OUT/logs/$name.log" 2>&1
   echo "exit $?" >> "$OUT/logs/$name.log"
   rm -rf "${ws:?}/lean" # the Lean build: ~100 MB per kernel
 }

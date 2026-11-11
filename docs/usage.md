@@ -156,7 +156,7 @@ go2lean props   [-workspace out] -package <path>  template properties from the m
 go2lean hunt    [-workspace out] [-property id] [-engine random|exhaustive|all] [-jobs n] [-budget s]
                 [-seed n] [-trials n] [-fuel n] [-maxlen n] [-exhaust-len n] [-exhaust-limit n]
 go2lean poc     [-workspace out] -counterexample id [more ids...]   one build per package, one process per counterexample
-go2lean run     [-workspace out] [-nil-inputs] [-deps=false] [-generics=false] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
+go2lean run     [-workspace out] [-nil-inputs] [-deps=false] [-generics=false] [-unexported] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking]
                 [-repairs n] [-report] <package>
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]
@@ -180,6 +180,14 @@ accept (`int`, `string`, `float64`, `bool`), and searches the wrapper. A
 finding names the instance: `Last[int]`, `Map[int, string]`. Methods of
 generic types, unexported generic functions and functions whose
 constraints none of those types satisfies are listed as not searched.
+
+`run` searches the `no_panic` and `no_hang` templates of the package's API
+only: exported functions, and exported methods of exported types. An
+unexported function's finding depends on what its callers pass, and the
+exported functions that call it are searched, so its own templates are
+skipped, and the hunt stage says how many. `-unexported` searches them
+too, and `-run` searches the functions it names, exported or not. Specs,
+fuzz targets and test functions are always searched (#172).
 
 `-run` selects targets as `go test -run` selects tests, and a suite's
 method is a target of its own (`-run 'TestY'`). `-run 'TestX/sub'` selects

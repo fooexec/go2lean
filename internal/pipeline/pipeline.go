@@ -63,6 +63,12 @@ type Env struct {
 	// Translate names dependency functions to translate whatever their
 	// depth (gossa.Options.Translate); the refinement loop adds to it.
 	Translate []string
+	// Unexported also searches the no_panic and no_hang templates of
+	// unexported functions and of methods of unexported types. Without it
+	// they are skipped unless -run names them: what they find depends on
+	// callers, and the exported functions that call them are searched
+	// (#172).
+	Unexported bool
 	// SpecsOnly searches the packages' specs only, not the no_panic
 	// templates: on a large package the templates otherwise take the
 	// budget first.
@@ -793,6 +799,12 @@ func runReport(w contract.Workspace, env Env, report *contract.ModelReport, opts
 	}
 	if env.Run != nil {
 		props = matchingTargets(w, props, env.Run)
+	} else if !env.Unexported {
+		var skipped int
+		props, skipped = apiTemplates(w, props)
+		if skipped > 0 {
+			fmt.Fprintf(out, "  %s of unexported functions not searched (-unexported searches them)\n", plural(skipped, "template property"))
+		}
 	}
 	if env.Subtest != "" {
 		// The model runs only the selected subtests (#48); replay must too.
@@ -859,6 +871,24 @@ func matchingTargets(w contract.Workspace, props []*contract.Property, re *regex
 		}
 	}
 	return out
+}
+
+// apiTemplates drops the template properties (no_panic, no_hang) of
+// functions outside the package's API, and returns how many it dropped.
+// Specs, sequences and tests are kept.
+func apiTemplates(w contract.Workspace, props []*contract.Property) ([]*contract.Property, int) {
+	var out []*contract.Property
+	skipped := 0
+	for _, p := range props {
+		if p.Source == "template" && (p.Kind == contract.KindNoPanic || p.Kind == contract.KindNoHang) {
+			if t, err := w.Target(p.Target); err == nil && !poc.APIFunc(t.Func) {
+				skipped++
+				continue
+			}
+		}
+		out = append(out, p)
+	}
+	return out, skipped
 }
 
 // notInstantiated is generic, without the names geninst wrapped.
