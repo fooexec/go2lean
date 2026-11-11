@@ -71,7 +71,7 @@ yields UB or poison, Go panics. A run ends in one of:
 | `panic modelStuck` | — | the model cannot continue (stuck); not a Go panic, never reported as one |
 | `outOfFuel` | — | the step budget ran out (loops, recursion), a slice would exceed the model's size bound (`sliceBound`, 16384 elements), or a run would start more than 128 goroutines (`goroutineBound`); moot |
 
-A panic ends the run: no deferred call runs after it, so nothing recovers from it. `recover()` is therefore nil wherever the model reaches it: in a deferred function run at a normal return, and outside deferred functions (#46).
+A panic ends the run, unless it happens in a function whose `defer` recovers (#181). That is a function that defers a function (a closure, or one of the program's) calling `recover()` itself. In such a function, the panic of a call it makes (a callee's panic, a nil func value) or its own `panic(...)` goes to a recovery block. The block runs the deferred calls whose `defer` statement ran. If one of them calls `recover()`, it gets a non-nil value, and the function returns its named results as they are then; otherwise the panic goes on. The interpreter's `catch` term carries the call's recovery block. In the concurrent machine, a frame a `catch` call pushed carries it, and a panic above it unwinds to it. Not recovered yet: a panic of the function's own operations (an index out of range in its body), and a panic in a synchronisation operation. `recover()` is nil everywhere else: at a normal return and outside deferred functions (#46).
 
 **Loops that never end (#86).** The engines rerun up to 20 of a
 property's out-of-fuel runs in a copy of the sequential interpreter
@@ -215,7 +215,7 @@ memory).
 | `defer f()` of an unmodelled function | ignored | assumption |
 | `defer f(args)` of a modelled function | the arguments are evaluated at the `defer` statement; at each return the calls whose `defer` statement ran are made, last first (go/ssa's `RunDefers`; a panic in one ends the run with it). In a function with a `defer` in a loop, every defer pushes its call onto a defer stack of the frame, which each return pops (#62; checked by `testdata/goosesem/go2lean_defer.go`) | exact for returns; on the way out of a panic no deferred call is made (the run ends with the panic, as a panic does here anyway) |
 | `panic(v)` | `panic explicit` | exact |
-| `recover()` | nil | exact: a panic ends the run before any deferred call, so `recover` runs only where Go's returns nil (`bytes.growSlice`'s `if recover() != nil`, which a havoc read turned into a spurious `ErrTooLarge` panic, #46) |
+| `recover()` | non-nil in a deferred call a recovery block makes after a panic (and the panic stops), nil elsewhere (#181) | exact for the panics a recovery block catches (above, §panics); a panic of the function's own operations still ends the run. Elsewhere nil, as Go's at a normal return (`bytes.growSlice`'s `if recover() != nil`, #46). Checked by `go2lean_recover.go` |
 
 ### 4.7 Package-level variables
 

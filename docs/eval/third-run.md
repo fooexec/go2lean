@@ -48,7 +48,8 @@ findings the summary shows: a caller can reach them, or a spec fails.
 
 ## Open
 
-- **`recover`** ([#181](https://github.com/fooexec/go2lean/issues/181)).
+- **`recover`** (fixed, [#181](https://github.com/fooexec/go2lean/issues/181):
+  lo with `-generics` goes from 28 spurious findings to 12, all `x/text`).
   `lo.Try` calls its callback under a `recover`. In the model, `recover()`
   is always nil and a panic ends the run, so a nil callback gives 4
   spurious findings.
