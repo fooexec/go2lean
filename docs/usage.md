@@ -89,14 +89,10 @@ Illustrative output (search details may vary):
 
 ```
 == Compile stage
-compiled github.com/andreasfoo/go2lean/examples/overflow -> out/lean/Go2Lean/Generated/gossa/overflow.lean
-  SpecSum      complete  func(xs []int, ret int) bool  [spec for Sum]
-  Sum          complete  func(xs []int) int
+compiled github.com/andreasfoo/go2lean/examples/overflow: 2 functions (2 complete, 0 partial, 0 rejected; -v lists them)
 == Spec & search stage: properties
-  p_overflow_sum_nopanic       no_panic       Sum does not panic on any input
-  p_overflow_sum_specsum       postcondition  Sum satisfies the spec-in-Go oracle SpecSum
+  2 properties to search (-v lists them)
 == Spec & search stage: hunt
-  p_overflow_sum_nopanic       random: none in 2000 trials; exhaustive: holds on 9724 inputs (recorded as exhausted)
   p_overflow_sum_specsum       random: found at trial 12 -> cx_overflow_sum_specsum_random_s42
       inputs map[xs_len:5 ...] memory map[xs:[1 0 0 0 9223372036854775807]] model ok -9223372036854775808
 == Replay stage: generate PoC and verify
@@ -120,6 +116,50 @@ reach, one entry per line where the program fails, with runtime errors before th
 unexported functions, need a nil no caller passes, or rest on package state
 the test forged. `out/summary.md` ranks every finding by how plausible its
 input is.
+
+`run -v` lists every compiled function with its status (and why one is
+`partial`: the calls and values the model does not know), every property,
+and every property's search.
+
+### Reading the results
+
+Every counterexample the model finds is run as a real `go test` (the
+PoC), and gets one of three verdicts:
+
+| verdict | meaning | what to do |
+|---|---|---|
+| **confirmed** | Go fails the same way on the same input | a real finding: read its rank (below) and the PoC |
+| **spurious** | Go does not fail on that input: the model was wrong | ignore it for the code. Its `why` lines name what the model guessed (an unmodelled call, an assumption). Please report it with `out/summary.md` attached: it is a model gap to close |
+| **inconclusive** | the real run neither confirmed nor refuted it (a timeout, out of memory, a race not observed) | look at its `why` lines; rerunning may settle it |
+
+A confirmed finding's **rank** says how plausible its input is for real callers:
+
+| tier | the input | listed in the run's summary |
+|---|---|---|
+| 1 | any caller of the package's API can pass it, or a caller in the module passes the same nil | yes |
+| 2 | depends on the callers (an unexported function's arguments, a nil a caller may pass) | counted |
+| 3 | no caller in the module passes it | counted |
+| 4 | the test forged it (an opaque value left nil, package state set up first) | counted |
+
+A violated spec is always listed. `out/summary.md` has every finding with
+its rank, input, real output and PoC.
+
+A finding raised by the package's own explicit `panic` says "check whether
+its documentation says it panics there": many APIs panic on bad arguments
+by design (`MustParse`, a negative size).
+
+No counterexample does **not** mean correct: the search is bounded, and
+the summary says which properties were proved, exhausted (every input in
+a small domain) or only searched.
+
+### Time and memory
+
+The first run on a machine builds go2lean's Lean runtime once: a few
+minutes, which it announces. After that, the trials on 28 unseen
+projects took from 7 seconds to 12 minutes each (`docs/eval/`), with the
+default 10 s search budget per property and a 10 s timeout per PoC.
+`-run-budget s` caps the whole search stage, and `-run regexp` searches
+only the functions it names.
 
 The PoC directory holds a ready-to-run Go test and a README with the
 reproduction command. Everything the modules exchange is a JSON record under
@@ -151,12 +191,13 @@ revised spec file in the report round triggers one more pass.
 ## Commands
 
 ```text
+go2lean version                                   the release tag, or the commit it was built from
 go2lean compile [-workspace out] <package>        Go -> Lean model, ABI, targets
 go2lean props   [-workspace out] -package <path>  template properties from the model report
 go2lean hunt    [-workspace out] [-property id] [-engine random|exhaustive|all] [-jobs n] [-budget s]
                 [-seed n] [-trials n] [-fuel n] [-maxlen n] [-exhaust-len n] [-exhaust-limit n]
 go2lean poc     [-workspace out] -counterexample id [more ids...]   one build per package, one process per counterexample
-go2lean run     [-workspace out] [-nil-inputs] [-deps=false] [-generics=false] [-unexported] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
+go2lean run     [-workspace out] [-v] [-nil-inputs] [-deps=false] [-generics=false] [-unexported] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking]
                 [-repairs n] [-report] <package>
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]

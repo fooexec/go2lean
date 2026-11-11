@@ -156,6 +156,7 @@ func cmdRun(args []string) error {
 	fuzzSpecs := fs.Bool("fuzz-specs", true, "read the packages' Go fuzz targets (FuzzXxx) as specs")
 	generics := fs.Bool("generics", true, "search the packages' exported generic functions at simple type arguments (int, string, float64, bool: the first their constraints accept)")
 	tests := fs.Bool("tests", false, "make the packages' test functions (TestXxx(t *testing.T)) targets")
+	verbose := fs.Bool("v", false, "list every compiled function, every property, and every property's search, not only counts and what was found")
 	unexported := fs.Bool("unexported", false, "also search the no_panic and no_hang properties of unexported functions and of methods of unexported types (without it, only those -run names)")
 	specsOnly := fs.Bool("specs-only", false, "search the packages' specs only, not the no_panic and no_hang templates")
 	runBudget := fs.Int("run-budget", 0, "seconds the hunt stage may take in all: properties start in order (synchronising targets, specs, tests first) until it is spent, and the rest are listed (0: unlimited)")
@@ -175,7 +176,7 @@ func cmdRun(args []string) error {
 		return err
 	}
 	env.Deps, env.Resume, env.FuzzSpecs, env.Tests, env.SpecsOnly = *deps, *resume, *fuzzSpecs, *tests, *specsOnly
-	env.Generics, env.Unexported = *generics, *unexported
+	env.Generics, env.Unexported, env.Quiet = *generics, *unexported, !*verbose
 	env.RunBudget = time.Duration(*runBudget) * time.Second
 	env.Changed = *changed
 	env.Refine = *refineRounds

@@ -52,6 +52,11 @@ only the API's templates by default (`-unexported` for the rest), which
 cut the properties by two thirds and the confirmed count with them, and
 to model `sync/atomic.Pointer`. After the fixes, two verdicts in the seven
 projects are spurious or inconclusive.
+An [audit of the standard library](../docs/eval/std-audit.md) measures the
+compile stage on all of its 165 public packages: 71.4% of its functions
+translate completely, 3.4% are held back by Go the model does not cover
+yet (a short list: complex numbers, `clear`, package variables it does not
+build), and 7.9% by the runtime, `unsafe`, assembly and the OS.
 
 Evidence beyond the codebase it was built on comes from blind runs with a
 protocol committed before each run and the tool frozen:

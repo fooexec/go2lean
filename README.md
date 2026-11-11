@@ -24,8 +24,11 @@ Lean finds the inputs; `go test` is the judge.
 
 
 > **Scope.** A bounded, search-based bug finder—not a guarantee of
-> correctness. No releases yet. See [limitations](docs/limitations.md) and
-> [validation](docs/validation.md) for scope and evidence.
+> correctness. Tried on 28 open-source projects it had never seen
+> ([runs](docs/eval/fourth-run.md)); it translates 71% of the standard
+> library's functions completely ([audit](docs/eval/std-audit.md)). See
+> [limitations](docs/limitations.md) and [validation](docs/validation.md)
+> for scope and evidence.
 
 ## Features
 
@@ -64,7 +67,8 @@ Lean finds the inputs; `go test` is the judge.
 ## Quick start
 
 Requires **Git, Go 1.26 and [elan](https://github.com/leanprover/elan)**.
-The pinned Lean toolchain is fetched on the first build. No LLM API key is needed.
+The pinned Lean toolchain is fetched, and go2lean's Lean runtime built, on
+the first run: a few minutes, once per machine. No LLM API key is needed.
 The binary bundles its Lean sources and can be installed with
 `go install github.com/andreasfoo/go2lean/cmd/go2lean@latest`; it does not
 need a source checkout at runtime. From a Go module, use
@@ -181,7 +185,8 @@ large arrays updated in place it also finds k016 at the default budget
 [what defects Go code has](docs/eval/go-defects.md) ·
 [go2lean's search against fuzzing](docs/eval/search-vs-fuzz.md) ·
 [recent concurrency bugs](docs/eval/conc-recent.md) ·
-[runs on unseen projects](docs/eval/first-run.md) ([second](docs/eval/second-run.md), [third](docs/eval/third-run.md), [fourth](docs/eval/fourth-run.md))
+[runs on unseen projects](docs/eval/first-run.md) ([second](docs/eval/second-run.md), [third](docs/eval/third-run.md), [fourth](docs/eval/fourth-run.md)) ·
+[how much of the standard library it translates](docs/eval/std-audit.md)
 
 ## Documentation
 

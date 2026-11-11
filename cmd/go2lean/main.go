@@ -21,6 +21,9 @@ func main() {
 	startMemProfile()
 	var err error
 	switch os.Args[1] {
+	case "version", "-version", "--version":
+		fmt.Println("go2lean", buildVersion())
+		return
 	case "doctor":
 		err = cmdDoctor(os.Args[2:])
 	case "compile":
@@ -58,6 +61,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
+  go2lean version                              the version (a release tag, or the commit it was built from)
   go2lean doctor [-deps [./...]]               diagnose prerequisites; optional offline target dependency check
   common flags: -workspace out   -module <dir of the Go module to analyse>
   go2lean compile [-workspace out] <packages...>  compile stage: Go -> Lean model, ABI, targets (./... allowed)

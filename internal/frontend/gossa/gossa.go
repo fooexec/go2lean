@@ -2767,12 +2767,18 @@ func constVal(c *ssa.Const) (ir.Val, error) {
 	if !ok {
 		return nil, fmt.Errorf("constant of unsupported type %s", c.Type())
 	}
+	// An integer constant written as a float (archive/zip's 1e2 as an
+	// int) is a Float in go/constant until converted.
+	iv := constant.ToInt(c.Value)
+	if iv.Kind() != constant.Int {
+		return nil, fmt.Errorf("constant %s of type %s is not an integer", c.Value, c.Type())
+	}
 	var bits uint64
 	if signed {
-		i, _ := constant.Int64Val(c.Value)
+		i, _ := constant.Int64Val(iv)
 		bits = uint64(i)
 	} else {
-		bits, _ = constant.Uint64Val(c.Value)
+		bits, _ = constant.Uint64Val(iv)
 	}
 	if w < 64 {
 		bits &= (1 << uint(w)) - 1
