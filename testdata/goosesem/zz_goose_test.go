@@ -182,6 +182,7 @@ func TestGoose(t *testing.T) {
 		"testNetPipeWriteRead": testNetPipeWriteRead,
 		"testNetSplitHostPort": testNetSplitHostPort,
 		"testNilDefault": testNilDefault,
+		"testNilInterfaceCallPanics": testNilInterfaceCallPanics,
 		"testNilVal": testNilVal,
 		"testOnceRunsOnce": testOnceRunsOnce,
 		"testOrCompare": testOrCompare,
