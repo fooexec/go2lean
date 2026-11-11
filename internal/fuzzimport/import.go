@@ -112,7 +112,7 @@ func translate(p *packages.Package) ([]byte, []Skipped) {
 		}
 		b.WriteString(")\n\n")
 	}
-	b.WriteString("// go2leanSink evaluates the arguments of a t.Log or t.Error call.\nfunc go2leanSink(...any) {}\n")
+	b.WriteString("// go2leanSink evaluates the arguments of a t.Log or t.Error call.\nfunc go2leanSink(...interface{}) {}\n")
 	for _, f := range funcs {
 		b.WriteString("\n")
 		b.WriteString(f)
