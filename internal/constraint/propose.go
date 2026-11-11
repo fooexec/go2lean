@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/andreasfoo/go2lean/internal/contract"
+	"github.com/andreasfoo/go2lean/internal/geninst"
 )
 
 var nonIdent = regexp.MustCompile(`[^A-Za-z0-9_]`)
@@ -37,14 +38,18 @@ func Propose(ws contract.Workspace, report *contract.ModelReport) ([]*contract.P
 	for _, f := range report.Funcs {
 		// Generic instances (Map[int]) are modelled for their callers; a
 		// harness cannot name them.
-		if f.Status == contract.ModelRejected || f.SpecFor != "" || f.SequenceFor != "" || f.Closure || f.WrappedBy != "" || f.CtorOnly != "" || f.TestFile || f.Init || strings.Contains(f.Name, "[") {
+		// A wrapper of a generic function at simple type arguments
+		// (internal/geninst) is a target, though in a test file.
+		genWrapper := strings.HasPrefix(f.Name, geninst.Prefix)
+		if f.Status == contract.ModelRejected || f.SpecFor != "" || f.SequenceFor != "" || f.Closure || f.WrappedBy != "" || f.CtorOnly != "" || (f.TestFile && !genWrapper) || f.Init || strings.Contains(f.Name, "[") {
 			continue
 		}
+		shown := geninst.Display(f.Name)
 		out = append(out, &contract.Property{
 			ID:       PropertyID(contract.PackageKey(report.Package), key[f.Name], "nopanic"),
 			Target:   contract.TargetID(report.Package, key[f.Name]),
 			Kind:     contract.KindNoPanic,
-			NL:       fmt.Sprintf("%s does not panic on any input", f.Name),
+			NL:       fmt.Sprintf("%s does not panic on any input", shown),
 			Frontend: report.Frontend,
 			Source:   "template",
 		})
@@ -54,7 +59,7 @@ func Propose(ws contract.Workspace, report *contract.ModelReport) ([]*contract.P
 				ID:       PropertyID(contract.PackageKey(report.Package), key[f.Name], "nohang"),
 				Target:   contract.TargetID(report.Package, key[f.Name]),
 				Kind:     contract.KindNoHang,
-				NL:       fmt.Sprintf("%s returns on every input (no run comes back to a state)", f.Name),
+				NL:       fmt.Sprintf("%s returns on every input (no run comes back to a state)", shown),
 				Frontend: report.Frontend,
 				Source:   "template",
 			})

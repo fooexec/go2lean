@@ -204,7 +204,7 @@ memory).
 | static call in the package | `call` | exact |
 | call into another package compiled together (`-deps`) | `xcall` (the driver links the models) | exact; a dependency's functions are translated up to 4 calls deep from the package under test, except its small helpers (a few blocks: `xxhash`'s `round`, `rol1`), which come with their caller at any depth (#71); deeper ones on request of the refinement loop (#85) |
 | closures, function values, method values | `funcRef`/`xfuncRef` + `callv` (captured values first) | exact; nil func call panics; an unknown func takes the fallback |
-| generic functions | modelled per instance (`Must[int]`, concrete types); the generic function itself is not in the model; instances of package `slices` under `-deps` | partial |
+| generic functions | modelled per instance (`Must[int]`, concrete types); the generic function itself is not in the model; instances of package `slices` under `-deps`. `run` instantiates each exported generic function at simple type arguments through a test-file wrapper (`-generics`, `internal/geninst`), which is a target | partial: one instance per function |
 | call into a logging package (logrus, log, slog, zap) | results opaque, calls without results ignored | exact for the code under test |
 | `apijson.UnmarshalRoot` (the SDKs' `UnmarshalJSON`, unions' `As*` methods) | `jsonDecode` with the target type's description | as JSON decoding above |
 | call to an unmodelled function with a result | `havocInto`: scalars havoc; structs havoc field by field (an array field of up to 16 scalars element by element; another field the model cannot vary is its zero value, recorded as an assumption, #68); pointers to a fresh struct of havoc fields; slices of 0–3 zero elements (assumption); interfaces/maps/funcs unknown | havoc / assumption |
@@ -506,8 +506,9 @@ suite's methods, `func (s) TestY(t *testing.T)` as grpc-go's
 `t.Run(name, f)` calls `f(t)` and returns true (under `-run TestX/sub`, on
 the test's own `t`, only when `sub` matches the name), and the subtest's closure
 is translated with its test's `t`, #48; calls on `t` itself are ignored);
-generic functions as targets (their instances are not targets either:
-a harness cannot name them).
+generic functions as targets, except through `run`'s wrappers at simple
+type arguments (`-generics`); other instances are not targets: a harness
+cannot name them.
 
 Not rejected but worth knowing: `range` over an integer (Go 1.22) is an
 ordinary loop in go/ssa and exact; `range` over a function iterator (Go
