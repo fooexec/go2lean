@@ -603,6 +603,10 @@ type Term struct {
 	// Fallback is the block run instead of Next when the callee gets
 	// stuck: it binds Dst to a havoc value, as an unmodelled call would.
 	Fallback int
+	// Catch, on a call in a function whose defer recovers (#181): the
+	// block the frame goes on at when the callee panics or its func value
+	// is nil (Lean's `.catch`). 0 is none: the entry block is never one.
+	Catch int
 	// Sync is the operation of a TermSync.
 	Sync SyncOp
 }
@@ -753,6 +757,11 @@ func (p *Prog) Validate() error {
 				if err := checkBlock(t.Next, where+" call continuation"); err != nil {
 					return err
 				}
+				if t.Catch != 0 {
+					if err := checkBlock(t.Catch, where+" call catch"); err != nil {
+						return err
+					}
+				}
 				if err := checkBlock(t.Fallback, where+" call fallback"); err != nil {
 					return err
 				}
@@ -784,10 +793,14 @@ func (t *Term) Succs() []int {
 	case TermBr:
 		return []int{t.T, t.F}
 	case TermCall, TermXCall, TermCallV:
+		succs := []int{t.Next}
 		if t.Fallback > 0 {
-			return []int{t.Next, t.Fallback}
+			succs = append(succs, t.Fallback)
 		}
-		return []int{t.Next}
+		if t.Catch > 0 {
+			succs = append(succs, t.Catch)
+		}
+		return succs
 	case TermSpawn, TermSync:
 		return []int{t.Next}
 	}

@@ -140,7 +140,7 @@ def xrefs (p : GoSSA.Prog) : List String :=
         | .op _ (.xfuncRef pkg _) _ => if acc.contains pkg then acc else pkg :: acc
         | _ => acc
       match blk.term with
-      | .xcall pkg .. => if acc.contains pkg then acc else pkg :: acc
+      | .xcall pkg .. | .catch (.xcall pkg ..) _ => if acc.contains pkg then acc else pkg :: acc
       | _ => acc
 
 /-- The functions of `p` renumbered for a merged program: FuncIds move up by
@@ -159,13 +159,17 @@ def shiftFuncs (p : GoSSA.Prog) (fbase hbase : Nat) (base : String → Option Na
             | some b => .op dst (.funcRef (f + b)) args
             | none => .op dst (.xfuncRef pkg f) args
           | i => i
-        term := match blk.term with
-          | .call f args dst next nargs fb => .call (f + fbase) args dst next nargs fb
-          | .xcall pkg f args dst next nargs fb =>
-            match base pkg with
-            | some b => .call (f + b) args dst next nargs fb
-            | none => .xcall pkg f args dst next nargs fb
-          | t => t } }
+        term :=
+          let relink : SSA.Term → SSA.Term := fun
+            | .call f args dst next nargs fb => .call (f + fbase) args dst next nargs fb
+            | .xcall pkg f args dst next nargs fb =>
+              match base pkg with
+              | some b => .call (f + b) args dst next nargs fb
+              | none => .xcall pkg f args dst next nargs fb
+            | t => t
+          match blk.term with
+          | .catch t pb => .catch (relink t) pb
+          | t => relink t } }
 
 /-- The models reachable from `todo` through `xcall`s, in discovery order. -/
 partial def closure (registry : List (String × GoSSA.Prog)) (todo seen : List String) :

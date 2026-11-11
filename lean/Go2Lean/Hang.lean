@@ -138,6 +138,29 @@ partial def runBlock (p : Prog) (or : Oracle) (h : Havoc Val) (fn : Func) (bid :
         | .spawn .. | .sync .. => .ok (.panic .modelStuck, s)
         | .xcall _ _ _ _ _ _ fb =>
           goto fb (enter fn fb env []) (s.assume "a call into a package not linked into the model: its effects are not modelled")
+        | .catch inner pb =>
+          -- A recovering frame (#181): a callee's panic goes on at `pb`.
+          let caught := fun (s' : HState Val) => goto pb (enter fn pb env []) { s' with panicAt := s.panicAt }
+          let callC := fun (f : FuncId) (args : List Val) (dst next fb : BlockId) (nargs : List Var) =>
+            match runFunc p or h f args s fuel with
+            | .error l => .error l
+            | .ok (.ok v, s') => goto next (enter fn next (env.set! dst v) nargs) s'
+            | .ok (.panic k, s') =>
+              if k.isStuck then
+                let s'' := { s' with heap := s.heap, stuck := s.stuck }
+                goto fb (enter fn fb env []) (s''.assume (stuckCallNote p f))
+              else caught s'
+            | .ok (.outOfFuel, s') => .ok (.outOfFuel, s')
+          match inner with
+          | .call f args dst next nargs fb => callC f (args.map (env[·]!)) dst next fb nargs
+          | .callv fv args dst next nargs fb =>
+            match Dialect.callee (Op := Op) env[fv]! with
+            | .nil => caught s
+            | .unknown => goto fb (enter fn fb env []) (s.assume "a call through a function value the model does not know: its effects are not modelled")
+            | .known f bound => callC f (bound ++ args.map (env[·]!)) dst next fb nargs
+          | .xcall _ _ _ _ _ _ fb =>
+            goto fb (enter fn fb env []) (s.assume "a call into a package not linked into the model: its effects are not modelled")
+          | _ => .ok (.panic .modelStuck, s)
 
 partial def runFunc (p : Prog) (or : Oracle) (h : Havoc Val) (fid : FuncId) (args : List Val)
     (s : HState Val) : (fuel : Nat) → R

@@ -37,6 +37,9 @@ structure Frame where
   dst : Var := 0
   next : BlockId := 0
   nargs : List Var := []
+  /-- Pushed by a `catch` call (#181): a panic of this frame, or of one
+  above it, goes on in the caller at this block. -/
+  catchB : Option BlockId := none
 
 instance : Inhabited Frame :=
   ⟨{ fn := { name := "", params := [], nvals := 0, entry := 0, blocks := #[] }, bid := 0, env := #[] }⟩
@@ -74,12 +77,29 @@ def returnTo (fr : Frame) (v : Val) : List Frame → Option (List Frame)
     some ({ c with env := env, bid := fr.next, atTerm := false } :: rest)
   | [] => none
 
+/-- The frames after a panic of the top one, when a `catch` call below
+recovers it: the frames up to the one it pushed are dropped, and its caller
+goes on at the catch block (#181). None when no frame recovers. -/
+def caughtBy : List Frame → Option (List Frame)
+  | [] => none
+  | f :: rest =>
+    match f.catchB, rest with
+    | some pb, c :: rest' => some ({ c with env := enter c.fn pb c.env [], bid := pb, atTerm := false } :: rest')
+    | some _, [] => none
+    | none, _ => caughtBy rest
+
 /-- Run the top frame's blocks until the goroutine reaches a `spawn` or
 `sync`, returns from its first frame, or panics. -/
 def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val → Nat → Stop × HState Val
   | [], s, _ => (.panicked .modelStuck, s)
   | _, s, 0 => (.outOfFuel, s)
   | fr :: rest, s, fuel + 1 =>
+    -- A panic in this frame: a `catch` call below recovers it, if any.
+    let fail := fun (k : PanicKind) (s' : HState Val) =>
+      if k.isStuck then (.panicked k, s') else
+      match caughtBy (fr :: rest) with
+      | some frames => advance p or h frames { s' with panicAt := none } fuel
+      | none => (.panicked k, s')
     if fr.atTerm then (.atSync (fr :: rest), s) else
     match fr.fn.blocks[fr.bid]? with
     | none => (.panicked .modelStuck, s)
@@ -91,7 +111,7 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
         let s := match s.panicAt with
           | some site => if site.startsWith "@" then s else { s with panicAt := some s!"@{fr.fn.name}#{fr.bid}: {site}" }
           | none => { s with panicAt := some s!"@{fr.fn.name}#{fr.bid}" }
-        (.panicked k, s)
+        fail k s
       | (.outOfFuel, s) => (.outOfFuel, s)
       | (.ok env, s) =>
         let goto := fun (b : BlockId) (env : Env Val) (args : List Var) =>
@@ -109,7 +129,7 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
               -- rollback (`SSA.runFuncF`).
               match runFuncF p or h true f vals s fuel with
               | (.ok v, s') => advance p or h (goto next (env.set! dst v) nargs) s' fuel
-              | (.panic k, s') => (.panicked k, s')
+              | (.panic k, s') => fail k s'
               | (.outOfFuel, s') => (.outOfFuel, s')
             else
               match runFunc p or h true f vals s fuel with
@@ -120,7 +140,7 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
                   -- site would be reported at the callee's place (#71).
                   let s'' := { s' with heap := s.heap, stuck := s.stuck, panicAt := s.panicAt }
                   advance p or h (goto fb env []) (s''.assume (stuckCallNote p f)) fuel
-                else (.panicked k, s')
+                else fail k s'
               | (.outOfFuel, s') => (.outOfFuel, s')
         match blk.term with
         | .ret v =>
@@ -133,11 +153,11 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
           | some true => advance p or h (goto t env ta) s fuel
           | some false => advance p or h (goto f env fa) s fuel
           | none => (.panicked .modelStuck, s)
-        | .panic k => (.panicked k, s)
+        | .panic k => fail k s
         | .call f args dst next nargs fb => call f (args.map (env[·]!)) dst next nargs fb
         | .callv fv args dst next nargs fb =>
           match Dialect.callee (Op := Go2Lean.GoSSA.Op) env[fv]! with
-          | .nil => (.panicked .nilDereference, s)
+          | .nil => fail .nilDereference s
           | .unknown => advance p or h (goto fb env [])
               (s.assume "a call through a function value the model does not know: its effects are not modelled") fuel
           | .known f bound => call f (bound ++ args.map (env[·]!)) dst next nargs fb
@@ -145,6 +165,45 @@ def advance (p : Prog) (or : Oracle) (h : Havoc Val) : List Frame → HState Val
           advance p or h (goto fb env [])
             (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
         | .spawn .. | .sync .. => (.atSync ({ fr with env, atTerm := true } :: rest), s)
+        | .catch inner pb =>
+          -- A recovering frame (#181): a callee's panic, or a nil func
+          -- value, goes on at `pb`. A callee the machine steps (one that
+          -- synchronises) is not caught: its panic ends the goroutine.
+          let caught := fun (s' : HState Val) =>
+            advance p or h (goto pb env []) { s' with panicAt := s.panicAt } fuel
+          let callC := fun (f : FuncId) (vals : List Val) (dst next : BlockId) (nargs : List Var) (fb : BlockId) =>
+            match p.funcs[f]? with
+            | none => (.panicked .modelStuck, s)
+            | some callee =>
+              if callee.sync then
+                -- Stepped by the machine: its frame carries the catch block.
+                advance p or h ({ entryFrame callee vals with dst, next, nargs, catchB := some pb } :: { fr with env } :: rest) s fuel
+              else if s.fast then
+                match runFuncF p or h true f vals s fuel with
+                | (.ok v, s') => advance p or h (goto next (env.set! dst v) nargs) s' fuel
+                | (.panic k, s') => if k.isStuck then (.panicked k, s') else caught s'
+                | (.outOfFuel, s') => (.outOfFuel, s')
+              else
+                match runFunc p or h true f vals s fuel with
+                | (.ok v, s') => advance p or h (goto next (env.set! dst v) nargs) s' fuel
+                | (.panic k, s') =>
+                  if k.isStuck then
+                    let s'' := { s' with heap := s.heap, stuck := s.stuck, panicAt := s.panicAt }
+                    advance p or h (goto fb env []) (s''.assume (stuckCallNote p f)) fuel
+                  else caught s'
+                | (.outOfFuel, s') => (.outOfFuel, s')
+          match inner with
+          | .call f args dst next nargs fb => callC f (args.map (env[·]!)) dst next nargs fb
+          | .callv fv args dst next nargs fb =>
+            match Dialect.callee (Op := Go2Lean.GoSSA.Op) env[fv]! with
+            | .nil => caught s
+            | .unknown => advance p or h (goto fb env [])
+                (s.assume "a call through a function value the model does not know: its effects are not modelled") fuel
+            | .known f bound => callC f (bound ++ args.map (env[·]!)) dst next nargs fb
+          | .xcall _ _ _ _ _ _ fb =>
+            advance p or h (goto fb env [])
+              (s.assume "a call into a package not linked into the model: its effects are not modelled") fuel
+          | _ => (.panicked .modelStuck, s)
 
 /-! ## Pending operations -/
 
