@@ -1071,6 +1071,10 @@ func buildDriver(coreDir, leanDir string) error {
 		return nil
 	}
 	if err := locked(coreDir, func() error {
+		if _, err := os.Stat(filepath.Join(coreDir, ".lake", "build", "lib")); err != nil {
+			// The first run on a machine builds go2lean's Lean runtime.
+			fmt.Fprintln(os.Stderr, "go2lean: building its Lean runtime, once per machine and version (a few minutes)...")
+		}
 		if out, err := lake(coreDir, "build", "Go2Lean"); err != nil {
 			return fmt.Errorf("lake build Go2Lean (core): %w\n%s", err, out)
 		}

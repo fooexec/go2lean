@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -63,6 +64,12 @@ type Env struct {
 	// Translate names dependency functions to translate whatever their
 	// depth (gossa.Options.Translate); the refinement loop adds to it.
 	Translate []string
+	// Models is the directory of user models (gossa.Options.Models, #204).
+	Models string
+	// Quiet prints counts for the compile stage and the properties, and
+	// in the hunt stage only the properties a counterexample was found
+	// for (run's default; run -v prints every function and property).
+	Quiet bool
 	// Unexported also searches the no_panic and no_hang templates of
 	// unexported functions and of methods of unexported types. Without it
 	// they are skipped unless -run names them: what they find depends on
@@ -138,7 +145,7 @@ func CompileLinked(w contract.Workspace, env Env, pattern string, out io.Writer)
 	if err := validateCompareOrderOverlay(env); err != nil {
 		return nil, err
 	}
-	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: true, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest}, pattern)
+	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: true, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest, Models: env.Models}, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +205,7 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 	if err := validateCompareOrderOverlay(env); err != nil {
 		return nil, err
 	}
-	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: env.Deps, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest}, patterns...)
+	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: env.Deps, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest, Models: env.Models}, patterns...)
 	if err != nil {
 		return nil, err
 	}
@@ -220,8 +227,21 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 		if err != nil {
 			return nil, err
 		}
-		fmt.Fprintf(out, "compiled %s -> %s\n", prog.Package, filepath.Join(w.Root, report.LeanFile))
+		if env.Quiet {
+			n := map[contract.ModelStatus]int{}
+			for _, f := range report.Funcs {
+				n[f.Status]++
+			}
+			fmt.Fprintf(out, "compiled %s: %d functions (%d complete, %d partial, %d rejected; -v lists them)\n",
+				prog.Package, len(report.Funcs), n[contract.ModelComplete], n[contract.ModelPartial], n[contract.ModelRejected])
+		}
+		if !env.Quiet {
+			fmt.Fprintf(out, "compiled %s -> %s\n", prog.Package, filepath.Join(w.Root, report.LeanFile))
+		}
 		for _, f := range report.Funcs {
+			if env.Quiet {
+				break
+			}
 			fmt.Fprintf(out, "  %-12s %-9s %s", f.Name, f.Status, f.GoSig)
 			if f.SpecFor != "" {
 				fmt.Fprintf(out, "  [spec for %s]", f.SpecFor)
@@ -248,6 +268,19 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 		fmt.Fprintf(out, "compiled builtin snapshot: %s (explicit ordering/purity/totality assumptions; not a passed check)\n", ref.SnapshotSHA256)
 	}
 	return reports, nil
+}
+
+// ModelsDir is the user-models directory a run uses (#204): dir when
+// given, else the module's .go2lean/models when it exists.
+func (env Env) ModelsDir(dir string) string {
+	if dir != "" {
+		return dir
+	}
+	d := filepath.Join(env.module(), gossa.UserModelsDir)
+	if fi, err := os.Stat(d); err == nil && fi.IsDir() {
+		return d
+	}
+	return ""
 }
 
 // Propose runs M2's property templates and prints them.
@@ -303,7 +336,9 @@ func Hunt(w contract.Workspace, env Env, p *contract.Property, opts constraint.S
 		return nil, err
 	}
 	if cx == nil {
-		fmt.Fprintf(out, "  %-28s %s\n", p.ID, summary)
+		if !env.Quiet {
+			fmt.Fprintf(out, "  %-28s %s\n", p.ID, summary)
+		}
 		return nil, nil
 	}
 	fmt.Fprintf(out, "  %-28s %s -> %s\n", p.ID, summary, cx.ID)
@@ -790,7 +825,11 @@ func refine(w contract.Workspace, env Env, opts constraint.SearchOptions, out io
 
 func runReport(w contract.Workspace, env Env, report *contract.ModelReport, opts constraint.SearchOptions, out io.Writer) (*Result, error) {
 	fmt.Fprintln(out, "== Spec & search stage: properties")
-	props, err := Propose(w, report, out)
+	propOut := out
+	if env.Quiet {
+		propOut = io.Discard
+	}
+	props, err := Propose(w, report, propOut)
 	if err != nil {
 		return nil, err
 	}
@@ -816,6 +855,9 @@ func runReport(w contract.Workspace, env Env, report *contract.ModelReport, opts
 				}
 			}
 		}
+	}
+	if env.Quiet {
+		fmt.Fprintf(out, "  %s to search (-v lists them)\n", plural(len(props), "property"))
 	}
 	fmt.Fprintln(out, "== Spec & search stage: hunt")
 	cxs, err := HuntAll(w, env, props, opts, out)
