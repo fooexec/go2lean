@@ -6350,7 +6350,10 @@ func planCells(units []unit) *cellPlan {
 			for _, b := range f.Blocks {
 				for _, in := range b.Instrs {
 					if st, ok := in.(*ssa.Store); ok {
-						if g, ok := st.Addr.(*ssa.Global); ok {
+						// The variable itself, or an element or field of it
+						// (go-runewidth's fillJoinerBits paints joinerBits[i],
+						// #184).
+						if g := storedGlobal(st.Addr); g != nil {
 							written[g] = true
 						}
 					}
@@ -6516,12 +6519,16 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 		return nil, nil
 	}
 	stores := map[*ssa.Global][]*ssa.Store{}
+	all := map[*ssa.Global][]*ssa.Store{} // every variable's, used or not
 	for _, f := range initFuncs(initFn) {
 		for _, b := range f.Blocks {
 			for _, in := range b.Instrs {
 				if st, ok := in.(*ssa.Store); ok {
-					if g, ok := st.Addr.(*ssa.Global); ok && used[g] {
-						stores[g] = append(stores[g], st)
+					if g, ok := st.Addr.(*ssa.Global); ok {
+						all[g] = append(all[g], st)
+						if used[g] {
+							stores[g] = append(stores[g], st)
+						}
 					}
 				}
 			}
@@ -6544,6 +6551,42 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 		if len(sts) == 1 && builtValue(sts[0].Val, spkg) {
 			roots = append(roots, sts[0])
 			cells[g] = true
+			continue
+		}
+		// An alias of a variable of the package that the initializer
+		// builds (unicode's var Letter = _L, var _L = &RangeTable{...},
+		// #184): both are cells, the source's store in the slice too. A
+		// lookup table (a map of constants) is zeroGlobals' alias instead.
+		if u, ok := sts[0].Val.(*ssa.UnOp); ok && len(sts) == 1 && u.Op == token.MUL {
+			if src, ok := u.X.(*ssa.Global); ok && src.Pkg == spkg && len(all[src]) == 1 && builtValue(all[src][0].Val, spkg) {
+				if mm, isMap := all[src][0].Val.(*ssa.MakeMap); isMap && constMapEntries(mm) != nil {
+					continue
+				}
+				roots = append(roots, all[src][0], sts[0])
+				cells[g], cells[src] = true, true
+			}
+		}
+	}
+	// A call in a func init() of a package function that writes a used
+	// variable (go-runewidth's init calls fillJoinerBits, which paints
+	// joinerBits, #184): the call is in the slice, and the callee with it
+	// (withInitCallees). The variable is a cell: a function other than
+	// init writes it.
+	for _, f := range initFuncs(initFn)[1:] {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				c, ok := in.(*ssa.Call)
+				if !ok {
+					continue
+				}
+				callee := c.Call.StaticCallee()
+				if callee == nil || callee.Pkg != spkg || callee.Parent() != nil || len(c.Call.Args) != 0 {
+					continue
+				}
+				if writesUsed(callee, used) {
+					roots = append(roots, in)
+				}
+			}
 		}
 	}
 	if len(roots) == 0 {
@@ -6708,6 +6751,38 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 	return false
 }
 
+// storedGlobal is the package variable an address is in: the variable
+// itself, or an element or field of it (an array, a struct), else nil.
+func storedGlobal(v ssa.Value) *ssa.Global {
+	for {
+		switch x := v.(type) {
+		case *ssa.Global:
+			return x
+		case *ssa.IndexAddr:
+			v = x.X
+		case *ssa.FieldAddr:
+			v = x.X
+		default:
+			return nil
+		}
+	}
+}
+
+// writesUsed says whether f stores into a package variable of used, at
+// its top or into an element or field of it.
+func writesUsed(f *ssa.Function, used map[*ssa.Global]bool) bool {
+	for _, b := range f.Blocks {
+		for _, in := range b.Instrs {
+			if st, ok := in.(*ssa.Store); ok {
+				if g := storedGlobal(st.Addr); g != nil && used[g] {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // knownIface says whether v, stored into an interface variable by its
 // initializer, is a value the model knows: a load of a shim's variable
 // (crypto/rand.Reader reads randmodel.Reader, itself such a cell), or a
@@ -6729,6 +6804,14 @@ func holdsSync(t types.Type) bool {
 	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "sync" {
 		switch n.Obj().Name() {
 		case "Mutex", "RWMutex", "WaitGroup", "Once":
+			return true
+		}
+	}
+	// sync/atomic's values (atomicCall): go-runewidth's package-level
+	// strictWidthLUTLimit atomic.Int32 (#184).
+	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "sync/atomic" {
+		switch n.Obj().Name() {
+		case "Bool", "Int32", "Int64", "Uint32", "Uint64":
 			return true
 		}
 	}
@@ -9028,7 +9111,10 @@ func zeroVal(t types.Type) (ir.Val, bool) {
 		}
 		return ir.StructVal{Fields: fields}, true
 	case *types.Array:
-		if u.Len() > 4096 {
+		// Up to 64K elements (go-runewidth's 8096-byte joinerBits, #184):
+		// a zero array is one element replicated in Lean (ArrVal.Lean),
+		// and large heap arrays are updated in place (#71).
+		if u.Len() > 65536 {
 			return nil, false
 		}
 		z, ok := zeroVal(u.Elem())
