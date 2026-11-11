@@ -224,7 +224,7 @@ strLen strIndex strSlice strConcat bytesToStr strToBytes strToRunes runesToStr
 utf16Encode strCut strLastIndexByte runeToStr strNext strHasPrefix strHasSuffix
 strContains strIndexOf strTrimSpace strTrimPrefix strTrimSuffix strAtoi strItoa
 strParseInt strParseUint strParseBool strFormatInt strFormatUint eqDeep neDeep
-hexEncode base64Decode base64Encode sprintf sprintfOk deepEqual deepEqualOk reCompileOk reflectOf reflectIsZero
+hexEncode base64Decode base64Encode sprintf sprintfOk deepEqual deepEqualOk reCompileOk reNumSubexp reQuoteMeta reflectOf reflectIsZero
 errNew errKnown nilKnown isNilOpaque makeMap mapDelete mapLen mapRange mapUpdate
 jsonValid strIndexByte strLastIndex strCount strEqualFold strTrim strTrimLeft
 strTrimRight strToLower strToUpper strReplaceAll strSplit strFields strJoin

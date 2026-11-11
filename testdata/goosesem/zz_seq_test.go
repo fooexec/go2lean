@@ -578,8 +578,17 @@ func SeqTestReflectCallNoArgs() bool { return testReflectCallNoArgs() }
 // go2lean:sequence testRegexpBytesIndex
 func SeqTestRegexpBytesIndex() bool { return testRegexpBytesIndex() }
 
+// go2lean:sequence testRegexpCompileError
+func SeqTestRegexpCompileError() bool { return testRegexpCompileError() }
+
+// go2lean:sequence testRegexpCompileNamed
+func SeqTestRegexpCompileNamed() bool { return testRegexpCompileNamed() }
+
 // go2lean:sequence testRegexpPackageVarPattern
 func SeqTestRegexpPackageVarPattern() bool { return testRegexpPackageVarPattern() }
+
+// go2lean:sequence testRegexpQuoteMeta
+func SeqTestRegexpQuoteMeta() bool { return testRegexpQuoteMeta() }
 
 // go2lean:sequence testRegexpRuntimeAltLazy
 func SeqTestRegexpRuntimeAltLazy() bool { return testRegexpRuntimeAltLazy() }

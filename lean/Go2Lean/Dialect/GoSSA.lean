@@ -420,6 +420,12 @@ inductive Op where
   model compiles it (`reCompile`), 1 when Go rejects it, 2 when the model
   does not take its syntax (#46). -/
   | reCompileOk
+  /-- `(*regexp.Regexp).NumSubexp()` on a regexp built at run time: its
+  capture groups, as `reCompile` parses them (#173). -/
+  | reNumSubexp
+  /-- `regexp.QuoteMeta(s)`: `s` with a backslash before each of
+  `\.+*?()|[]{}^$`, as Go's (#173). -/
+  | reQuoteMeta
   /-- `reflect.DeepEqual(x, y)` on values the program built (#46). -/
   | deepEqual
   /-- Can `deepEqual` decide on these values? -/
@@ -1480,7 +1486,21 @@ def reAtom (rs : Array Nat) : Nat → Nat → Nat → Except ReErr (ReAst × Nat
           match reAlt rs fuel (i + 3) g with
           | .ok (x, j, g) => if rs[j]? == some 41 then .ok (x, j + 1, g) else .error 1
           | .error e => .error e
-        else .error 2 -- flags, named groups
+        else
+          -- A named group, `(?P<name>re)` or `(?<name>re)`: a capture like
+          -- `(re)`; its name only matters to SubexpNames (gorilla/mux's
+          -- route patterns, #173). A name that is not a word is an error.
+          let nameAt := if rs[i + 2]? == some 80 && rs[i + 3]? == some 60 then some (i + 4)
+            else if rs[i + 2]? == some 60 then some (i + 3) else none
+          match nameAt with
+          | none => .error 2 -- flags
+          | some n =>
+            let word := fun (c : Nat) => (48 ≤ c && c ≤ 57) || (65 ≤ c && c ≤ 90) || (97 ≤ c && c ≤ 122) || c == 95
+            let len := ((rs.extract n rs.size).toList.takeWhile word).length
+            if len == 0 || rs[n + len]? != some 62 then .error 1 else
+            match reAlt rs fuel (n + len + 1) (g + 1) with
+            | .ok (x, j, g') => if rs[j]? == some 41 then .ok (.cap (g + 1) x, j + 1, g') else .error 1
+            | .error e => .error e
       else
         match reAlt rs fuel (i + 1) (g + 1) with
         | .ok (x, j, g') => if rs[j]? == some 41 then .ok (.cap (g + 1) x, j + 1, g') else .error 1
@@ -1581,7 +1601,7 @@ def reMaxInsts : Nat := 4000
 /-- Compile a pattern (its bytes) as `regexp.Compile` does (Perl syntax):
 the program, its start and its capture count; error 1 when Go rejects it, 2
 when the model does not take its syntax (flags, Unicode classes, `\p`,
-`\x`, named groups, POSIX classes) or it is too large (#46). -/
+`\x`, flags, POSIX classes) or it is too large (#46). -/
 def reCompile (pat : List Nat) : Except ReErr (List ReInst × Nat × Nat) :=
   let rec runes (fuel i : Nat) : List Nat :=
     match fuel with
@@ -1765,6 +1785,10 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
       | some _ => true
       | none => false
     | _ => false))
+  | .reNumSubexp, [.boxed _ (.str r o l)] =>
+    match strBytes heap (.str r o l) >>= fun b => (reCompile b).toOption with
+    | some (_, _, slots) => .ok (.int 64 (BitVec.ofNat 64 (slots / 2 - 1)))
+    | none => .panic .modelStuck
   | .reCompileOk, [p] => .ok (.int 64 (BitVec.ofNat 64 (match strBytes heap p with
     | some b => match reCompile b with | .ok _ => 0 | .error e => e
     | none => 2)))
@@ -3739,6 +3763,13 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
     match strBytes heap s with
     | some x =>
       let r := replacePairs pairs x
+      if r.length > strLimit then .panic .modelStuck else .ok (strAlloc heap r)
+    | none => .panic .modelStuck
+  | .reQuoteMeta, [s] =>
+    match strBytes heap s with
+    | some x =>
+      let special := [92, 46, 43, 42, 63, 40, 41, 124, 91, 93, 123, 125, 94, 36]
+      let r := x.flatMap fun c => if special.contains c then [92, c] else [c]
       if r.length > strLimit then .panic .modelStuck else .ok (strAlloc heap r)
     | none => .panic .modelStuck
   | .strReplaceAll, [s, o, n] =>
