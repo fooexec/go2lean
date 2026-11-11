@@ -52,8 +52,9 @@ findings the summary shows: a caller can reach them, or a spec fails.
   `lo.Try` calls its callback under a `recover`. In the model, `recover()`
   is always nil and a panic ends the run, so a nil callback gives 4
   spurious findings.
-- **Interface-typed package variables**
-  ([#182](https://github.com/fooexec/go2lean/issues/182)). In uuid,
+- **Interface-typed package variables** (fixed,
+  [#182](https://github.com/fooexec/go2lean/issues/182): uuid now has 0
+  spurious findings). In uuid,
   `var rander = rand.Reader` starts as an unknown non-nil reader. The model
   never builds an initializer cell of interface type (#55), so
   `io.ReadFull(rander, …)` may fail there and `Must` panic: 23 spurious

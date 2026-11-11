@@ -405,9 +405,12 @@ linked package write are shared cells, so their races are seen. Which
 variables are cells is decided once for the whole program, so every
 package reads and writes a variable the same way (#55). A cell starts at the variable's zero
 value, at the one constant its initializer stores, or, for an interface
-its initializer builds (`var logger Logger = &std{}`, or a call of a
-function that returns one), at an opaque
-non-nil value whose method calls are havoc (#55). A
+its initializer builds through a call (a function that returns one), at
+an opaque non-nil value whose method calls are havoc (#55). An interface
+whose initializer boxes a value it builds (`var logger Logger = &std{}`)
+or copies a shim's variable (google/uuid's `var rander = rand.Reader`,
+the crypto/rand shim's reader) is built by the initializer's slice like
+the cells below, so calls on it dispatch to its dynamic type (#182). A
 variable that linked functions use and that the package initializer sets once to a value
 it builds (a new object, map, slice or channel, made in place or by a call
 of a function of the package, or of a function literal called where it is

@@ -6519,6 +6519,14 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 	cells := map[*ssa.Global]bool{}
 	for g, sts := range stores {
 		if _, iface := g.Type().(*types.Pointer).Elem().Underlying().(*types.Interface); iface {
+			// An interface is a cell only when the model knows the value
+			// it holds (#182): crypto/rand.Reader, which the shim models
+			// (google/uuid's var rander = rand.Reader), or a value the
+			// initializer builds and boxes (var logger Logger = &std{}).
+			if len(sts) == 1 && knownIface(sts[0].Val, spkg) {
+				roots = append(roots, sts[0])
+				cells[g] = true
+			}
 			continue
 		}
 		if len(sts) == 1 && builtValue(sts[0].Val, spkg) {
@@ -6684,6 +6692,21 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 		}
 		return fn != nil && fn.Parent() == nil && !isInit(fn.Name()) &&
 			(fn.Pkg == spkg || fn.Pkg != nil && modelledStdlib[fn.Pkg.Pkg.Path()])
+	}
+	return false
+}
+
+// knownIface says whether v, stored into an interface variable by its
+// initializer, is a value the model knows: a load of a shim's variable
+// (crypto/rand.Reader reads randmodel.Reader, itself such a cell), or a
+// value the initializer builds, boxed (#182).
+func knownIface(v ssa.Value, spkg *ssa.Package) bool {
+	if u, ok := v.(*ssa.UnOp); ok && u.Op == token.MUL {
+		g, ok := u.X.(*ssa.Global)
+		return ok && g.Pkg != nil && shimPaths[g.Pkg.Pkg.Path()]
+	}
+	if mi, ok := v.(*ssa.MakeInterface); ok {
+		return builtValue(mi.X, spkg)
 	}
 	return false
 }
