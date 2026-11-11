@@ -84,9 +84,10 @@ where 29 of 138 were.
 - **conc's `Stream.Go`** ([#198](https://github.com/fooexec/go2lean/issues/198)).
   The model reports a data race after getting stuck in `callbacker`, and
   the replay cannot follow the schedule into `conc/pool`: 1 inconclusive.
-- **Ranking** ([#194](https://github.com/fooexec/go2lean/issues/194),
-  [#195](https://github.com/fooexec/go2lean/issues/195)). A nil traced to
-  a `var` that every path assigns, and a struct whose fields break the
-  type's invariant, are ranked tier 1.
+- **Ranking** ([#195](https://github.com/fooexec/go2lean/issues/195)). A
+  struct whose fields break the type's invariant is ranked tier 1. (A nil
+  traced to a func value the caller calls first, go-toml's
+  `scanDigitsWithUnderscores`, is now tier 3: fixed,
+  [#194](https://github.com/fooexec/go2lean/issues/194).)
 - **Methods of generic types are not searched.** golang-lru is almost all
   of them (`LRU[K, V]`, `Cache[K, V]`): 7 properties.
