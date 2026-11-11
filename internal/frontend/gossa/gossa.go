@@ -1147,12 +1147,18 @@ func tableFunc(v ssa.Value) (*ssa.Function, bool) {
 }
 
 // testHelper says whether f exists for tests only: named ...ForTest or
-// ...ForTesting, or a closure inside one.
+// ...ForTesting, a benchmark, fuzz target or example (go2lean runs none of
+// them: gorilla/mux's BenchmarkNewRouterRegexpFunc swaps its
+// RegexpCompileFunc, #173), or a closure inside one.
 func testHelper(f *ssa.Function) bool {
 	for f.Parent() != nil {
 		f = f.Parent()
 	}
-	return strings.HasSuffix(f.Name(), "ForTest") || strings.HasSuffix(f.Name(), "ForTesting")
+	name := f.Name()
+	if f.Signature.Recv() == nil && (strings.HasPrefix(name, "Benchmark") || strings.HasPrefix(name, "Fuzz") || strings.HasPrefix(name, "Example")) {
+		return true
+	}
+	return strings.HasSuffix(name, "ForTest") || strings.HasSuffix(name, "ForTesting")
 }
 
 // addCtorWrappers adds, for each method of a type T whose package has a
@@ -4097,6 +4103,18 @@ func (t *fnState) call(x *ssa.Call) error {
 		return nil
 	}
 	callee := x.Call.StaticCallee()
+	if callee == nil {
+		// A call through a variable the initializer sets to regexp.Compile
+		// and nothing writes (gorilla/mux's var RegexpCompileFunc =
+		// regexp.Compile): a call of regexp.Compile (#173).
+		if u, ok := x.Call.Value.(*ssa.UnOp); ok && u.Op == token.MUL {
+			if g, ok := u.X.(*ssa.Global); ok {
+				if fn, ok := t.prog.zeros[g].(*ssa.Function); ok && fn.String() == "regexp.Compile" {
+					callee = fn
+				}
+			}
+		}
+	}
 	if callee != nil && callee.Pkg != nil && loggingPkg(callee.Pkg.Pkg.Path()) {
 		// A logger (logrus.WithContext, WithField, Debugf): its results only
 		// feed more logging calls. Not followed, even where its package is
@@ -4207,7 +4225,21 @@ func (t *fnState) call(x *ssa.Call) error {
 			return nil
 		}
 		if callee.String() == "regexp.MustCompile" && len(x.Call.Args) == 1 {
-			return t.regexpRuntime(x)
+			return t.regexpRuntime(x, false)
+		}
+		if callee.String() == "regexp.Compile" && len(x.Call.Args) == 1 {
+			return t.regexpRuntime(x, true)
+		}
+		if callee.String() == "regexp.QuoteMeta" && len(x.Call.Args) == 1 {
+			v, err := t.val(x.Call.Args[0])
+			if err != nil {
+				return err
+			}
+			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("reQuoteMeta"), Args: []ir.Var{v}})
+			return nil
+		}
+		if callee.String() == "(*regexp.Regexp).NumSubexp" && len(x.Call.Args) == 1 {
+			return t.regexpNumSubexp(x)
 		}
 		if done, err := t.randBounded(x, callee); done || err != nil {
 			return err
@@ -5868,7 +5900,7 @@ func regexpValue(pat string) ir.Val {
 // its methods compile it (reCompile in the dialect, reFindIn). A pattern
 // Go rejects panics, as MustCompile does; one the model's compiler does not
 // take is havoc, as before.
-func (t *fnState) regexpRuntime(x *ssa.Call) error {
+func (t *fnState) regexpRuntime(x *ssa.Call, compile bool) error {
 	p, err := t.val(x.Call.Args[0])
 	if err != nil {
 		return err
@@ -5884,18 +5916,72 @@ func (t *fnState) regexpRuntime(x *ssa.Call) error {
 	name := t.cur.Name
 	t.addBlocks(name+".re-compiled", name+".re-error", name+".re-rejected", name+".re-unknown", name+".re-join")
 	t.cur = &t.out.Blocks[yes]
-	t.emit(ir.Instr{Dst: dst, Op: ir.Box{Tag: regexpTag}, Args: []ir.Var{p}})
+	if compile {
+		// Compile: (re, nil).
+		re, nilErr := t.fresh(), t.fresh()
+		t.emit(ir.Instr{Dst: re, Op: ir.Box{Tag: regexpTag}, Args: []ir.Var{p}})
+		t.emit(ir.Instr{Dst: nilErr, Op: ir.Const{V: ir.ErrVal{}}})
+		t.emit(ir.Instr{Dst: dst, Op: ir.Simple("mkTuple"), Args: []ir.Var{re, nilErr}})
+	} else {
+		t.emit(ir.Instr{Dst: dst, Op: ir.Box{Tag: regexpTag}, Args: []ir.Var{p}})
+	}
 	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
-	// Code 1: Go rejects the pattern, and MustCompile panics.
+	// Code 1: Go rejects the pattern: MustCompile panics, Compile returns
+	// (nil, a non-nil error).
 	t.cur = &t.out.Blocks[notOk]
 	one, bad := t.fresh(), t.fresh()
 	t.emit(ir.Instr{Dst: one, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: "1"}}})
 	t.emit(ir.Instr{Dst: bad, Op: ir.Simple("eq"), Args: []ir.Var{code, one}})
 	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: bad, T: rejected, F: no}
-	t.out.Blocks[rejected].Term = ir.Term{Kind: ir.TermPanic, Panic: contract.PanicExplicit}
+	if compile {
+		t.cur = &t.out.Blocks[rejected]
+		nilRe, err := t.fresh(), t.fresh()
+		t.emit(ir.Instr{Dst: nilRe, Op: ir.Const{V: ir.NilPtr{}}})
+		t.emit(ir.Instr{Dst: err, Op: ir.Const{V: ir.ErrVal{NonNil: true}}})
+		t.emit(ir.Instr{Dst: dst, Op: ir.Simple("mkTuple"), Args: []ir.Var{nilRe, err}})
+		t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	} else {
+		t.out.Blocks[rejected].Term = ir.Term{Kind: ir.TermPanic, Panic: contract.PanicExplicit}
+	}
 	// Code 2: a pattern the model's compiler does not take.
 	t.cur = &t.out.Blocks[no]
-	if err := t.havocResult(dst, x, "call regexp.MustCompile", "unmodeled-call"); err != nil {
+	what := "call regexp.MustCompile"
+	if compile {
+		what = "call regexp.Compile"
+	}
+	if err := t.havocResult(dst, x, what, "unmodeled-call"); err != nil {
+		return err
+	}
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[join]
+	return nil
+}
+
+// regexpNumSubexp lowers (*regexp.Regexp).NumSubexp: a constant pattern's
+// count, or, on a regexp built at run time (which holds its pattern), the
+// model's parse of it; havoc on any other (#173).
+func (t *fnState) regexpNumSubexp(x *ssa.Call) error {
+	dst := t.def(x)
+	if re, ok := compiledPattern(x.Call.Args[0]); ok {
+		t.emit(ir.Instr{Dst: dst, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: fmt.Sprint(re.NumSubexp())}}})
+		return nil
+	}
+	re, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return err
+	}
+	known := t.fresh()
+	t.emit(ir.Instr{Dst: known, Op: ir.ReIn{}, Args: []ir.Var{re}})
+	yes := len(t.out.Blocks)
+	no, join := yes+1, yes+2
+	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: known, T: yes, F: no}
+	name := t.cur.Name
+	t.addBlocks(name+".re-known", name+".re-unknown", name+".re-join")
+	t.cur = &t.out.Blocks[yes]
+	t.emit(ir.Instr{Dst: dst, Op: ir.Simple("reNumSubexp"), Args: []ir.Var{re}})
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[no]
+	if err := t.havocResult(dst, x, "call (*regexp.Regexp).NumSubexp", "unmodeled-call"); err != nil {
 		return err
 	}
 	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}

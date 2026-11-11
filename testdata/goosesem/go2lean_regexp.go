@@ -71,3 +71,31 @@ func testRegexpBytesIndex() bool {
 	return loc != nil && loc[0] == 5 && loc[1] == 6 && semStartPattern.Match(b) &&
 		!semStartPattern.Match([]byte("tel")) && len(all) == 5 && all[4][0] == 10
 }
+
+// regexp.Compile of a pattern built at run time, with named groups,
+// QuoteMeta and NumSubexp, as gorilla/mux builds its route patterns (#173).
+var compileFunc = regexp.Compile
+
+func testRegexpCompileNamed() bool {
+	raw := "/a.b/"
+	re, err := compileFunc("^" + regexp.QuoteMeta(raw) + "(?P<v0>[a-z]+)" + "(?<v1>[0-9]*)$")
+	if err != nil || re.NumSubexp() != 2 {
+		return false
+	}
+	m := re.FindStringSubmatch("/a.b/id42")
+	return len(m) == 3 && m[1] == "id" && m[2] == "42" && !re.MatchString("/aXb/id")
+}
+
+// A pattern Go rejects: Compile returns a nil regexp and an error.
+func testRegexpCompileError() bool {
+	open := "("
+	re, err := regexp.Compile("a" + open)
+	_, err2 := regexp.Compile("(?P<>a)")
+	return re == nil && err != nil && err2 != nil
+}
+
+// QuoteMeta escapes exactly the metacharacters.
+func testRegexpQuoteMeta() bool {
+	s := `a.b+c*d?e(f)g|h[i]j{k}l^m$n\o-p`
+	return regexp.QuoteMeta(s) == `a\.b\+c\*d\?e\(f\)g\|h\[i\]j\{k\}l\^m\$n\\o-p` && regexp.QuoteMeta("") == ""
+}
