@@ -530,9 +530,6 @@ func SeqTestNetSplitHostPort() bool { return testNetSplitHostPort() }
 // go2lean:sequence testNilDefault
 func SeqTestNilDefault() bool { return testNilDefault() }
 
-// go2lean:sequence testNilInterfaceCallPanics
-func SeqTestNilInterfaceCallPanics() bool { return testNilInterfaceCallPanics() }
-
 // go2lean:sequence testNilVal
 func SeqTestNilVal() bool { return testNilVal() }
 

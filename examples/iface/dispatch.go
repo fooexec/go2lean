@@ -66,3 +66,15 @@ func Name(o Opt) string {
 	}
 	return o.V
 }
+
+// Resetter is a collaborator no type of the package implements: the
+// model does not follow its methods.
+type Resetter interface{ Reset() }
+
+// Restart resets r before use. Bug: a nil r panics in Go (a method call
+// through a nil interface), which the model once ignored as a call
+// without result (#174).
+func Restart(r Resetter) int {
+	r.Reset()
+	return 1
+}

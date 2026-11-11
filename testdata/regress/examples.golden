@@ -160,6 +160,7 @@ exhausted iface_queue_sum_nohang
 confirmed iface_queue_sum_nopanic
 confirmed iface_ratio_nopanic
 exhausted iface_rect_area_nopanic
+confirmed iface_restart_nopanic
 exhausted iface_set_nopanic
 exhausted mut=1/4 iface_set_specsetnonnil
 exhausted iface_sq_area_nopanic
