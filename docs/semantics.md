@@ -401,7 +401,10 @@ the other, end the run with `data_race`. Within a step the machine is
 sequentially consistent: no weak-memory reorderings. In every package
 of the program (since #176; before, only in packages that start goroutines
 and their dependencies), the package variables that the functions of any
-linked package write are shared cells, so their races are seen. Which
+linked package write are shared cells, so their races are seen. A store into
+an element or field of the variable counts as a write (go-runewidth's
+`joinerBits[i] = …`, #184), and a variable holding a `sync/atomic` value
+(`atomic.Int32`) is a cell like one holding a mutex. Which
 variables are cells is decided once for the whole program, so every
 package reads and writes a variable the same way (#55). A cell starts at the variable's zero
 value, at the one constant its initializer stores, or, for an interface
@@ -418,13 +421,17 @@ written (decimal's `var pow10Table = func() []*big.Int {...}()`, #176), or of a
 standard-library package translated from source (nkeys' `var b32Enc = base32.StdEncoding.WithPadding(...)`,
 whose callees are then translated too): `var reg = &registry{m: map[string]int{}}`;
 or a struct literal, whose fields may then be locked and written:
-go-metrics' `var arbiter = meterArbiter{meters: make(...)}`, #129)
+go-metrics' `var arbiter = meterArbiter{meters: make(...)}`, #129),
+or an alias of such a variable of the package (unicode's `var Letter = _L`,
+`var _L = &RangeTable{...}`, #184),
 is a cell too: the compile stage keeps the slice of the package
 initializer that builds it (the store, what it depends on, and what writes
 into the object built), and the search runs that slice once, before the
 trials, so every trial starts with the object the initializer built and the
 goroutines share it (the functions of its package the slice calls, a
 generic constructor's instance included, are translated with it). A
+call in a `func init()` of a package function that writes such a variable
+is in the slice too (go-runewidth's `init` calls `fillJoinerBits`, #184). A
 variable whose part of the slice the model cannot translate (grpc's
 `make([]byte, 131070)`, beyond the slice bound) is not such a cell, and
 the slice is kept without it, so the package's other cells are still

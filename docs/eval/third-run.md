@@ -63,8 +63,10 @@ findings the summary shows: a caller can reach them, or a spec fails.
   lo's case conversions go through `cases` and `language`, where the model
   gets stuck (`Tag.Tag`) or guesses (`InheritanceMatcher.Match`): 10
   spurious findings.
-- **Tables an init function fills, and very large arrays**
-  ([#184](https://github.com/fooexec/go2lean/issues/184)). go-runewidth's
+- **Tables an init function fills, and very large arrays** (fixed,
+  [#184](https://github.com/fooexec/go2lean/issues/184): go-runewidth now
+  has 0 spurious findings; `unicode.IsLetter` is exact, and lo's
+  `SnakeCase` then stops in `x/text`, #183). go-runewidth's
   `joinerBits` is filled by `fillJoinerBits`, called from `init`, and its
   `strictWidthLUT` is 2.2 MB. lo's `unicode.Letter` is a `RangeTable` the
   model does not build. Together: 8 spurious findings.

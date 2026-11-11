@@ -755,6 +755,12 @@ func SeqTestU64ToU32() bool { return testU64ToU32() }
 // go2lean:sequence testUint32Untyped
 func SeqTestUint32Untyped() bool { return testUint32Untyped() }
 
+// go2lean:sequence testUnicodeLetterTables
+func SeqTestUnicodeLetterTables() bool { return testUnicodeLetterTables() }
+
+// go2lean:sequence testUnicodeUpperLower
+func SeqTestUnicodeUpperLower() bool { return testUnicodeUpperLower() }
+
 // go2lean:sequence testUnsetenv
 func SeqTestUnsetenv() bool { return testUnsetenv() }
 

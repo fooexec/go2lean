@@ -257,6 +257,8 @@ func TestGoose(t *testing.T) {
 		"testU32ToU64": testU32ToU64,
 		"testU64ToU32": testU64ToU32,
 		"testUint32Untyped": testUint32Untyped,
+		"testUnicodeLetterTables": testUnicodeLetterTables,
+		"testUnicodeUpperLower": testUnicodeUpperLower,
 		"testUnsetenv": testUnsetenv,
 		"testWaitGroupWaits": testWaitGroupWaits,
 		"testsUseLocks": testsUseLocks,
