@@ -97,6 +97,9 @@ type Options struct {
 	// on its own t run their function only when the pattern matches the
 	// subtest's name (#48).
 	Subtest string
+	// Models is a directory of user models (#204, addUserModels): Go
+	// functions that stand for the functions and methods they name.
+	Models string
 }
 
 // Limits of the dependency walk: how deep it follows calls from the
@@ -177,6 +180,11 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		// math's assembly versions (archFloor, ...) call the portable Go
 		// ones (#148).
 		portableMath(sprog)
+		if _, err := addUserModels(sprog, opts.Models); err != nil {
+			return nil, "", err
+		}
+	} else if opts.Models != "" {
+		return nil, "", fmt.Errorf("user models (%s) need -deps: the models are translated as dependency code", opts.Models)
 	}
 	zeros := zeroGlobals(sprog, spkgs, opts.Deps, opts.Tests)
 

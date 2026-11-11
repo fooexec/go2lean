@@ -762,6 +762,10 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 			// library (whose unmodelled functions stay unmodelled).
 			note += ". Compiling with -deps models the functions of the dependency packages called, if it was off"
 		}
+		if slices.ContainsFunc(p.guessed, func(c string) bool { return !strings.HasPrefix(c, "(") || !strings.Contains(c, ").") || strings.HasPrefix(c, "(*") }) {
+			// A function or a concrete method: a user model can stand for it.
+			note += ". A user model in .go2lean/models can stand for a function or method (docs/usage.md#user-models)"
+		}
 		v.Diagnosis.Notes = append(v.Diagnosis.Notes, note)
 	} else if (v.Status == contract.VerdictSpurious || v.Status == contract.VerdictInconclusive) && v.Diagnosis != nil && len(p.cx.Assumptions) > 0 {
 		// No guessed call to name: the run's assumptions are what the

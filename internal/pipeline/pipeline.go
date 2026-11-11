@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -63,6 +64,8 @@ type Env struct {
 	// Translate names dependency functions to translate whatever their
 	// depth (gossa.Options.Translate); the refinement loop adds to it.
 	Translate []string
+	// Models is the directory of user models (gossa.Options.Models, #204).
+	Models string
 	// Quiet prints counts for the compile stage and the properties, and
 	// in the hunt stage only the properties a counterexample was found
 	// for (run's default; run -v prints every function and property).
@@ -142,7 +145,7 @@ func CompileLinked(w contract.Workspace, env Env, pattern string, out io.Writer)
 	if err := validateCompareOrderOverlay(env); err != nil {
 		return nil, err
 	}
-	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: true, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest}, pattern)
+	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: true, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest, Models: env.Models}, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +205,7 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 	if err := validateCompareOrderOverlay(env); err != nil {
 		return nil, err
 	}
-	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: env.Deps, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest}, patterns...)
+	progs, modPath, err := gossa.TranslateAllOpts(env.module(), gossa.Options{Deps: env.Deps, Overlay: env.Overlay, Tests: env.Tests, Translate: env.Translate, Subtest: env.Subtest, Models: env.Models}, patterns...)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +268,19 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 		fmt.Fprintf(out, "compiled builtin snapshot: %s (explicit ordering/purity/totality assumptions; not a passed check)\n", ref.SnapshotSHA256)
 	}
 	return reports, nil
+}
+
+// ModelsDir is the user-models directory a run uses (#204): dir when
+// given, else the module's .go2lean/models when it exists.
+func (env Env) ModelsDir(dir string) string {
+	if dir != "" {
+		return dir
+	}
+	d := filepath.Join(env.module(), gossa.UserModelsDir)
+	if fi, err := os.Stat(d); err == nil && fi.IsDir() {
+		return d
+	}
+	return ""
 }
 
 // Propose runs M2's property templates and prints them.

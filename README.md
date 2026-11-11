@@ -61,6 +61,9 @@ Lean finds the inputs; `go test` is the judge.
   optional agent or by hand. A
   proof counts only when Lean's comparator accepts it against go2lean's own
   statement, in a sandbox, with a certificate ([trust model](docs/trust.md)).
+- **User models** — a call the model does not look into (an SDK client, a
+  cgo binding) can be given a model written in Go, in `.go2lean/models`,
+  without changing go2lean ([usage](docs/usage.md#user-models)).
 - **Optional spec-writing agent** — read source, propose and repair Go specs,
   run the pipeline, and report the verdicts. The basic pipeline needs no API key.
 

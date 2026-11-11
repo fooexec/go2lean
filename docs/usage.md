@@ -152,6 +152,44 @@ No counterexample does **not** mean correct: the search is bounded, and
 the summary says which properties were proved, exhausted (every input in
 a small domain) or only searched.
 
+### User models
+
+A spurious verdict whose `why` names calls the model does not look into
+(an SDK client, a cgo binding, an operating-system call) can be fixed
+without changing go2lean. Write what the call should return, in Go, in
+the module's `.go2lean/models` directory (or one given with
+`run -models dir`), and mark it with the function it stands for:
+
+```go
+package models
+
+import "example.com/acme/sdk"
+
+//go2lean:model example.com/acme/sdk.(*Client).Get
+func ClientGet(c *sdk.Client, key string) (string, error) {
+	if key == "" {
+		return "", sdk.ErrNotFound
+	}
+	return "value", nil
+}
+```
+
+- **Targets.** A function is `pkg/path.Func`, and a method is
+  `pkg/path.(*T).Method` or `pkg/path.T.Method`. A method's receiver is
+  the model's first parameter, and the signatures must otherwise match.
+  The run stops with an error naming both signatures if they don't.
+- **Effect.** Every static call of the target goes to the model, which is
+  translated like the package's own code. A model can keep state in
+  package variables, and can call the function it stands for: calls made
+  inside the models are not redirected.
+- **The models only shape the search.** Replay runs the real code, so a
+  wrong model can cost spurious or missed findings, but a confirmed finding
+  is still a real `go test` failure.
+- **Limits.**
+  - A call through an interface has no static target to replace.
+  - A model cannot reach another package's unexported fields.
+  - User models need `-deps`, which is on by default.
+
 ### Time and memory
 
 The first run on a machine builds go2lean's Lean runtime once: a few
