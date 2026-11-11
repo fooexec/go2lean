@@ -83,9 +83,6 @@ package state.
 
 ## Open
 
-- **`regexp` in mux.** mux's spurious findings rest on `regexp.QuoteMeta`
-  and `NumSubexp`, which the model does not model when `regexp` comes in
-  through a dependency.
 - **backoff's ticker.** The model reports a deadlock, while the real run
   dereferences nil: `panic_kind_mismatch` on `Ticker.run` and `Ticker.send`
   (a `*time.Ticker` left nil by the harness).
@@ -141,4 +138,30 @@ decimal's run now gives no spurious or inconclusive verdict. The index out
 of range in `pow10` on a negative exponent (`pow10Table[n]` with `n < 0`,
 reached from `RoundHalfUp` and `powNegIntApprox`) is now confirmed from the
 table the initializer built. Before, it rested on an assumed table.
+
+## Rerun of mux with run-time regexps (#173)
+
+mux builds each route's pattern at run time. It quotes the template's
+literal parts with `regexp.QuoteMeta`, adds named groups `(?P<v0>...)`,
+compiles the pattern through `var RegexpCompileFunc = regexp.Compile`, and
+checks `NumSubexp`. All four steps were havoc. Five changes:
+- The model compiles a run-time pattern for `regexp.Compile`, as it did
+  for `MustCompile`.
+- Its parser takes named groups.
+- `QuoteMeta` is exact.
+- `NumSubexp` is counted from the parse.
+- A variable that only benchmarks reassign keeps its initial value.
+  `BenchmarkNewRouterRegexpFunc` swaps `RegexpCompileFunc`, and go2lean
+  runs no benchmark.
+
+| | before | after |
+|---|---|---|
+| time | 96 s | 99 s |
+| confirmed (listed in the summary) | 2 (0) | 10 (1) |
+| spurious | 16 | 0 |
+| inconclusive | 6 | 4 |
+
+The finding a caller can reach is an index out of range at `regexp.go:122`,
+in `newRouteRegexp`, reached from `Route.addRegexpMatcher`. It takes
+`strings.SplitN(template, "=", 2)[1]` of a query template that has no `=`.
 

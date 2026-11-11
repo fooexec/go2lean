@@ -1147,12 +1147,18 @@ func tableFunc(v ssa.Value) (*ssa.Function, bool) {
 }
 
 // testHelper says whether f exists for tests only: named ...ForTest or
-// ...ForTesting, or a closure inside one.
+// ...ForTesting, a benchmark, fuzz target or example (go2lean runs none of
+// them: gorilla/mux's BenchmarkNewRouterRegexpFunc swaps its
+// RegexpCompileFunc, #173), or a closure inside one.
 func testHelper(f *ssa.Function) bool {
 	for f.Parent() != nil {
 		f = f.Parent()
 	}
-	return strings.HasSuffix(f.Name(), "ForTest") || strings.HasSuffix(f.Name(), "ForTesting")
+	name := f.Name()
+	if f.Signature.Recv() == nil && (strings.HasPrefix(name, "Benchmark") || strings.HasPrefix(name, "Fuzz") || strings.HasPrefix(name, "Example")) {
+		return true
+	}
+	return strings.HasSuffix(name, "ForTest") || strings.HasSuffix(name, "ForTesting")
 }
 
 // addCtorWrappers adds, for each method of a type T whose package has a
