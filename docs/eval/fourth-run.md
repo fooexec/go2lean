@@ -78,9 +78,12 @@ where 29 of 138 were.
   msgpack's `Marshal` reads its encoder cache through `Load`, which the
   model left free: 1 spurious finding. `sync.Map` is now a map, empty at
   first. The finding stays spurious for another reason: the encoder is
-  chosen by `reflect.Type`'s `Implements` and `Kind`, which are
+  chosen by `reflect.Type`'s `Implements` and `Kind`, which were
   unmodelled ([#200](https://github.com/fooexec/go2lean/issues/200)), as
-  in go-toml's `encPropsForType`.
+  in go-toml's `encPropsForType`. With `reflect.Type` modelled (fixed),
+  neither is spurious: go-toml's `encodeRoot` holds within its budget, and
+  msgpack's `Marshal` finds no counterexample (its runs that reach a
+  `reflect.Value` the model did not make get stuck, which is moot).
 - **conc's `Stream.Go`** ([#198](https://github.com/fooexec/go2lean/issues/198)).
   The model reports a data race after getting stuck in `callbacker`, and
   the replay cannot follow the schedule into `conc/pool`: 1 inconclusive.

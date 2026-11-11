@@ -441,6 +441,18 @@ inductive Op where
   /-- (reflect.Value).IsNil, with the same table: Go's answer for the kinds
   that can be nil, a panic for the others (and for Invalid). -/
   | reflectIsNil (kinds : List (Nat × Nat))
+  /-- `reflect.TypeOf(x)`, `(reflect.Value).Type`: a `reflect.Type` is the
+  dynamic type's tag boxed with tag `rt`, so `==` and map keys compare
+  types (#200); the nil interface gives the nil Type. -/
+  | reflectTypeOf (rt : Nat)
+  /-- `(reflect.Type).Kind`, by the type's tag. An unknown tag: stuck. -/
+  | reflectTypeKind (rt : Nat) (kinds : List (Nat × Nat))
+  /-- `(reflect.Type).Elem`, `reflect.PointerTo`: the type whose tag the
+  table gives for this one's. An unknown tag: stuck. -/
+  | reflectTypeMap (rt : Nat) (table : List (Nat × Nat))
+  /-- `(reflect.Type).Implements(u)`: the frontend lists the answer for
+  each (type, interface) pair it knows. Another pair: stuck. -/
+  | reflectImplements (rt : Nat) (yes : List (Nat × Nat)) (no : List (Nat × Nat))
   /-- An array of `n` bytes distinct from every other `freshArr` value of
   the run (a random UUID): the bytes spell the heap size, which the op
   grows by one. -/
@@ -1762,6 +1774,43 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
       | some k => .ok (.int 64 (BitVec.ofNat 64 k))
       | none => .panic .modelStuck
     | _ => .panic .modelStuck
+  | .reflectTypeOf rt, [x] =>
+    match x with
+    | .boxed t _ => .ok (.boxed rt (.int 64 (BitVec.ofNat 64 t)))
+    | .opaqueNil | .err false => .ok .opaqueNil
+    -- An error the model keeps as `.err true` has no type tag: stuck.
+    | _ => .panic .modelStuck
+  | .reflectTypeKind rt kinds, [x] =>
+    match x with
+    | .boxed r (.int 64 t) =>
+      if r == rt then
+        match kinds.lookup t.toNat with
+        | some k => .ok (.int 64 (BitVec.ofNat 64 k))
+        | none => .panic .modelStuck
+      else .panic .modelStuck
+    | .opaqueNil => .panic .nilDereference -- a method of the nil Type
+    | _ => .panic .modelStuck
+  | .reflectTypeMap rt table, [x] =>
+    match x with
+    | .boxed r (.int 64 t) =>
+      if r == rt then
+        match table.lookup t.toNat with
+        | some u => .ok (.boxed rt (.int 64 (BitVec.ofNat 64 u)))
+        | none => .panic .modelStuck
+      else .panic .modelStuck
+    | .opaqueNil => .panic .nilDereference
+    | _ => .panic .modelStuck
+  | .reflectImplements rt yes no, [x, y] =>
+    match x, y with
+    | .boxed r (.int 64 t), .boxed r' (.int 64 u) =>
+      if r == rt && r' == rt then
+        if yes.contains (t.toNat, u.toNat) then .ok (.bool true)
+        else if no.contains (t.toNat, u.toNat) then .ok (.bool false)
+        else .panic .modelStuck
+      else .panic .modelStuck
+    | .opaqueNil, _ => .panic .nilDereference
+    | _, .opaqueNil => .panic .explicit -- Go: "reflect: nil type passed to Type.Implements"
+    | _, _ => .panic .modelStuck
   | .reflectIsNil kinds, [x] =>
     match x with
     | .boxed t v =>

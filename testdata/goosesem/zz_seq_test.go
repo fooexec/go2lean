@@ -593,6 +593,18 @@ func SeqTestReflectCallIfaceResult() bool { return testReflectCallIfaceResult() 
 // go2lean:sequence testReflectCallNoArgs
 func SeqTestReflectCallNoArgs() bool { return testReflectCallNoArgs() }
 
+// go2lean:sequence testReflectTypeEqual
+func SeqTestReflectTypeEqual() bool { return testReflectTypeEqual() }
+
+// go2lean:sequence testReflectTypeImplements
+func SeqTestReflectTypeImplements() bool { return testReflectTypeImplements() }
+
+// go2lean:sequence testReflectTypeKey
+func SeqTestReflectTypeKey() bool { return testReflectTypeKey() }
+
+// go2lean:sequence testReflectTypeKind
+func SeqTestReflectTypeKind() bool { return testReflectTypeKind() }
+
 // go2lean:sequence testRegexpBytesIndex
 func SeqTestRegexpBytesIndex() bool { return testRegexpBytesIndex() }
 
