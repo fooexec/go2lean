@@ -74,9 +74,13 @@ where 29 of 138 were.
 
 ## Open
 
-- **`sync.Map`** ([#193](https://github.com/fooexec/go2lean/issues/193)).
+- **`sync.Map`** (fixed, [#193](https://github.com/fooexec/go2lean/issues/193)).
   msgpack's `Marshal` reads its encoder cache through `Load`, which the
-  model leaves free: 1 spurious finding.
+  model left free: 1 spurious finding. `sync.Map` is now a map, empty at
+  first. The finding stays spurious for another reason: the encoder is
+  chosen by `reflect.Type`'s `Implements` and `Kind`, which are
+  unmodelled ([#200](https://github.com/fooexec/go2lean/issues/200)), as
+  in go-toml's `encPropsForType`.
 - **conc's `Stream.Go`** ([#198](https://github.com/fooexec/go2lean/issues/198)).
   The model reports a data race after getting stuck in `callbacker`, and
   the replay cannot follow the schedule into `conc/pool`: 1 inconclusive.

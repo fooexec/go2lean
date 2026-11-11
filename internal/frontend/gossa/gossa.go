@@ -4330,6 +4330,9 @@ func (t *fnState) call(x *ssa.Call) error {
 		if done, err := t.atomicCall(x, callee); done || err != nil {
 			return err
 		}
+		if done, err := t.syncMapCall(x, callee); done || err != nil {
+			return err
+		}
 		if done, err := t.regexpCall(x, callee); done || err != nil {
 			return err
 		}
@@ -4441,6 +4444,11 @@ func (t *fnState) call(x *ssa.Call) error {
 	name := x.Call.Value.Name()
 	if callee != nil {
 		name = callee.String()
+	} else if x.Call.IsInvoke() {
+		// The method, not the receiver's variable: a spurious verdict names
+		// it among the calls the model chose results for (msgpack's
+		// typ.Implements, interfaceMethod).
+		name = interfaceMethod + "(" + x.Call.Value.Type().String() + ")." + x.Call.Method.Name()
 	}
 	if x.Call.IsInvoke() {
 		// A method call through a nil interface panics in Go, whatever the
@@ -6854,7 +6862,7 @@ func knownIface(v ssa.Value, spkg *ssa.Package) bool {
 func holdsSync(t types.Type) bool {
 	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "sync" {
 		switch n.Obj().Name() {
-		case "Mutex", "RWMutex", "WaitGroup", "Once":
+		case "Mutex", "RWMutex", "WaitGroup", "Once", "Map":
 			return true
 		}
 	}
@@ -7819,6 +7827,115 @@ func (t *fnState) atomicPointerCall(x *ssa.Call, callee *ssa.Function, st *types
 	return true, nil
 }
 
+// interfaceMethod starts the havoc site name of an unmodelled call through
+// an interface: "call interface method (reflect.Type).Implements".
+const interfaceMethod = "interface method "
+
+// isSyncMap says whether t is sync.Map.
+func isSyncMap(t types.Type) bool {
+	n, ok := types.Unalias(t).(*types.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "sync" && n.Obj().Name() == "Map"
+}
+
+// syncMapCall lowers the methods of sync.Map (#193) to a map the model
+// keeps in the struct's field 1 (sync.Map's m, whose own type the model
+// does not use), nil in the zero value: Load, Store, LoadOrStore,
+// LoadAndDelete, Delete, Swap and Clear. Each method reads the field with
+// atomicLoad and writes it back with atomicStore, which order the map's
+// accesses between goroutines as sync.Map does. Range and the
+// compare-and-swap methods stay unmodelled.
+func (t *fnState) syncMapCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
+	recv := callee.Signature.Recv()
+	if recv == nil {
+		return false, nil
+	}
+	pt, ok := recv.Type().(*types.Pointer)
+	if !ok || !isSyncMap(pt.Elem()) {
+		return false, nil
+	}
+	name := callee.Name()
+	switch name {
+	case "Load", "Store", "LoadOrStore", "LoadAndDelete", "Delete", "Swap", "Clear":
+	default:
+		return false, nil
+	}
+	args := make([]ir.Var, len(x.Call.Args))
+	for i, a := range x.Call.Args {
+		v, err := t.val(a)
+		if err != nil {
+			return true, err
+		}
+		args[i] = v
+	}
+	addr := t.fresh()
+	t.emit(ir.Instr{Dst: addr, Op: ir.FieldAddr{I: 1}, Args: []ir.Var{args[0]}})
+	nilAny := t.fresh()
+	t.emit(ir.Instr{Dst: nilAny, Op: ir.Const{V: ir.OpaqueNil{}}})
+	// m: the map, made on the first write.
+	m := t.fresh()
+	switch name {
+	case "Store", "LoadOrStore", "Swap":
+		cur := t.fresh()
+		t.emit(ir.Instr{Dst: cur, Op: ir.Conc("atomicLoad"), Args: []ir.Var{addr}})
+		isNil := t.fresh()
+		t.emit(ir.Instr{Dst: isNil, Op: ir.Simple("isNilOpaque"), Args: []ir.Var{cur}})
+		mk := len(t.out.Blocks)
+		join := mk + 1
+		t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: isNil, T: mk, F: join}
+		base := t.cur.Name
+		t.out.Blocks = append(t.out.Blocks, ir.Block{Name: base + ".syncmap-make"}, ir.Block{Name: base + ".syncmap"})
+		t.cur = &t.out.Blocks[mk]
+		nm := t.fresh()
+		t.emit(ir.Instr{Dst: nm, Op: ir.Simple("makeMap")})
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{addr, nm}})
+		t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+		t.cur = &t.out.Blocks[join]
+	}
+	t.emit(ir.Instr{Dst: m, Op: ir.Conc("atomicLoad"), Args: []ir.Var{addr}})
+	lookup := func() ir.Var { // (value, ok)
+		r := t.fresh()
+		t.emit(ir.Instr{Dst: r, Op: ir.MapLookup{CommaOk: true, Zero: ir.OpaqueNil{}}, Args: []ir.Var{m, args[1]}})
+		return r
+	}
+	extract := func(tup ir.Var, i int) ir.Var {
+		r := t.fresh()
+		t.emit(ir.Instr{Dst: r, Op: ir.Extract{I: i}, Args: []ir.Var{tup}})
+		return r
+	}
+	unit := func() {
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
+	}
+	switch name {
+	case "Load":
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.MapLookup{CommaOk: true, Zero: ir.OpaqueNil{}}, Args: []ir.Var{m, args[1]}})
+	case "Store":
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("mapUpdate"), Args: []ir.Var{m, args[1], args[2]}})
+		unit()
+	case "Swap": // (previous, loaded)
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.MapLookup{CommaOk: true, Zero: ir.OpaqueNil{}}, Args: []ir.Var{m, args[1]}})
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("mapUpdate"), Args: []ir.Var{m, args[1], args[2]}})
+	case "LoadOrStore": // (actual, loaded): the stored value when not loaded
+		r := lookup()
+		old, loaded := extract(r, 0), extract(r, 1)
+		v := t.fresh()
+		t.emit(ir.Instr{Dst: v, Op: ir.Simple("ite"), Args: []ir.Var{loaded, old, args[2]}})
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("mapUpdate"), Args: []ir.Var{m, args[1], v}})
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("mkTuple"), Args: []ir.Var{v, loaded}})
+	case "LoadAndDelete": // (value, loaded)
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.MapLookup{CommaOk: true, Zero: ir.OpaqueNil{}}, Args: []ir.Var{m, args[1]}})
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("mapDelete"), Args: []ir.Var{m, args[1]}})
+	case "Delete":
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("mapDelete"), Args: []ir.Var{m, args[1]}})
+		unit()
+	case "Clear":
+		t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{addr, nilAny}})
+		unit()
+		return true, nil
+	}
+	t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Conc("atomicStore"), Args: []ir.Var{addr, m}})
+	return true, nil
+}
+
 // bufferGrow lowers (*strings.Builder).Grow(n) and (*bytes.Buffer).Grow(n).
 // Grow changes only the capacity, which the model does not track, and
 // panics for n < 0 as in Go. Ignoring the call would be an
@@ -7979,6 +8096,16 @@ func (t *fnState) known(v ssa.Value, seen map[ssa.Value]bool) bool {
 		return t.known(v.Tuple, seen)
 	case *ssa.Lookup:
 		return t.readsOnly() && t.known(v.X, seen)
+	case *ssa.Call:
+		// A value read from a sync.Map (syncMapCall), as from a map.
+		if callee := v.Call.StaticCallee(); callee != nil && callee.Signature.Recv() != nil {
+			if pt, ok := callee.Signature.Recv().Type().(*types.Pointer); ok && isSyncMap(pt.Elem()) {
+				switch callee.Name() {
+				case "Load", "LoadOrStore", "LoadAndDelete", "Swap":
+					return t.readsOnly()
+				}
+			}
+		}
 	case *ssa.TypeAssert:
 		return t.readsOnly() && t.known(v.X, seen)
 	case *ssa.Next:
@@ -9310,6 +9437,10 @@ func zeroVal(t types.Type) (ir.Val, bool) {
 	case *types.Slice:
 		return ir.NilSlice{}, true
 	case *types.Struct:
+		if isSyncMap(t) {
+			// No map yet (syncMapCall): the first write makes one.
+			return ir.StructVal{Fields: []ir.Val{ir.StructVal{}, ir.OpaqueNil{}}}, true
+		}
 		var fields []ir.Val
 		for i := 0; i < u.NumFields(); i++ {
 			if i == 2 && atomicPointer(u) {
