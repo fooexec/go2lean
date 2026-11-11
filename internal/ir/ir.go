@@ -179,6 +179,35 @@ func (o ReflectKind) Lean() string {
 	return fmt.Sprintf("(.%s [%s])", name, strings.Join(parts, ", "))
 }
 
+// ReflectType is one of the reflect.Type ops (#200): reflectTypeOf,
+// reflectTypeKind and reflectTypeMap (Table: tag to kind or to tag), or
+// reflectImplements (Yes and No: the (type, interface) pairs). RT is the
+// tag a reflect.Type value is boxed with.
+type ReflectType struct {
+	Kind    string
+	RT      uint32
+	Table   [][2]uint32
+	Yes, No [][2]uint32
+}
+
+func pairs(t [][2]uint32) string {
+	parts := make([]string, len(t))
+	for i, e := range t {
+		parts[i] = fmt.Sprintf("(%d, %d)", e[0], e[1])
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func (o ReflectType) Lean() string {
+	switch o.Kind {
+	case "reflectTypeOf":
+		return fmt.Sprintf("(.reflectTypeOf %d)", o.RT)
+	case "reflectImplements":
+		return fmt.Sprintf("(.reflectImplements %d %s %s)", o.RT, pairs(o.Yes), pairs(o.No))
+	}
+	return fmt.Sprintf("(.%s %d %s)", o.Kind, o.RT, pairs(o.Table))
+}
+
 // IfaceComparable is ifaceComparable: is the dynamic type of an interface
 // value comparable? NotComparable lists the tags of the types that are not.
 type IfaceComparable struct{ NotComparable []uint32 }

@@ -246,7 +246,16 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	var boxed []types.Type
 	seenBoxed := map[string]bool{}
 	for _, u := range units {
-		for _, f := range u.fns {
+		fns := u.fns
+		// The package initializer too, which joins the unit later: msgpack's
+		// var errorType = reflect.TypeOf((*error)(nil)).Elem() boxes a
+		// *error there (#200).
+		if p := sprog.ImportedPackage(u.path); p != nil {
+			if init := p.Func("init"); init != nil {
+				fns = append(append(fns[:len(fns):len(fns)], init), init.AnonFuncs...)
+			}
+		}
+		for _, f := range fns {
 			for _, b := range f.Blocks {
 				for _, in := range b.Instrs {
 					if mi, ok := in.(*ssa.MakeInterface); ok {
@@ -1895,6 +1904,8 @@ type progState struct {
 	sprog *ssa.Program
 	// boxed lists the types modelled code boxes into interfaces.
 	boxed []types.Type
+	// rtypes: the reflect.Type tables, built on first use.
+	rtypes *reflectTypes
 	// notComparable: the tags of the boxed types == does not apply to.
 	notComparable []uint32
 	// json describes the types the package encodes or decodes.
@@ -2197,6 +2208,127 @@ func (s *progState) kindTable() [][2]uint32 {
 		out = append(out, [2]uint32{tag, uint32(reflectKindOf(t))})
 	}
 	return out
+}
+
+// rtTag is the tag a reflect.Type value is boxed with (the type of
+// reflect.TypeOf's result, *reflect.rtype).
+var rtTag = func() uint32 {
+	h := fnv.New32a()
+	h.Write([]byte("*reflect.rtype"))
+	return h.Sum32()
+}()
+
+// reflectTypes is what the reflect.Type ops know (#200): the types of
+// kindTable, their elements and pointers to them, with each one's kind,
+// element, pointer, and whether it implements each interface among them.
+type reflectTypes struct {
+	kinds, elems, ptrs [][2]uint32
+	yes, no            [][2]uint32
+}
+
+func (s *progState) reflectTypeTables() *reflectTypes {
+	if s.rtypes != nil {
+		return s.rtypes
+	}
+	empty := types.NewInterfaceType(nil, nil)
+	base := append([]types.Type{types.Typ[types.String], types.Typ[types.Bool], types.Typ[types.Int], types.Typ[types.Float64],
+		types.NewMap(types.Typ[types.String], empty), types.NewSlice(empty)}, s.boxed...)
+	var all []types.Type
+	seen := map[uint32]bool{}
+	add := func(t types.Type) {
+		if tag := typeTag(t); !seen[tag] {
+			seen[tag] = true
+			all = append(all, t)
+		}
+	}
+	elemOf := func(t types.Type) types.Type {
+		switch u := t.Underlying().(type) {
+		case *types.Pointer:
+			return u.Elem()
+		case *types.Slice:
+			return u.Elem()
+		case *types.Array:
+			return u.Elem()
+		case *types.Map:
+			return u.Elem()
+		case *types.Chan:
+			return u.Elem()
+		}
+		return nil
+	}
+	for _, t := range base {
+		add(t)
+		if e := elemOf(t); e != nil {
+			add(e)
+		}
+		add(types.NewPointer(t))
+	}
+	r := &reflectTypes{}
+	var ifaces []types.Type
+	for _, t := range all {
+		r.kinds = append(r.kinds, [2]uint32{typeTag(t), uint32(reflectKindOf(t))})
+		if e := elemOf(t); e != nil {
+			r.elems = append(r.elems, [2]uint32{typeTag(t), typeTag(e)})
+		}
+		r.ptrs = append(r.ptrs, [2]uint32{typeTag(t), typeTag(types.NewPointer(t))})
+		if types.IsInterface(t) {
+			ifaces = append(ifaces, t)
+		}
+	}
+	for _, t := range all {
+		for _, i := range ifaces {
+			pair := [2]uint32{typeTag(t), typeTag(i)}
+			if types.Implements(t, i.Underlying().(*types.Interface)) {
+				r.yes = append(r.yes, pair)
+			} else {
+				r.no = append(r.no, pair)
+			}
+		}
+	}
+	s.rtypes = r
+	return r
+}
+
+// reflectTypeCall lowers reflect.TypeOf, (reflect.Value).Type,
+// reflect.PtrTo and PointerTo, and the reflect.Type methods Kind, Elem and
+// Implements, over the types reflectTypeTables knows (#200).
+func (t *fnState) reflectTypeCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
+	var op ir.ReflectType
+	var args []ssa.Value
+	switch {
+	case x.Call.IsInvoke() && isReflectType(x.Call.Value.Type()):
+		args = append([]ssa.Value{x.Call.Value}, x.Call.Args...)
+		tb := t.prog.reflectTypeTables()
+		switch x.Call.Method.Name() {
+		case "Kind":
+			op = ir.ReflectType{Kind: "reflectTypeKind", Table: tb.kinds}
+		case "Elem":
+			op = ir.ReflectType{Kind: "reflectTypeMap", Table: tb.elems}
+		case "Implements":
+			op = ir.ReflectType{Kind: "reflectImplements", Yes: tb.yes, No: tb.no}
+		default:
+			return false, nil
+		}
+	case callee != nil && (callee.String() == "reflect.TypeOf" || callee.String() == "(reflect.Value).Type"):
+		args = x.Call.Args
+		op = ir.ReflectType{Kind: "reflectTypeOf"}
+	case callee != nil && (callee.String() == "reflect.PtrTo" || callee.String() == "reflect.PointerTo"):
+		args = x.Call.Args
+		op = ir.ReflectType{Kind: "reflectTypeMap", Table: t.prog.reflectTypeTables().ptrs}
+	default:
+		return false, nil
+	}
+	op.RT = rtTag
+	var vs []ir.Var
+	for _, a := range args {
+		v, err := t.val(a)
+		if err != nil {
+			return true, err
+		}
+		vs = append(vs, v)
+	}
+	t.emit(ir.Instr{Dst: t.def(x), Op: op, Args: vs})
+	return true, nil
 }
 
 // reflectKindOf is the reflect.Kind of t (reflect's numbering).
@@ -4264,6 +4396,9 @@ func (t *fnState) call(x *ssa.Call) error {
 		if done, err := t.reflectCall(x); done || err != nil {
 			return err
 		}
+	}
+	if done, err := t.reflectTypeCall(x, callee); done || err != nil {
+		return err
 	}
 	if callee != nil && (callee.String() == "(reflect.Value).Kind" || callee.String() == "(reflect.Value).IsNil") && len(x.Call.Args) == 1 {
 		v, err := t.val(x.Call.Args[0])
@@ -6854,7 +6989,37 @@ func knownIface(v ssa.Value, spkg *ssa.Package) bool {
 	if mi, ok := v.(*ssa.MakeInterface); ok {
 		return builtValue(mi.X, spkg)
 	}
+	// A reflect.Type the model computes (#200): msgpack's
+	// var errorType = reflect.TypeOf((*error)(nil)).Elem().
+	return reflectTypeExpr(v)
+}
+
+// reflectTypeExpr says whether v is a reflect.Type that reflectTypeCall
+// lowers: reflect.TypeOf, (reflect.Value).Type, reflect.PtrTo and
+// PointerTo, or Elem of such a type.
+func reflectTypeExpr(v ssa.Value) bool {
+	c, ok := v.(*ssa.Call)
+	if !ok {
+		return false
+	}
+	if c.Call.IsInvoke() {
+		return isReflectType(c.Call.Value.Type()) && c.Call.Method.Name() == "Elem" && reflectTypeExpr(c.Call.Value)
+	}
+	if fn := c.Call.StaticCallee(); fn != nil {
+		switch fn.String() {
+		case "reflect.TypeOf", "(reflect.Value).Type":
+			return true
+		case "reflect.PtrTo", "reflect.PointerTo":
+			return reflectTypeExpr(c.Call.Args[0])
+		}
+	}
 	return false
+}
+
+// isReflectType says whether t is the interface reflect.Type.
+func isReflectType(t types.Type) bool {
+	n, ok := types.Unalias(t).(*types.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "reflect" && n.Obj().Name() == "Type"
 }
 
 // holdsSync says whether a value of type t holds synchronisation state
@@ -8097,6 +8262,9 @@ func (t *fnState) known(v ssa.Value, seen map[ssa.Value]bool) bool {
 	case *ssa.Lookup:
 		return t.readsOnly() && t.known(v.X, seen)
 	case *ssa.Call:
+		if reflectTypeExpr(v) {
+			return true
+		}
 		// A value read from a sync.Map (syncMapCall), as from a map.
 		if callee := v.Call.StaticCallee(); callee != nil && callee.Signature.Recv() != nil {
 			if pt, ok := callee.Signature.Recv().Type().(*types.Pointer); ok && isSyncMap(pt.Elem()) {
