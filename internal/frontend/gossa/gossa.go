@@ -1223,10 +1223,6 @@ func addCtorWrappers(p *ir.Prog, fns []*ssa.Function) {
 				p.Funcs[ids[m]].CtorOnly = ctor.Name()
 			}
 		}
-		if ctor.Signature.Variadic() {
-			noWrapper()
-			continue
-		}
 		_, ctorPtr := ctor.Signature.Results().At(0).Type().(*types.Pointer)
 		if ptrRecv && !ctorPtr {
 			noWrapper()
@@ -1288,6 +1284,12 @@ func ctorWrapper(p *ir.Prog, ctor, m *ssa.Function, ctorID, mID int, deref bool)
 	if err != nil {
 		return nil, err
 	}
+	// A variadic constructor (cron.New(opts ...Option)) is called with no
+	// variadic argument: the default object, as a caller writes New() (#186).
+	variadic := ctor.Signature.Variadic()
+	if variadic && len(cabi.Params) > 0 {
+		cabi.Params = cabi.Params[:len(cabi.Params)-1]
+	}
 	mabi, err := abiOf(m, nil)
 	if err != nil {
 		return nil, err
@@ -1332,6 +1334,9 @@ func ctorWrapper(p *ir.Prog, ctor, m *ssa.Function, ctorID, mID int, deref bool)
 		abi.Params = append(abi.Params, prm)
 	}
 	nc, nm := len(ctor.Params), len(m.Params)-1
+	if variadic {
+		nc-- // the variadic slice is not a parameter of the wrapper
+	}
 	w := &ir.Func{Name: name, GoSig: abi.GoSig, ABI: abi, Status: contract.ModelComplete, Calls: []int{ctorID, mID}}
 	v := 0
 	fresh := func() ir.Var { v++; return ir.Var(v - 1) }
@@ -1342,7 +1347,14 @@ func ctorWrapper(p *ir.Prog, ctor, m *ssa.Function, ctorID, mID int, deref bool)
 	// Blocks: 0 call ctor; 1 receiver (and error check); 2 call method;
 	// 3 return the method's result; 4 return unit; 5 stuck.
 	w.Blocks = make([]ir.Block, 6)
-	w.Blocks[0] = ir.Block{Name: "ctor", Term: ir.Term{Kind: ir.TermCall, Callee: ctorID, CArgs: w.Params[:nc], Dst: r, Next: 1, Fallback: 5}}
+	cargs := append([]ir.Var{}, w.Params[:nc]...)
+	var b0 []ir.Instr
+	if variadic {
+		none := fresh()
+		b0 = append(b0, ir.Instr{Dst: none, Op: ir.Const{V: ir.NilSlice{}}})
+		cargs = append(cargs, none)
+	}
+	w.Blocks[0] = ir.Block{Name: "ctor", Instrs: b0, Term: ir.Term{Kind: ir.TermCall, Callee: ctorID, CArgs: cargs, Dst: r, Next: 1, Fallback: 5}}
 	recv := r
 	b1 := ir.Block{Name: "recv"}
 	if errRes {

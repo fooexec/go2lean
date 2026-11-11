@@ -763,6 +763,17 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 			note += ". Compiling with -deps models the functions of the dependency packages called, if it was off"
 		}
 		v.Diagnosis.Notes = append(v.Diagnosis.Notes, note)
+	} else if (v.Status == contract.VerdictSpurious || v.Status == contract.VerdictInconclusive) && v.Diagnosis != nil && len(p.cx.Assumptions) > 0 {
+		// No guessed call to name: the run's assumptions are what the
+		// model fixed that Go may not (a table it did not build, a callee
+		// it got stuck in), #185.
+		as := p.cx.Assumptions
+		more := ""
+		if len(as) > 3 {
+			as, more = as[:3], fmt.Sprintf(" (and %d more)", len(p.cx.Assumptions)-3)
+		}
+		v.Diagnosis.Notes = append(v.Diagnosis.Notes, "the model's run took assumptions Go need not share: "+
+			strings.Join(as, "; ")+more)
 	}
 	if v.Status == contract.VerdictSpurious && needsSlowCode(p.cx) && modelPanic(p.cx) != contract.PanicDataRace {
 		// The model's schedule lets a sleep end while other code could
