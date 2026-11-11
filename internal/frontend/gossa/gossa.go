@@ -1792,7 +1792,12 @@ func goSig(f *ssa.Function) string {
 }
 
 // funcName is the model name of a function: its Go name, or Type.Method
-// for a method (the same for value and pointer receivers).
+// for a method (the same for value and pointer receivers). A method of an
+// instantiated generic type names the type arguments, Type[int, int].Method:
+// two instances of a type (golang-lru's LRU[int, int] and LRU[int,
+// struct{}]) would otherwise share one name, and a target or model looked
+// up by it would run the wrong instance (#196). Like a generic function's
+// instance (Map[int]), it is modelled for its callers, not a target.
 func funcName(f *ssa.Function) string {
 	if recv := f.Signature.Recv(); recv != nil {
 		t := recv.Type()
@@ -1800,7 +1805,16 @@ func funcName(f *ssa.Function) string {
 			t = p.Elem()
 		}
 		if n, ok := t.(*types.Named); ok {
-			return n.Obj().Name() + "." + f.Name()
+			name := n.Obj().Name()
+			if targs := n.TypeArgs(); targs.Len() > 0 {
+				qual := func(p *types.Package) string { return p.Name() }
+				var args []string
+				for i := 0; i < targs.Len(); i++ {
+					args = append(args, types.TypeString(targs.At(i), qual))
+				}
+				name += "[" + strings.Join(args, ", ") + "]"
+			}
+			return name + "." + f.Name()
 		}
 	}
 	return f.Name()

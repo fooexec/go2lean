@@ -77,7 +77,9 @@ projects offer for it (Goose's channel model, Veil, Iris-Lean) is in
   machine sets it, also for the callees it runs big-step; sequential runs
   and the prover pass a literal `false`, which `simp` folds away. A race ends the run with
   the panic kind `data_race`, naming the location and both goroutines.
-- `sync/atomic`'s functions are `atomicLoad`/`atomicStore`, which acquire
+- `sync/atomic`'s functions, and the methods of its types (`Int32`,
+  `Int64`, `Uint32`, `Uint64`, `Bool`, and `Pointer[T]`, which holds a
+  `*T`, nil at first, #192), are `atomicLoad`/`atomicStore`, which acquire
   and release their location: no race between atomics, and an atomic
   publishes the writes before it. An atomic access is also checked against
   plain ones (since C3: an atomic add and a plain read of the same field

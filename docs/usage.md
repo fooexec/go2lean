@@ -180,6 +180,8 @@ accept (`int`, `string`, `float64`, `bool`), and searches the wrapper. A
 finding names the instance: `Last[int]`, `Map[int, string]`. Methods of
 generic types, unexported generic functions and functions whose
 constraints none of those types satisfies are listed as not searched.
+A method of a generic type is modelled per instance, named with its type
+arguments (`LRU[int, int].Keys`), for its callers (#196).
 
 `run` searches the `no_panic` and `no_hang` templates of the package's API
 only: exported functions, and exported methods of exported types. An
