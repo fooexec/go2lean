@@ -284,6 +284,9 @@ func (c *callerIndex) resultMayNil(f *ssa.Function, i, depth int, seen map[ssa.V
 // v == nil, so v is not nil there.
 func guarded(v ssa.Value, at ssa.Instruction) bool {
 	b := at.Block()
+	if calledBefore(v, at) {
+		return true
+	}
 	for x := b; x != nil; x = x.Idom() {
 		p := x.Idom()
 		if p == nil || len(p.Instrs) == 0 {
@@ -306,6 +309,36 @@ func guarded(v ssa.Value, at ssa.Instruction) bool {
 		}
 		if (cmp.Op == token.NEQ && taken == 0) || (cmp.Op == token.EQL && taken == 1) {
 			return true
+		}
+	}
+	return false
+}
+
+// calledBefore says whether the func value v is called on every path to
+// at, before it: a nil v would have panicked there first. go-toml passes
+// isInRange on only after calling isInRange(b[i]) itself (#194).
+func calledBefore(v ssa.Value, at ssa.Instruction) bool {
+	if _, ok := v.Type().Underlying().(*types.Signature); !ok {
+		return false
+	}
+	called := func(in ssa.Instruction) bool {
+		c, ok := in.(ssa.CallInstruction)
+		return ok && in != at && !c.Common().IsInvoke() && c.Common().Value == v
+	}
+	b := at.Block()
+	for _, in := range b.Instrs {
+		if in == at {
+			break
+		}
+		if called(in) {
+			return true
+		}
+	}
+	for x := b.Idom(); x != nil; x = x.Idom() {
+		for _, in := range x.Instrs {
+			if called(in) {
+				return true
+			}
 		}
 	}
 	return false

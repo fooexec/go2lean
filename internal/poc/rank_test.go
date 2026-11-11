@@ -79,6 +79,22 @@ func guardedUse(ok bool) {
 	}
 }
 
+func scan(b []byte, in func(byte) bool) int { n := 0; for _, c := range b { if in(c) { n++ } }; return n }
+
+func digits(b []byte) int {
+	var in func(byte) bool
+	switch b[0] {
+	case 'x':
+		in = func(c byte) bool { return c < 'g' }
+	case 'b':
+		in = func(c byte) bool { return c < '2' }
+	}
+	if len(b) < 2 || !in(b[1]) {
+		return 0
+	}
+	return scan(b, in) // in was called just above: never nil here
+}
+
 func use(t T, ok bool) {
 	x := 1
 	F(&x)
@@ -103,6 +119,7 @@ func use(t T, ok bool) {
 		{"T.M", 0, 0, 1},     // &x only
 		{"L", 0, 0, 1},       // find may return nil, but p != nil guards the call
 		{"E.Error", 1, 0, 0}, // no static call; a nil *E is boxed in check
+		{"scan", 0, 0, 1},    // in may be the nil zero, but digits calls it first (#194)
 	} {
 		names := []string{"p"}
 		if tc.fn == "T.M" {
@@ -110,6 +127,9 @@ func use(t T, ok bool) {
 		}
 		if tc.fn == "E.Error" {
 			names = []string{"e"}
+		}
+		if tc.fn == "scan" {
+			names = []string{"in"}
 		}
 		yes, maybe, calls, ok := c.nilSites("m", tc.fn, names)
 		if !ok || len(yes) != tc.yes || len(maybe) != tc.maybe || calls != tc.calls {

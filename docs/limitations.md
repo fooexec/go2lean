@@ -150,7 +150,9 @@ workspace, `go2lean summary` groups the findings by tier):
 Nil-ness is traced through the callers' SSA (since 2026-10-22): a nil
 constant through phis and conversions, a caller's parameter up to three
 callers up, the results of functions that return nil; a call reached only
-past `v != nil` (a dominating check) is not counted; a nil receiver is also
+past `v != nil` (a dominating check), or past a call of the func value `v`
+itself on every path (a nil would have panicked there first: go-toml's
+`isInRange`, #194), is not counted; a nil receiver is also
 traced to the places a nil pointer of its type is stored in an interface
 (a typed nil). On the 53 confirmed results of an older tingly-box workspace
 (`out-tingly6`) this gives 1 / 10 / 42 / 0: 33 are nil receivers of methods
