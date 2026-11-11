@@ -154,6 +154,7 @@ func cmdRun(args []string) error {
 	deps := fs.Bool("deps", true, "also model the functions of dependency packages the compiled packages call, and the standard-library code the model translates from source (-deps=false: only the compiled packages; dependency calls are havoc)")
 	resume := fs.Bool("resume", false, "skip properties already searched and counterexamples already verified in the workspace")
 	fuzzSpecs := fs.Bool("fuzz-specs", true, "read the packages' Go fuzz targets (FuzzXxx) as specs")
+	generics := fs.Bool("generics", true, "search the packages' exported generic functions at simple type arguments (int, string, float64, bool: the first their constraints accept)")
 	tests := fs.Bool("tests", false, "make the packages' test functions (TestXxx(t *testing.T)) targets")
 	specsOnly := fs.Bool("specs-only", false, "search the packages' specs only, not the no_panic and no_hang templates")
 	runBudget := fs.Int("run-budget", 0, "seconds the hunt stage may take in all: properties start in order (synchronising targets, specs, tests first) until it is spent, and the rest are listed (0: unlimited)")
@@ -173,6 +174,7 @@ func cmdRun(args []string) error {
 		return err
 	}
 	env.Deps, env.Resume, env.FuzzSpecs, env.Tests, env.SpecsOnly = *deps, *resume, *fuzzSpecs, *tests, *specsOnly
+	env.Generics = *generics
 	env.RunBudget = time.Duration(*runBudget) * time.Second
 	env.Changed = *changed
 	env.Refine = *refineRounds

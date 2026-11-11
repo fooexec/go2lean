@@ -83,3 +83,31 @@ findings the summary shows: a caller can reach them, or a spec fails.
   that returns its main type (`cron.New() *Cron`) is not taken for that
   type's constructor, so the type's methods run on receivers that no caller
   can build.
+
+## Generic functions (`-generics`)
+
+lo is almost all generic: 429 generic functions and types went unsearched,
+and the first run checked 99 properties. `run` now instantiates each exported
+generic function at simple type arguments (`int`, `string`, `float64`,
+`bool`: the first its constraints accept) through a test-file wrapper, and
+searches the wrapper.
+
+| lo | before | with `-generics` |
+|---|---|---|
+| generic functions searched | 0 | 454 (lo 296, lo/it 155, lo/parallel 3) |
+| properties | 99 | 554 |
+| confirmed (listed) | 18 (4) | 261 (14, in 13 places) |
+| spurious | 16 | 28 |
+| time | 257 s | 335 s |
+
+The new listed findings, all in generic functions:
+- `DispatchingStrategyRoundRobin[int]` divides by zero on no channels.
+- `FanIn[int]` and `SliceToChannel[int]` fail in `makechan` on a negative
+  buffer size.
+- `RangeFrom[int]` and `RangeWithSteps[int]` fail in `makeslice`.
+- `ChunkEntries` and `ChunkString` raise their documented panics.
+
+233 of the other confirmed findings call a nil callback. They are ranked
+below tier 1 and only counted. The 28 spurious findings are `recover` (#181:
+`Try` and `TryOr` and their instances, 16) and `x/text` (#183, 12).
+

@@ -22,6 +22,7 @@ import (
 	"github.com/andreasfoo/go2lean/internal/contract"
 	"github.com/andreasfoo/go2lean/internal/frontend/gossa"
 	"github.com/andreasfoo/go2lean/internal/fuzzimport"
+	"github.com/andreasfoo/go2lean/internal/geninst"
 	"github.com/andreasfoo/go2lean/internal/ir"
 	"github.com/andreasfoo/go2lean/internal/memgov"
 	"github.com/andreasfoo/go2lean/internal/poc"
@@ -43,6 +44,12 @@ type Env struct {
 	// FuzzSpecs reads the packages' Go fuzz targets as sequence specs
 	// (internal/fuzzimport); their generated file joins Overlay.
 	FuzzSpecs bool
+	// Generics instantiates the packages' exported generic functions at
+	// simple type arguments (internal/geninst); their wrappers' file joins
+	// Overlay.
+	Generics bool
+	// instantiated: per package, the generic functions geninst wrapped.
+	instantiated map[string][]string
 	// Overlay adds files to the packages for compiling and replaying
 	// (absolute path to contents), never written into them.
 	Overlay map[string][]byte
@@ -218,12 +225,12 @@ func CompileAll(w contract.Workspace, env Env, out io.Writer, patterns ...string
 				fmt.Fprintf(out, "      - %s\n", is)
 			}
 		}
-		if g := prog.Generic; len(g) > 0 {
+		if g := notInstantiated(prog.Generic, env.instantiated[report.Package]); len(g) > 0 {
 			names := g
 			if len(names) > 8 {
 				names = append(names[:8:8], fmt.Sprintf("and %d more", len(g)-8))
 			}
-			fmt.Fprintf(out, "  %d generic functions and types not searched (a model needs concrete type arguments: a spec, or a test with -tests, that instantiates them is): %s\n", len(g), strings.Join(names, ", "))
+			fmt.Fprintf(out, "  %d generic functions and types not searched (methods of generic types, unexported functions, and functions whose constraints no simple type satisfies: a spec, or a test with -tests, that instantiates them gives them a model): %s\n", len(g), strings.Join(names, ", "))
 		}
 		reports = append(reports, report)
 	}
@@ -592,6 +599,29 @@ func RunAll(w contract.Workspace, env Env, opts constraint.SearchOptions, out io
 		}
 		maps.Copy(env.Overlay, overlay)
 	}
+	if env.Generics {
+		overlay, done, err := geninst.Wrappers(env.module(), patterns...)
+		if err != nil {
+			return nil, err
+		}
+		if len(done) > 0 {
+			fmt.Fprintln(out, "== generic functions at simple type arguments")
+			var pkgs []string
+			for p := range done {
+				pkgs = append(pkgs, p)
+			}
+			sort.Strings(pkgs)
+			for _, p := range pkgs {
+				fmt.Fprintf(out, "  %s: %d\n", p, len(done[p]))
+			}
+		}
+		env.instantiated = done
+		env.Overlay = maps.Clone(env.Overlay)
+		if env.Overlay == nil {
+			env.Overlay = map[string][]byte{}
+		}
+		maps.Copy(env.Overlay, overlay)
+	}
 	fmt.Fprintln(out, "== Compile stage")
 	var reports []*contract.ModelReport
 	var err error
@@ -826,6 +856,17 @@ func matchingTargets(w contract.Workspace, props []*contract.Property, re *regex
 	for _, p := range props {
 		if t, err := w.Target(p.Target); err == nil && re.MatchString(t.Func) {
 			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// notInstantiated is generic, without the names geninst wrapped.
+func notInstantiated(generic, wrapped []string) []string {
+	var out []string
+	for _, g := range generic {
+		if !slices.Contains(wrapped, g) {
+			out = append(out, g)
 		}
 	}
 	return out

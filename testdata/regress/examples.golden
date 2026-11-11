@@ -260,6 +260,7 @@ exhausted portable_fill_nohang
 exhausted portable_fill_nopanic
 confirmed portable_finish_nopanic
 exhausted portable_first_nopanic
+confirmed portable_go2leangen_must__int_nopanic
 inconclusive portable_group_nopanic
 confirmed portable_head_nopanic
 exhausted portable_initencoder_nopanic

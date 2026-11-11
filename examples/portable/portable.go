@@ -50,7 +50,9 @@ func PerMax() int {
 }
 
 // Must returns v or panics with err. Generic: its instances are modelled,
-// not the function itself (Must[int] is used by Port).
+// not the function itself (Must[int] is used by Port); run searches it as
+// Must[int] (-generics), confirmed: it panics on a non-nil error, as it
+// says.
 func Must[T any](v T, err error) T {
 	if err != nil {
 		panic(err)

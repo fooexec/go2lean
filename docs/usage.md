@@ -156,7 +156,7 @@ go2lean props   [-workspace out] -package <path>  template properties from the m
 go2lean hunt    [-workspace out] [-property id] [-engine random|exhaustive|all] [-jobs n] [-budget s]
                 [-seed n] [-trials n] [-fuel n] [-maxlen n] [-exhaust-len n] [-exhaust-limit n]
 go2lean poc     [-workspace out] -counterexample id [more ids...]   one build per package, one process per counterexample
-go2lean run     [-workspace out] [-nil-inputs] [-deps=false] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
+go2lean run     [-workspace out] [-nil-inputs] [-deps=false] [-generics=false] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking]
                 [-repairs n] [-report] <package>
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]
@@ -170,6 +170,16 @@ portable code, `slices`, the encodings, the environment and
 `crypto/rand`). `-deps=false` models only the compiled packages; their
 calls into anything else are then unmodelled, and their results havoc,
 which gives more spurious counterexamples.
+
+`run` searches the packages' exported generic functions too (`-generics`,
+on by default). A generic function has no model until something
+instantiates it, so `run` writes, into a test-file overlay
+(`zz_go2lean_generics_test.go`, never written into the package), a wrapper
+that calls each one at the first simple type arguments its constraints
+accept (`int`, `string`, `float64`, `bool`), and searches the wrapper. A
+finding names the instance: `Last[int]`, `Map[int, string]`. Methods of
+generic types, unexported generic functions and functions whose
+constraints none of those types satisfies are listed as not searched.
 
 `-run` selects targets as `go test -run` selects tests, and a suite's
 method is a target of its own (`-run 'TestY'`). `-run 'TestX/sub'` selects

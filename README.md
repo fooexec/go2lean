@@ -32,7 +32,8 @@ Lean finds the inputs; `go test` is the judge.
 - **Executable Go models in Lean 4** — translate Go through SSA into a
   fuel-bounded semantic model, with unsupported behavior made explicit.
 - **Safety checks without handwritten specs** — automatically generate
-  `no_panic` properties for eligible target functions.
+  `no_panic` properties for eligible target functions, generic ones
+  included (instantiated at simple type arguments: `Last[int]`).
 - **Business rules written in Go** — express postconditions as ordinary
   `bool`-returning Go functions; compile them alongside the target and reuse
   them as oracles in real Go tests.
