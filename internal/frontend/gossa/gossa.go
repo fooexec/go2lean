@@ -4365,6 +4365,14 @@ func (t *fnState) call(x *ssa.Call) error {
 	if callee != nil {
 		name = callee.String()
 	}
+	if x.Call.IsInvoke() {
+		// A method call through a nil interface panics in Go, whatever the
+		// method (backoff's NewTicker(nil) calls b.Reset(), #174): checked
+		// before the call is made havoc or ignored.
+		if err := t.nilInvokePanics(x.Call.Value); err != nil {
+			return err
+		}
+	}
 	if hasResult {
 		if callee != nil && callee.Pkg != nil && callee.Name() == "Perm" && strings.HasPrefix(callee.Pkg.Pkg.Path(), "math/rand") && isSlice(x.Type()) {
 			return t.randPerm(x, x.Call.Args[len(x.Call.Args)-1])
@@ -7838,6 +7846,26 @@ func (t *fnState) nilCompare(x *ssa.BinOp, v ssa.Value) error {
 	t.emit(ir.Instr{Dst: dst, HavocSite: idx})
 	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
 	t.cur = &t.out.Blocks[join]
+	return nil
+}
+
+// nilInvokePanics ends the block with a nil dereference when interface
+// value v is nil (opaqueNil), and continues in a fresh block otherwise.
+func (t *fnState) nilInvokePanics(v ssa.Value) error {
+	val, err := t.val(v)
+	if err != nil {
+		return err
+	}
+	isNil := t.fresh()
+	t.emit(ir.Instr{Dst: isNil, Op: ir.Simple("isNilOpaque"), Args: []ir.Var{val}})
+	panics := len(t.out.Blocks)
+	cont := panics + 1
+	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: isNil, T: panics, F: cont}
+	name := t.cur.Name
+	t.out.Blocks = append(t.out.Blocks,
+		ir.Block{Name: name + ".nil-iface", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicNilDeref}},
+		ir.Block{Name: name + ".iface"})
+	t.cur = &t.out.Blocks[cont]
 	return nil
 }
 

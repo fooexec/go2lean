@@ -83,9 +83,12 @@ package state.
 
 ## Open
 
-- **backoff's ticker.** The model reports a deadlock, while the real run
-  dereferences nil: `panic_kind_mismatch` on `Ticker.run` and `Ticker.send`
-  (a `*time.Ticker` left nil by the harness).
+- **backoff's ticker** (fixed, #174). `NewTicker(nil)` calls `b.Reset()`
+  on its nil `BackOff`, which Go dereferences; the model ignored the call
+  (no result, no implementing type) and reported a goroutine leak. A
+  method call through a nil interface now panics in the model too: the 3
+  inconclusive findings are confirmed nil-argument panics, ranked below
+  tier 1.
 - **Unexported functions dominate.** 105 of toml's 111 confirmed findings
   are in unexported functions or depend on package state. The ranking puts
   them below tier 1, but they still make up most of the summary's count.
