@@ -78,7 +78,8 @@ The tier-1 findings are the same in every mode.
     translated.
   - Its `Write` and `Flush` recover their own `osError` panics with
     `defer b.handlePanic(&err, op)`, a shape the model's `recover`
-    (#181) does not cover yet (#209).
+    (#181) did not cover (#209). Fixed: with #209, envconfig gives no
+    spurious verdict under `GO2LEAN_STD_ALL=1`.
 - **chi, 1 finding lost in both.**
   - `Compressor.SetEncoder~NewCompressor` is confirmed by default.
   - Translated, `NewCompressor` runs `compress/flate`'s writer
