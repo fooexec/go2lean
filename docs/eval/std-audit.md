@@ -36,25 +36,14 @@ Each change rerun on the audit (#207):
 | first audit (#205) | 71.4% | 3.4% | 7.9% |
 | `clear`, `print`, `println`; debug switches as no-ops | 71.8% | 3.1% | 7.9% |
 
-## Translating more of the standard library (an experiment)
+## Translating more of the standard library
 
-Under `-deps` the model translates only a list of standard-library
-packages (`modelledStdlib`). `GO2LEAN_STD_ALL=1` translates more: every
-package except the boundary and those the model has its own semantics for
-(`fmt`, `errors`, `regexp`, `encoding/json`, `sync`, `time`, ...), and of
-those only the ones that import no boundary package directly (`reflect`,
-`os`, `unsafe`, `syscall`, the runtime). On the audit and on the fourth
-run's seven projects (same build, each mode):
-
-| | the list (default) | every package | no boundary import (`GO2LEAN_STD_ALL=1`) |
-|---|---|---|---|
-| audit: complete | 71.8% | 75.9% | 74.4% |
-| seven projects: time | 618 s | 1,075 s | 605 s |
-| new spurious verdicts | | 2 (envconfig: `text/template` reaches `reflect.Type.NumOut`) | 1 (envconfig: `text/tabwriter`'s `defer`/`recover`, #209) |
-| findings lost | | 1 | 1 (chi: `compress/flate`, translated, runs every trial out of fuel, #210) |
-
-It stays off by default until those are fixed: translating more code
-also reaches more of what the model does not cover yet.
+`GO2LEAN_STD_ALL=1` translates more standard-library packages than the
+default list. Every package lifts the audit from 71.8% to 75.9% complete;
+the packages that import no boundary package give 74.4%. On real projects,
+each costs a spurious verdict and a lost finding, so it stays off: the
+data and the project-by-project details are in
+[std-translation.md](std-translation.md).
 
 ## The language gaps (3.4%)
 
