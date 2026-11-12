@@ -6,7 +6,7 @@ import json
 import sys
 
 ws = sys.argv[1]
-prefix = "p_github_com_andreasfoo_go2lean_testdata_goosesem_seq"
+prefix = "p_github_com_fooexec_go2lean_testdata_goosesem_seq"
 proofs = {}
 for f in glob.glob(f"{ws}/proofs/*.json"):
     p = json.load(open(f))

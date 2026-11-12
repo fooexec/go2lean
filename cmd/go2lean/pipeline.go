@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/constraint"
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/pipeline"
-	"github.com/andreasfoo/go2lean/internal/poc"
+	"github.com/fooexec/go2lean/internal/constraint"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/pipeline"
+	"github.com/fooexec/go2lean/internal/poc"
 )
 
 // engineOptions defers reading the -engine flag until after Parse.

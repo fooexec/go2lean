@@ -32,7 +32,7 @@ muts = load("mutations")
 for p in sorted(out):
     m = muts.get(p)
     mut = f" mut={m['killed']}/{m['tried']}" if m else ""
-    print(out[p] + mut, p.removeprefix("p_github_com_andreasfoo_go2lean_examples_"))
+    print(out[p] + mut, p.removeprefix("p_github_com_fooexec_go2lean_examples_"))
 EOF
 GOLDEN=testdata/regress/examples.golden
 EXPECTED=$GOLDEN

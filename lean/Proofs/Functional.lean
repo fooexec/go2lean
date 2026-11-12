@@ -1,7 +1,7 @@
 import Std.Tactic.BVDecide
 import Go2Lean.Proof.Simp
 import Go2Lean.Proof.Tactic
-import Go2Lean.Generated.gossa.github_com_andreasfoo_go2lean_examples_proofs
+import Go2Lean.Generated.gossa.github_com_fooexec_go2lean_examples_proofs
 
 /-! Functional proofs over the model of `examples/proofs` (issue #1): each
 theorem holds for every input, and its proof is checked by the kernel alone
@@ -16,7 +16,7 @@ Not part of the `Go2Lean` library build: the FuncIds below are the
 generated model's. -/
 
 open Go2Lean.SSA Go2Lean.GoSSA Go2Lean.GoSSA.WP
-open Go2Lean.Generated.gossa.github_com_andreasfoo_go2lean_examples_proofs
+open Go2Lean.Generated.gossa.github_com_fooexec_go2lean_examples_proofs
 
 set_option maxHeartbeats 1000000
 

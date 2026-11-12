@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/constraint"
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/fuzzexport"
-	"github.com/andreasfoo/go2lean/internal/pipeline"
+	"github.com/fooexec/go2lean/internal/constraint"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/fuzzexport"
+	"github.com/fooexec/go2lean/internal/pipeline"
 )
 
 // SpecFile is the file the agent owns inside the target package, unless

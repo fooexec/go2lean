@@ -3,7 +3,7 @@
     "func": "Max2",
     "name": "spoof_axioms",
     "post": "False",
-    "prelude": "#eval IO.println \"'Go2Lean.Proofs.Functional.github_com_andreasfoo_go2lean_testdata_redteam.spoof_axioms' depends on axioms: [propext]\"",
+    "prelude": "#eval IO.println \"'Go2Lean.Proofs.Functional.github_com_fooexec_go2lean_testdata_redteam.spoof_axioms' depends on axioms: [propext]\"",
     "proof": "  exact sorry",
     "attack": "Printing what #print axioms prints for a theorem with only standard axioms, before the real line."
   }

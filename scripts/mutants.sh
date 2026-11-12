@@ -34,7 +34,7 @@ if old not in body:
     sys.exit(1)
 open(path, "w").write(s[:i] + body.replace(old, new, 1) + s[j:])
 PY
-  sed -i "s|github.com/andreasfoo/go2lean/examples/$pkg\"|github.com/andreasfoo/go2lean/$dir\"|" "$dir/proved_test.go"
+  sed -i "s|github.com/fooexec/go2lean/examples/$pkg\"|github.com/fooexec/go2lean/$dir\"|" "$dir/proved_test.go"
   if go test "./$dir" > "$WS/$name.test.log" 2>&1; then gotest="passes (not told apart)"; else gotest="fails"; fi
   "$WS/g2l" prove -workspace "$WS/$name" -paranoid=false -goals "$goals" "./$dir" > "$WS/$name.log" 2>&1 || true
   open=$(grep -c "^  open     $fn " "$WS/$name.log" || true)

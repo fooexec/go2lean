@@ -8,3 +8,4 @@
 /lean/Search/
 /lean/Go2Lean/Generated/
 /testdata/mutant-*/
+/go2lean

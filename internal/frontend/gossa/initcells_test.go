@@ -3,7 +3,7 @@ package gossa
 import (
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/ir"
+	"github.com/fooexec/go2lean/internal/ir"
 )
 
 // A package whose functions start goroutines and use a variable its

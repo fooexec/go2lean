@@ -399,7 +399,7 @@ LLVM struct). Both produce the same record:
 
 ```json
 {
-  "go_func": "github.com/andreasfoo/go2lean/examples/overflow.Sum",
+  "go_func": "github.com/fooexec/go2lean/examples/overflow.Sum",
   "go_sig": "func(xs []int) int", "frontend": "gossa",
   "params": [{"go": "xs", "go_type": "[]int", "kind": "slice", "elem": "int",
               "model": ["xs_ref", "xs_off", "xs_len", "xs_cap"]}],
@@ -690,7 +690,7 @@ rendered per the Go type in the ABI (signed/unsigned). The workspace layout:
 
 ```jsonc
 // Target
-{"id":"t-sum","module":"github.com/andreasfoo/go2lean","package":".../examples/overflow",
+{"id":"t-sum","module":"github.com/fooexec/go2lean","package":".../examples/overflow",
  "func":"Sum","go_sig":"func(xs []int) int","models":{"gossa":"models/gossa/Sum.json"}}
 
 // Property

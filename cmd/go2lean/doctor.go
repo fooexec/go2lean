@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/sandbox"
-	leanassets "github.com/andreasfoo/go2lean/lean"
+	"github.com/fooexec/go2lean/internal/sandbox"
+	leanassets "github.com/fooexec/go2lean/lean"
 )
 
 // doctor inspects prerequisites without downloading a toolchain or executing

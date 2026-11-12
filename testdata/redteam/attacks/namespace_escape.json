@@ -3,7 +3,7 @@
     "func": "Max2",
     "name": "namespace_escape",
     "post": "False",
-    "prelude": "end Go2Lean.Proofs.Functional.github_com_andreasfoo_go2lean_testdata_redteam\ntheorem Go2Lean.Proofs.Functional.github_com_andreasfoo_go2lean_testdata_redteam.namespace_escape : True := trivial\nnamespace Go2Lean.Proofs.Functional.github_com_andreasfoo_go2lean_testdata_redteam",
+    "prelude": "end Go2Lean.Proofs.Functional.github_com_fooexec_go2lean_testdata_redteam\ntheorem Go2Lean.Proofs.Functional.github_com_fooexec_go2lean_testdata_redteam.namespace_escape : True := trivial\nnamespace Go2Lean.Proofs.Functional.github_com_fooexec_go2lean_testdata_redteam",
     "proof": "  trivial",
     "attack": "Leaving the namespace to declare the theorem's name first with a true type; go2lean's theorem then fails as a duplicate."
   }

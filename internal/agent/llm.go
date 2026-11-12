@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/andreasfoo/go2lean/internal/sandbox"
+	"github.com/fooexec/go2lean/internal/sandbox"
 )
 
 // LLM is the one call the agent makes. Implementations: Claude (the

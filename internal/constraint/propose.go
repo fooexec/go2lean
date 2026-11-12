@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/geninst"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/geninst"
 )
 
 var nonIdent = regexp.MustCompile(`[^A-Za-z0-9_]`)

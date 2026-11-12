@@ -9,7 +9,7 @@ import (
 // -deps translates a dependency up to four calls deep; Options.Translate
 // adds a function past that depth, and only that function (#85).
 func TestTranslateForced(t *testing.T) {
-	const deep = "github.com/andreasfoo/go2lean/testdata/refinedeep"
+	const deep = "github.com/fooexec/go2lean/testdata/refinedeep"
 	funcs := func(opts Options) []string {
 		progs, _, err := TranslateAllOpts("../../..", opts, "./examples/refine")
 		if err != nil {

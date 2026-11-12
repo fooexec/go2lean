@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/builtin"
-	"github.com/andreasfoo/go2lean/internal/constraint"
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/pipeline"
-	"github.com/andreasfoo/go2lean/internal/sandbox"
+	"github.com/fooexec/go2lean/internal/builtin"
+	"github.com/fooexec/go2lean/internal/constraint"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/pipeline"
+	"github.com/fooexec/go2lean/internal/sandbox"
 )
 
 func activatedOrder(t *testing.T, body string) (contract.Workspace, pipeline.Env, *contract.Property) {

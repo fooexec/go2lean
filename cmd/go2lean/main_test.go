@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/pipeline"
+	"github.com/fooexec/go2lean/internal/pipeline"
 )
 
 func TestWorkspaceOutsideCheckout(t *testing.T) {

@@ -7,7 +7,7 @@ package sharedep
 import (
 	"sync"
 
-	"github.com/andreasfoo/go2lean/testdata/sharedep"
+	"github.com/fooexec/go2lean/testdata/sharedep"
 )
 
 // HitTwice hits from two goroutines. Bug: a data race on the dependency's

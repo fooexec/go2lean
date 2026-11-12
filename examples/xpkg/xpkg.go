@@ -3,7 +3,7 @@
 // money, so they are only visible when the models are linked.
 package xpkg
 
-import "github.com/andreasfoo/go2lean/examples/xpkg/money"
+import "github.com/fooexec/go2lean/examples/xpkg/money"
 
 // Share guards negative totals but not zero: money.Pct then divides by
 // zero.

@@ -3,7 +3,7 @@
 // havoc, and that goes away once the loop translates that call.
 package refine
 
-import "github.com/andreasfoo/go2lean/testdata/refinedeep"
+import "github.com/fooexec/go2lean/testdata/refinedeep"
 
 // Digit returns the last decimal digit of x, which the dependency
 // computes five calls deep. It panics if the digit is out of range, which

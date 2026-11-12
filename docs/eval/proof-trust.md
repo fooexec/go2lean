@@ -3,8 +3,8 @@
 This page is the evidence for [trust](../trust.md): whether a `proved`
 record holds when the proof agent is malicious, and whether the proved
 properties hold of the real Go code. The work is tracked in
-[#29](https://github.com/andreasfoo/go2lean/issues/29), part of
-[#22](https://github.com/andreasfoo/go2lean/issues/22).
+[#29](https://github.com/fooexec/go2lean/issues/29), part of
+[#22](https://github.com/fooexec/go2lean/issues/22).
 
 ## Before
 

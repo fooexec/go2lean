@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/prover"
-	"github.com/andreasfoo/go2lean/internal/sandbox"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/prover"
+	"github.com/fooexec/go2lean/internal/sandbox"
 )
 
 func TestParseProof(t *testing.T) {

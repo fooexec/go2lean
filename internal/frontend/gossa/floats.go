@@ -5,7 +5,7 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/andreasfoo/go2lean/internal/ir"
+	"github.com/fooexec/go2lean/internal/ir"
 	"golang.org/x/tools/go/ssa"
 )
 

@@ -14,7 +14,7 @@ DEPS=${DEPS:-}
 rm -rf "$WS"; mkdir -p "$WS"
 go build -o "$WS/g2l" ./cmd/go2lean
 "$WS/g2l" compile ${DEPS:+-deps} -workspace "$WS" "./$PKG" > "$WS/compile.log" 2>&1
-"$WS/g2l" props -workspace "$WS" -package "github.com/andreasfoo/go2lean/$PKG" > /dev/null
+"$WS/g2l" props -workspace "$WS" -package "github.com/fooexec/go2lean/$PKG" > /dev/null
 for p in $(ls "$WS/properties" | sed 's/\.json$//' | grep 'diff$'); do
   for seed in $(seq 1 "$SEEDS"); do
     "$WS/g2l" hunt -workspace "$WS" -property "$p" -seed "$seed" -engine random >> "$WS/hunt.log" 2>&1

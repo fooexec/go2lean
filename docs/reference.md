@@ -85,13 +85,13 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - ✅ Regression gate in CI (260 properties); benchmark of hand-found bugs (34/34)
 - ✅ Differential tests of the JSON, regexp, UTF-16 and number models against Go
 - ✅ Proof prototype: a postcondition proved for all 64-bit inputs by hand (`lean/Proofs`)
-- ✅ Real-world run: tingly-box, 82 bugs found and confirmed ([go2lean-tingly-box](https://github.com/andreasfoo/go2lean-tingly-box))
+- ✅ Real-world run: tingly-box, 82 bugs found and confirmed ([go2lean-tingly-box](https://github.com/fooexec/go2lean-tingly-box))
 - ✅ Proofs over all inputs in the pipeline for `no_panic` on integer and bool functions, each with its trust base (10 on the examples, all kernel-checked), and, through the weakest precondition, for specs and integer slices of loop-free functions (5 more on the examples, each judged by Lean's comparator)
 - ✅ Sequence specs (`go2lean:sequence`): properties of a sequence of calls, bounded model checking over short sequences
 - ✅ Spec mutation check: each spec that held is run against mutants of the code under test; a spec no mutant fails is flagged as checking nothing
 - ✅ Specs as Go fuzz targets (`go2lean fuzz`, and in `agent`): the same properties searched by `go test -fuzz` on the real code
 - ✅ Go fuzz targets (`FuzzXxx`) read as specs (`go2lean run`, `-fuzz-specs`): a project with fuzz targets needs no spec writing
-- 🚧 Proofs of postconditions: `go2lean prove` states a function's contract from a postcondition and proves loop-free functions alone; loops by an agent that writes the invariants under the kernel's check (10 of 10 goals, nested loops and bubble sort included, [eval](../docs/eval/proof-agent.md)) or by hand (up to insertion sort); a Go spec can be the postcondition; every proof judged by Lean's comparator in a sandbox, with a certificate ([trust](trust.md), [#22](https://github.com/andreasfoo/go2lean/issues/22))
+- 🚧 Proofs of postconditions: `go2lean prove` states a function's contract from a postcondition and proves loop-free functions alone; loops by an agent that writes the invariants under the kernel's check (10 of 10 goals, nested loops and bubble sort included, [eval](../docs/eval/proof-agent.md)) or by hand (up to insertion sort); a Go spec can be the postcondition; every proof judged by Lean's comparator in a sandbox, with a certificate ([trust](trust.md), [#22](https://github.com/fooexec/go2lean/issues/22))
 - 🚧 `init` functions and package state (stores an `init` makes on every path, since 2026-10-23); floats ✅ (#148)
 - 🚧 Concurrency (C1, C2, [concurrency.md](../docs/concurrency.md)): goroutines, channels, `select`, `sync`; deadlocks and leaks found and confirmed in 60 of GoKer's 68 blocking kernels (`context`, timers, `sync.Cond` included), with the model's schedule replayed in Go when its scheduler does not take it; data races found and confirmed under `-race` in 24 of its 35 non-blocking kernels; a certificate under every schedule for small configurations (C3)
 

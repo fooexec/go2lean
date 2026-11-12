@@ -22,7 +22,7 @@ import (
 
 	"golang.org/x/tools/go/packages"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/contract"
 )
 
 // Spec is one spec to export.

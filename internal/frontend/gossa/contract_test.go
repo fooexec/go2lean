@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/ir"
+	"github.com/fooexec/go2lean/internal/ir"
 )
 
 // The results of unmodelled calls stay within their callee's documented

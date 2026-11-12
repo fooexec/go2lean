@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/ir"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/ir"
 )
 
 // bigProg has n functions of about 1 KB of model text each.

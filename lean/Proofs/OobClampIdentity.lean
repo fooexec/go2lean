@@ -1,6 +1,6 @@
 import Std.Tactic.BVDecide
 import Go2Lean.Search
-import Go2Lean.Generated.gossa.github_com_andreasfoo_go2lean_examples_oob
+import Go2Lean.Generated.gossa.github_com_fooexec_go2lean_examples_oob
 
 /-! Prototype of the proof engine: a theorem over all 64-bit inputs, not a
 sample. For every `v lo hi`, the model of `oob.Clamp` returns a value on
@@ -18,7 +18,7 @@ apart.) It is not part of the `Go2Lean` library build: the FuncIds below are
 those of the generated model and change when M1 regenerates it. -/
 
 open Go2Lean Go2Lean.SSA Go2Lean.GoSSA
-open Go2Lean.Generated.gossa.github_com_andreasfoo_go2lean_examples_oob
+open Go2Lean.Generated.gossa.github_com_fooexec_go2lean_examples_oob
 
 set_option maxHeartbeats 0
 set_option maxRecDepth 100000

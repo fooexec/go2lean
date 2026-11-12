@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	leanassets "github.com/andreasfoo/go2lean/lean"
+	leanassets "github.com/fooexec/go2lean/lean"
 )
 
 // Root walks up from the working directory to the directory holding go.mod.

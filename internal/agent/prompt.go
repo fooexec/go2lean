@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/contract"
 )
 
 const systemPrompt = `You are the property-proposal agent of go2lean, a tool that finds bugs in Go

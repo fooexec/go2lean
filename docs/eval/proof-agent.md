@@ -2,7 +2,7 @@
 
 Two runs of `go2lean prove -llm`, in which an LLM writes the loop
 invariants and proofs of functional theorems that go2lean states
-([#22](https://github.com/andreasfoo/go2lean/issues/22)): the first on
+([#22](https://github.com/fooexec/go2lean/issues/22)): the first on
 single loops, the second on nested loops, a call in a loop, and Go specs
 as postconditions.
 

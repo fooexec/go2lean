@@ -16,7 +16,7 @@ func TestRewriteCompiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkg := "github.com/andreasfoo/go2lean/examples/conc"
+	pkg := "github.com/fooexec/go2lean/examples/conc"
 	files, err := Rewrite(root, pkg)
 	if err != nil {
 		t.Fatal(err)

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/fuzzexport"
+	"github.com/fooexec/go2lean/internal/fuzzexport"
 )
 
 // cmdFuzz hands the spec properties of a package to Go's fuzzer.

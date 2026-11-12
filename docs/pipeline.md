@@ -124,7 +124,7 @@ on count (`relevant_havoc`). The loop then translates that function
 and replays that property again (#85):
 
 ```
-== Refinement round 1: translating github.com/andreasfoo/go2lean/testdata/refinedeep.Level5
+== Refinement round 1: translating github.com/fooexec/go2lean/testdata/refinedeep.Level5
   refine_digit_nopanic random: none in 2000 trials (0 out of fuel, 0 moot/stuck); ...
 ```
 
