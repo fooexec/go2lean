@@ -132,6 +132,8 @@ func TestGoose(t *testing.T) {
 		"testFormatFloatPrecision": testFormatFloatPrecision,
 		"testFormatFloatShortest": testFormatFloatShortest,
 		"testFormatFloatSpecial": testFormatFloatSpecial,
+		"testFtoiInRange": testFtoiInRange,
+		"testFtoiOutOfRange": testFtoiOutOfRange,
 		"testHexRoundTrip": testHexRoundTrip,
 		"testIOReadAllChunks": testIOReadAllChunks,
 		"testIOReadAllStrings": testIOReadAllStrings,

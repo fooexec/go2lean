@@ -3,6 +3,8 @@ package gossa
 import (
 	"fmt"
 	"go/token"
+	"os"
+	"runtime"
 	"strings"
 
 	"github.com/fooexec/go2lean/internal/ir"
@@ -115,6 +117,11 @@ func (t *fnState) floatConv(dst, src ssa.Value) (bool, error) {
 		if err != nil {
 			return true, err
 		}
+		if replayArch() == "amd64" {
+			// Out of range and NaN as the machine the replay runs on
+			// converts them (#207): exact for every float the model knows.
+			return true, t.floatGuarded(dst, sw, ir.Raw(fmt.Sprintf("(.ftoiAmd64 %d %d %v)", sw, iw, signed)), []ir.Var{a}, what)
+		}
 		inRange := t.fresh()
 		t.emit(ir.Instr{Dst: inRange, Op: ir.Raw(fmt.Sprintf("(.ftoiOk %d %d %v)", sw, iw, signed)), Args: []ir.Var{a}})
 		res := t.def(dst)
@@ -126,6 +133,16 @@ func (t *fnState) floatConv(dst, src ssa.Value) (bool, error) {
 			return t.havocInto(res, dst.Type(), t.f.Name()+": "+what, "opaque-op", "")
 		})
 	}
+}
+
+// replayArch is the architecture the replay's go test runs on: GOARCH
+// when set, else the machine's. Go leaves a float-to-integer conversion out
+// of range to the machine, so the model converts as that one does.
+func replayArch() string {
+	if a := os.Getenv("GOARCH"); a != "" {
+		return a
+	}
+	return runtime.GOARCH
 }
 
 // floatMathCall lowers math.Float64bits, Float64frombits, Float32bits and

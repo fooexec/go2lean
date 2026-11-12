@@ -591,6 +591,9 @@ inductive Op where
   | ftoiOk (w dw : Nat) (signed : Bool)
   /-- A `w`-bit float truncated to a `dw`-bit integer (in range: see `ftoiOk`). -/
   | ftoi (w dw : Nat) (signed : Bool)
+  /-- A `w`-bit float converted to a `dw`-bit integer as Go does on amd64,
+  out-of-range and NaN included (Go leaves those to the machine, #207). -/
+  | ftoiAmd64 (w dw : Nat) (signed : Bool)
   /-- A `w`-bit float converted to `dw` bits (float32 <-> float64). -/
   | fconv (w dw : Nat)
   /-- The square root (IEEE: correctly rounded; NaN below zero, `-0` of `-0`). -/
@@ -1739,6 +1742,30 @@ def floatTrunc? (w dw : Nat) (signed : Bool) (x : Nat) : Option Int :=
     some (if signed then t.toInt64.toInt else t.toUInt64.toNat)
   else none
 
+/-- `f` truncated toward zero to a signed `bits`-bit integer as amd64's
+CVTTSD2SI does: NaN and out-of-range give the most negative value. -/
+def cvttAmd64 (bits : Nat) (f : Float) : Int :=
+  let t := if f < 0 then -((-f).floor) else f.floor
+  let lo : Float := -(Float.ofNat (2 ^ (bits - 1)))
+  let hi : Float := Float.ofNat (2 ^ (bits - 1))
+  if lo ≤ t && t < hi then t.toInt64.toInt else -(2 ^ (bits - 1))
+
+/-- Go's float-to-integer conversion on amd64 (Go 1.26's code, measured):
+int64 and int through CVTTSD2SQ; int32 through CVTTSD2SL; int16, int8,
+uint16 and uint8 through the 32-bit conversion, truncated; uint32 through
+the 64-bit one, truncated; uint64 as the 64-bit one below 2^63, else that
+of `f - 2^63` with the top bit set (NaN takes that branch). -/
+def ftoiAmd64 (w dw : Nat) (signed : Bool) (x : Nat) : BitVec dw :=
+  let f := if w == 32 then (f32Of x).toFloat else f64Of x
+  if signed then
+    if dw == 64 then BitVec.ofInt dw (cvttAmd64 64 f) else BitVec.ofInt dw (cvttAmd64 32 f)
+  else if dw == 64 then
+    let two63 : Float := Float.ofNat (2 ^ 63)
+    if f < two63 then BitVec.ofInt dw (cvttAmd64 64 f)
+    else BitVec.ofInt dw (cvttAmd64 64 (f - two63)) ||| BitVec.ofNat dw (2 ^ 63)
+  else if dw == 32 then BitVec.ofInt dw (cvttAmd64 64 f)
+  else BitVec.ofInt dw (cvttAmd64 32 f)
+
 /-- Pure instructions: no heap access. -/
 def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
   | .const v, [] => .ok v
@@ -1926,6 +1953,9 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
       | none => false))
   | .ftoi w dw signed, [a] => match floatBits? w a >>= floatTrunc? w dw signed with
     | some i => .ok (.int dw (BitVec.ofInt dw i))
+    | none => .panic .modelStuck
+  | .ftoiAmd64 w dw signed, [a] => match floatBits? w a with
+    | some x => .ok (.int dw (ftoiAmd64 w dw signed x))
     | none => .panic .modelStuck
   | .fsqrt w, [a] => match floatBits? w a with
     | some x => .ok (if w == 32 then f32Val (f32Of x).sqrt else f64Val (f64Of x).sqrt)

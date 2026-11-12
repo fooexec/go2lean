@@ -380,6 +380,12 @@ func SeqTestFormatFloatShortest() bool { return testFormatFloatShortest() }
 // go2lean:sequence testFormatFloatSpecial
 func SeqTestFormatFloatSpecial() bool { return testFormatFloatSpecial() }
 
+// go2lean:sequence testFtoiInRange
+func SeqTestFtoiInRange() bool { return testFtoiInRange() }
+
+// go2lean:sequence testFtoiOutOfRange
+func SeqTestFtoiOutOfRange() bool { return testFtoiOutOfRange() }
+
 // go2lean:sequence testHexRoundTrip
 func SeqTestHexRoundTrip() bool { return testHexRoundTrip() }
 
