@@ -1407,7 +1407,7 @@ func ctorWrapper(p *ir.Prog, ctor, m *ssa.Function, ctorID, mID int, deref bool)
 	w.Blocks[2] = ir.Block{Name: "method", Instrs: b2, Term: ir.Term{Kind: ir.TermCall, Callee: mID, CArgs: append([]ir.Var{recv}, w.Params[nc:]...), Dst: res, Next: 3, Fallback: 5}}
 	w.Blocks[3] = ir.Block{Name: "ret", Term: ir.Term{Kind: ir.TermRet, V: res}}
 	w.Blocks[4] = ir.Block{Name: "ctor-error", Instrs: []ir.Instr{{Dst: unit, Op: ir.Const{V: ir.UnitVal{}}}}, Term: ir.Term{Kind: ir.TermRet, V: unit}}
-	w.Blocks[5] = ir.Block{Name: "stuck", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicOther}}
+	w.Blocks[5] = ir.Block{Name: "stuck", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicModelStuck}}
 	w.NVals = v
 	return w, nil
 }
@@ -2581,7 +2581,7 @@ func rejectStub(out *ir.Func, err error) {
 	out.Params = nil
 	out.NVals = 0
 	out.Entry = 0
-	out.Blocks = []ir.Block{{Name: "rejected", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicOther}}}
+	out.Blocks = []ir.Block{{Name: "rejected", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicModelStuck}}}
 }
 
 type fnState struct {
