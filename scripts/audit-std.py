@@ -100,7 +100,7 @@ def family(k, kind):
     if k in ('type assertion on a value the model did not build', 'nil comparison on an unknown value',
              'map the model knows nothing about', '== on an interface value the model did not build',
              'interface value not modelled', 'func value not modelled', 'call through an unknown value') \
-            or 'float the model does not know' in k or k.startswith('load ') and 'havoc' in k:
+            or 'float the model does not know' in k or 'complex number the model does not know' in k or k.startswith('load ') and 'havoc' in k:
         return 'analysis'
     return 'language'
 

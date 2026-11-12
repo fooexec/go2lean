@@ -215,6 +215,15 @@ func SeqTestComparePointerWrappedToNil() bool { return testComparePointerWrapped
 // go2lean:sequence testCompareSliceToNil
 func SeqTestCompareSliceToNil() bool { return testCompareSliceToNil() }
 
+// go2lean:sequence testComplex64
+func SeqTestComplex64() bool { return testComplex64() }
+
+// go2lean:sequence testComplexArith
+func SeqTestComplexArith() bool { return testComplexArith() }
+
+// go2lean:sequence testComplexDivEdges
+func SeqTestComplexDivEdges() bool { return testComplexDivEdges() }
+
 // go2lean:sequence testCopyShorterDst
 func SeqTestCopyShorterDst() bool { return testCopyShorterDst() }
 
@@ -379,6 +388,12 @@ func SeqTestFormatFloatShortest() bool { return testFormatFloatShortest() }
 
 // go2lean:sequence testFormatFloatSpecial
 func SeqTestFormatFloatSpecial() bool { return testFormatFloatSpecial() }
+
+// go2lean:sequence testFtoiInRange
+func SeqTestFtoiInRange() bool { return testFtoiInRange() }
+
+// go2lean:sequence testFtoiOutOfRange
+func SeqTestFtoiOutOfRange() bool { return testFtoiOutOfRange() }
 
 // go2lean:sequence testHexRoundTrip
 func SeqTestHexRoundTrip() bool { return testHexRoundTrip() }

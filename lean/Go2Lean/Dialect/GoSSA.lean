@@ -591,6 +591,19 @@ inductive Op where
   | ftoiOk (w dw : Nat) (signed : Bool)
   /-- A `w`-bit float truncated to a `dw`-bit integer (in range: see `ftoiOk`). -/
   | ftoi (w dw : Nat) (signed : Bool)
+  /-- A `w`-bit float converted to a `dw`-bit integer as Go does on amd64,
+  out-of-range and NaN included (Go leaves those to the machine, #207). -/
+  | ftoiAmd64 (w dw : Nat) (signed : Bool)
+  /-- Complex numbers (#207): a `complex64` or `complex128` is `.structv
+  [re, im]`, each part the bits of a `w`-bit float (32 or 64). `cmake w`
+  builds one from its parts; `cknown w` says both parts are known floats;
+  `cbin k w` is `+ - * /` (k = 0..3) as Go computes them; `ceq w` is `==`;
+  `cconv w dw` converts between complex64 and complex128. -/
+  | cmake (w : Nat)
+  | cknown (w : Nat)
+  | cbin (k w : Nat)
+  | ceq (w : Nat)
+  | cconv (w dw : Nat)
   /-- A `w`-bit float converted to `dw` bits (float32 <-> float64). -/
   | fconv (w dw : Nat)
   /-- The square root (IEEE: correctly rounded; NaN below zero, `-0` of `-0`). -/
@@ -1739,6 +1752,93 @@ def floatTrunc? (w dw : Nat) (signed : Bool) (x : Nat) : Option Int :=
     some (if signed then t.toInt64.toInt else t.toUInt64.toNat)
   else none
 
+/-- `f` truncated toward zero to a signed `bits`-bit integer as amd64's
+CVTTSD2SI does: NaN and out-of-range give the most negative value. -/
+def cvttAmd64 (bits : Nat) (f : Float) : Int :=
+  let t := if f < 0 then -((-f).floor) else f.floor
+  let lo : Float := -(Float.ofNat (2 ^ (bits - 1)))
+  let hi : Float := Float.ofNat (2 ^ (bits - 1))
+  if lo ≤ t && t < hi then t.toInt64.toInt else -(2 ^ (bits - 1))
+
+/-- Go's float-to-integer conversion on amd64 (Go 1.26's code, measured):
+int64 and int through CVTTSD2SQ; int32 through CVTTSD2SL; int16, int8,
+uint16 and uint8 through the 32-bit conversion, truncated; uint32 through
+the 64-bit one, truncated; uint64 as the 64-bit one below 2^63, else that
+of `f - 2^63` with the top bit set (NaN takes that branch). -/
+def ftoiAmd64 (w dw : Nat) (signed : Bool) (x : Nat) : BitVec dw :=
+  let f := if w == 32 then (f32Of x).toFloat else f64Of x
+  if signed then
+    if dw == 64 then BitVec.ofInt dw (cvttAmd64 64 f) else BitVec.ofInt dw (cvttAmd64 32 f)
+  else if dw == 64 then
+    let two63 : Float := Float.ofNat (2 ^ 63)
+    if f < two63 then BitVec.ofInt dw (cvttAmd64 64 f)
+    else BitVec.ofInt dw (cvttAmd64 64 (f - two63)) ||| BitVec.ofNat dw (2 ^ 63)
+  else if dw == 32 then BitVec.ofInt dw (cvttAmd64 64 f)
+  else BitVec.ofInt dw (cvttAmd64 32 f)
+
+/-- The parts of a complex number with `w`-bit parts, as their bits. -/
+def cparts? (w : Nat) : Val → Option (Nat × Nat)
+  | .structv [a, b] => match floatBits? w a, floatBits? w b with
+    | some x, some y => some (x, y)
+    | _, _ => none
+  | _ => none
+
+/-- The bits of a float result (`floatBin`'s). -/
+def fbits : Val → Nat
+  | .int _ b => b.toNat
+  | _ => 0
+
+/-- `copysign(m, s)` on float64s. -/
+def fcopysign (m s : Float) : Float :=
+  let neg := s.toBits.toNat ≥ 2 ^ 63
+  if neg then -m.abs else m.abs
+
+/-- Go's runtime complex128div (Smith's algorithm, with C99's corrections
+of a NaN result to infinities and zeros). -/
+def cdiv64 (a b c d : Float) : Float × Float :=
+  let (e, f) :=
+    if c.abs ≥ d.abs then
+      let ratio := d / c
+      let denom := c + ratio * d
+      ((a + b * ratio) / denom, (b - a * ratio) / denom)
+    else
+      let ratio := c / d
+      let denom := d + ratio * c
+      ((a * ratio + b) / denom, (b * ratio - a) / denom)
+  if e.isNaN && f.isNaN then
+    let inf : Float := 1.0 / 0.0
+    let inf2one := fun (x : Float) => fcopysign (if x.isInf then 1.0 else 0.0) x
+    let fin := fun (x : Float) => !x.isNaN && !x.isInf
+    if c == 0.0 && d == 0.0 && (!a.isNaN || !b.isNaN) then
+      (fcopysign inf c * a, fcopysign inf c * b)
+    else if (a.isInf || b.isInf) && fin c && fin d then
+      let a := inf2one a; let b := inf2one b
+      (inf * (a * c + b * d), inf * (b * c - a * d))
+    else if (c.isInf || d.isInf) && fin a && fin b then
+      let c := inf2one c; let d := inf2one d
+      (0.0 * (a * c + b * d), 0.0 * (b * c - a * d))
+    else (e, f)
+  else (e, f)
+
+/-- `cbin k w` on known parts: + and - part by part, * as Go's SSA expands
+it ((ac - bd) + (ad + bc)i, no fused multiply-add), / through
+complex128div (a complex64 widened, the result rounded back). -/
+def complexBin (k w : Nat) (x y : Nat × Nat) : Val :=
+  let (a, b) := x
+  let (c, d) := y
+  match k with
+  | 0 => .structv [floatBin 0 w a c, floatBin 0 w b d]
+  | 1 => .structv [floatBin 1 w a c, floatBin 1 w b d]
+  | 2 =>
+    let re := floatBin 1 w (fbits (floatBin 2 w a c)) (fbits (floatBin 2 w b d))
+    let im := floatBin 0 w (fbits (floatBin 2 w a d)) (fbits (floatBin 2 w b c))
+    .structv [re, im]
+  | _ =>
+    let wid := fun (n : Nat) => if w == 32 then (f32Of n).toFloat else f64Of n
+    let (e, f) := cdiv64 (wid a) (wid b) (wid c) (wid d)
+    if w == 32 then .structv [f32Val e.toFloat32, f32Val f.toFloat32]
+    else .structv [f64Val e, f64Val f]
+
 /-- Pure instructions: no heap access. -/
 def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
   | .const v, [] => .ok v
@@ -1926,6 +2026,23 @@ def denotePure (or : Oracle) (heap : Heap Val) : Op → List Val → Res Val
       | none => false))
   | .ftoi w dw signed, [a] => match floatBits? w a >>= floatTrunc? w dw signed with
     | some i => .ok (.int dw (BitVec.ofInt dw i))
+    | none => .panic .modelStuck
+  | .ftoiAmd64 w dw signed, [a] => match floatBits? w a with
+    | some x => .ok (.int dw (ftoiAmd64 w dw signed x))
+    | none => .panic .modelStuck
+  | .cmake _, [re, im] => .ok (.structv [re, im])
+  | .cknown w, args => .ok (.bool (args.all fun v => (cparts? w v).isSome))
+  | .cbin k w, [x, y] => match cparts? w x, cparts? w y with
+    | some p, some q => .ok (complexBin k w p q)
+    | _, _ => .panic .modelStuck
+  | .ceq w, [x, y] => match cparts? w x, cparts? w y with
+    | some (a, b), some (c, d) => .ok (.bool (floatCmp 0 w a c && floatCmp 0 w b d))
+    | _, _ => .panic .modelStuck
+  | .cconv w dw, [x] => match cparts? w x with
+    | some (a, b) =>
+      if w == dw then .ok x
+      else if dw == 32 then .ok (.structv [f32Val (f64Of a).toFloat32, f32Val (f64Of b).toFloat32])
+      else .ok (.structv [f64Val (f32Of a).toFloat, f64Val (f32Of b).toFloat])
     | none => .panic .modelStuck
   | .fsqrt w, [a] => match floatBits? w a with
     | some x => .ok (if w == 32 then f32Val (f32Of x).sqrt else f64Val (f64Of x).sqrt)

@@ -2834,8 +2834,11 @@ func constVal(c *ssa.Const) (ir.Val, error) {
 	if w, ok := floatWidth(c.Type()); ok {
 		return floatConst(c.Value, w), nil
 	}
+	if w, ok := complexWidth(c.Type()); ok {
+		return ir.StructVal{Fields: []ir.Val{floatConst(constant.Real(c.Value), w), floatConst(constant.Imag(c.Value), w)}}, nil
+	}
 	if isOpaqueType(c.Type()) {
-		return ir.Opaque{}, nil // a complex literal: the model does not compute with it
+		return ir.Opaque{}, nil
 	}
 	w, signed, ok := intWidth(c.Type())
 	if !ok {
@@ -3049,6 +3052,8 @@ func (t *fnState) binop(x *ssa.BinOp) error {
 		}
 	} else if w, ok := floatWidth(x.X.Type()); ok {
 		return t.floatBinOp(x, w)
+	} else if w, ok := complexWidth(x.X.Type()); ok {
+		return t.complexBinOp(x, w)
 	} else if isOpaqueType(x.X.Type()) {
 		if eqOp && isNilable(x.X.Type()) {
 			if v, ok := nilOperand(x); ok {
@@ -4131,6 +4136,15 @@ func (t *fnState) conv(dst ssa.Value, src ssa.Value) error {
 	if done, err := t.floatConv(dst, src); done || err != nil {
 		return err
 	}
+	if sw, ok := complexWidth(src.Type()); ok {
+		if dw, ok := complexWidth(dst.Type()); ok {
+			a, err := t.val(src)
+			if err != nil {
+				return err
+			}
+			return t.complexGuarded(dst, sw, ir.Raw(fmt.Sprintf("(.cconv %d %d)", sw, dw)), []ir.Var{a}, fmt.Sprintf("conversion %s -> %s", src.Type(), dst.Type()))
+		}
+	}
 	if isOpaqueType(dst.Type()) || isOpaqueType(src.Type()) {
 		// complex numbers, unsafe pointers: the model does not compute with them.
 		return t.havoc(dst, fmt.Sprintf("conversion %s -> %s", src.Type(), dst.Type()), "opaque-op", "")
@@ -4393,6 +4407,9 @@ func (t *fnState) call(x *ssa.Call) error {
 			}
 			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Append{Zero: zero}, Args: []ir.Var{a, b}})
 			return nil
+		}
+		if done, err := t.complexBuiltin(x, bi.Name()); done || err != nil {
+			return err
 		}
 		if _, signed, isInt := intWidth(x.Type()); (bi.Name() == "min" || bi.Name() == "max") && isInt {
 			// min(a, b, ...) and max: a comparison and a choice per argument
@@ -9808,6 +9825,10 @@ func bigArrayZero(t types.Type) (ir.Val, bool) {
 }
 
 func zeroVal(t types.Type) (ir.Val, bool) {
+	if w, ok := complexWidth(t); ok {
+		z := ir.IntVal{Width: w, Bits: "0"}
+		return ir.StructVal{Fields: []ir.Val{z, z}}, true
+	}
 	if w, _, ok := intWidth(t); ok {
 		return ir.IntVal{Width: w, Bits: "0"}, true
 	}

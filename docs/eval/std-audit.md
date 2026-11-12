@@ -36,6 +36,7 @@ Each change rerun on the audit (#207):
 | first audit (#205) | 71.4% | 3.4% | 7.9% |
 | `clear`, `print`, `println`; debug switches as no-ops | 71.8% | 3.1% | 7.9% |
 | `recover` of the panic's value and of a function's own operations (#209); `godebug.New` | 72.1% | 3.1% | 7.7% |
+| complex numbers; float-to-integer conversions as amd64 does them | 72.2% | 2.7% | 7.8% |
 
 ## Translating more of the standard library
 
