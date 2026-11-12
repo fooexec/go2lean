@@ -3,6 +3,7 @@ package gossa
 import (
 	"fmt"
 	"go/token"
+	"go/types"
 	"os"
 	"runtime"
 	"strings"
@@ -47,13 +48,20 @@ func (t *fnState) floatBinOp(x *ssa.BinOp, w int) error {
 // model knows (fknown), and to a havoc value of x's type otherwise.
 func (t *fnState) floatGuarded(x ssa.Value, w int, op ir.Op, args []ir.Var, what string) error {
 	dst := t.def(x)
+	if fromConstants(x, 8) {
+		// Known whatever the run: no guard.
+		t.emit(ir.Instr{Dst: dst, Op: op, Args: args})
+		return nil
+	}
 	known := t.fresh()
 	t.emit(ir.Instr{Dst: known, Op: ir.Raw(fmt.Sprintf("(.fknown %d)", w)), Args: args})
 	return t.guarded(known, func() error {
 		t.emit(ir.Instr{Dst: dst, Op: op, Args: args})
 		return nil
 	}, func() error {
-		t.issue("%s on a float the model does not know is havoc", what)
+		if !fromConstants(x, 8) {
+			t.issue("%s on a float the model does not know is havoc", what)
+		}
 		return t.havocInto(dst, x.Type(), t.f.Name()+": "+what, "opaque-op", "")
 	})
 }
@@ -244,4 +252,153 @@ func portableMath(sprog *ssa.Program) {
 			}
 		}
 	}
+}
+
+// complexWidth is the width of a complex type's parts: 64 for complex128
+// (and untyped complex constants), 32 for complex64. A complex number is
+// the struct of its parts' bits in the model (#207).
+func complexWidth(t types.Type) (int, bool) {
+	b, ok := t.Underlying().(*types.Basic)
+	if !ok {
+		return 0, false
+	}
+	switch b.Kind() {
+	case types.Complex64:
+		return 32, true
+	case types.Complex128, types.UntypedComplex:
+		return 64, true
+	}
+	return 0, false
+}
+
+var complexBinKinds = map[token.Token]int{token.ADD: 0, token.SUB: 1, token.MUL: 2, token.QUO: 3}
+
+// complexBinOp lowers x op y on complex numbers with w-bit parts: + - * /
+// (as Go computes them, cbin) and == !=.
+func (t *fnState) complexBinOp(x *ssa.BinOp, w int) error {
+	a, err := t.val(x.X)
+	if err != nil {
+		return err
+	}
+	b, err := t.val(x.Y)
+	if err != nil {
+		return err
+	}
+	what := fmt.Sprintf("%s on %s", x.Op, x.X.Type())
+	if k, ok := complexBinKinds[x.Op]; ok {
+		return t.complexGuarded(x, w, ir.Raw(fmt.Sprintf("(.cbin %d %d)", k, w)), []ir.Var{a, b}, what)
+	}
+	switch x.Op {
+	case token.EQL:
+		return t.complexGuarded(x, w, ir.Raw(fmt.Sprintf("(.ceq %d)", w)), []ir.Var{a, b}, what)
+	case token.NEQ:
+		eq := t.fresh()
+		dst := t.def(x)
+		known := t.fresh()
+		t.emit(ir.Instr{Dst: known, Op: ir.Raw(fmt.Sprintf("(.cknown %d)", w)), Args: []ir.Var{a, b}})
+		return t.guarded(known, func() error {
+			t.emit(ir.Instr{Dst: eq, Op: ir.Raw(fmt.Sprintf("(.ceq %d)", w)), Args: []ir.Var{a, b}})
+			t.emit(ir.Instr{Dst: dst, Op: ir.Simple("not"), Args: []ir.Var{eq}})
+			return nil
+		}, func() error {
+			if !fromConstants(x, 8) {
+				t.issue("%s on a complex number the model does not know is havoc", what)
+			}
+			return t.havocInto(dst, x.Type(), t.f.Name()+": "+what, "opaque-op", "")
+		})
+	}
+	return fmt.Errorf("complex operator %s not supported", x.Op)
+}
+
+// complexGuarded binds x to op(args) when every argument is a complex
+// number with known w-bit parts, and to a havoc value otherwise (an input's
+// complex number, which the search does not generate).
+func (t *fnState) complexGuarded(x ssa.Value, w int, op ir.Op, args []ir.Var, what string) error {
+	dst := t.def(x)
+	if fromConstants(x, 8) {
+		// Known whatever the run: no guard.
+		t.emit(ir.Instr{Dst: dst, Op: op, Args: args})
+		return nil
+	}
+	known := t.fresh()
+	t.emit(ir.Instr{Dst: known, Op: ir.Raw(fmt.Sprintf("(.cknown %d)", w)), Args: args})
+	return t.guarded(known, func() error {
+		t.emit(ir.Instr{Dst: dst, Op: op, Args: args})
+		return nil
+	}, func() error {
+		if !fromConstants(x, 8) {
+			t.issue("%s on a complex number the model does not know is havoc", what)
+		}
+		return t.havocInto(dst, x.Type(), t.f.Name()+": "+what, "opaque-op", "")
+	})
+}
+
+// fromConstants says whether v is computed from constants only (within
+// depth steps): a constant, or a conversion, arithmetic or complex/real/
+// imag of such values. The guard's unknown branch is then never taken, and
+// is not a gap of the function's model.
+func fromConstants(v ssa.Value, depth int) bool {
+	if depth == 0 {
+		return false
+	}
+	switch v := v.(type) {
+	case *ssa.Const:
+		return true
+	case *ssa.Convert:
+		return fromConstants(v.X, depth-1)
+	case *ssa.ChangeType:
+		return fromConstants(v.X, depth-1)
+	case *ssa.UnOp:
+		return v.Op == token.SUB && fromConstants(v.X, depth-1)
+	case *ssa.BinOp:
+		return fromConstants(v.X, depth-1) && fromConstants(v.Y, depth-1)
+	case *ssa.Call:
+		if bi, ok := v.Call.Value.(*ssa.Builtin); ok {
+			switch bi.Name() {
+			case "complex", "real", "imag":
+				for _, a := range v.Call.Args {
+					if !fromConstants(a, depth-1) {
+						return false
+					}
+				}
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// complexBuiltin lowers complex(r, i), real(c) and imag(c).
+func (t *fnState) complexBuiltin(x *ssa.Call, name string) (bool, error) {
+	switch name {
+	case "complex":
+		if _, ok := complexWidth(x.Type()); !ok {
+			return false, nil
+		}
+		r, err := t.val(x.Call.Args[0])
+		if err != nil {
+			return true, err
+		}
+		i, err := t.val(x.Call.Args[1])
+		if err != nil {
+			return true, err
+		}
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Raw("(.cmake 0)"), Args: []ir.Var{r, i}})
+		return true, nil
+	case "real", "imag":
+		w, ok := complexWidth(x.Call.Args[0].Type())
+		if !ok {
+			return false, nil
+		}
+		c, err := t.val(x.Call.Args[0])
+		if err != nil {
+			return true, err
+		}
+		i := 0
+		if name == "imag" {
+			i = 1
+		}
+		return true, t.complexGuarded(x, w, ir.Field{I: i}, []ir.Var{c}, name)
+	}
+	return false, nil
 }

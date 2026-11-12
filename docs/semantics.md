@@ -41,7 +41,7 @@ memory images.
 | func | `.boxed 0 (tuple [fid, captured…])`, nil `.opaqueNil` | exact for functions and closures of the program |
 | tuple (multiple results) | `.tuple vs` | exact |
 | `float64`, `float32` | `.int 64 bits`, `.int 32 bits`: the IEEE 754 encoding (#148); a float64 decoded from JSON may also be the decimal bytes `json.Marshal` writes for it | exact (§4.9); a float the model does not know (an opaque input, an unknown JSON number) makes what it reaches havoc |
-| `complex64/128` | opaque (`.unit`) | havoc: arithmetic, comparisons and conversions |
+| `complex64/128` | `.structv [re, im]`, each part a float's bits (32-bit parts for `complex64`, #207) | exact (below); a complex number the search would have to generate (an input) is unknown, and what it reaches havoc |
 | `chan T` | `.ptr r []` to a heap object `.structv [cap, .arr buffer, .bool closed, zero]`; nil is `.ptr 0 []` or `.opaqueNil` | exact (§6) |
 | `unsafe.Pointer` | opaque | havoc |
 | `unsafe.String(unsafe.SliceData(b), len(b))`, `unsafe.Slice(unsafe.StringData(s), len(s))` (zero-copy views, prometheus' `yoloString`) | `string(b)`, `[]byte(s)` | exact: package `unsafe` forbids writing the bytes while the view is in use (#87) |
@@ -241,7 +241,8 @@ memory).
 | named ↔ underlying type, `json.RawMessage` ↔ `[]byte` | no-op | exact |
 | string ↔ bytes / runes | §4.2 | exact |
 | integer → float, float32 ↔ float64 | `itof`, `fconv` | exact (rounded to nearest even, once) |
-| float → integer | `ftoi` | exact when the truncation fits the type; NaN, infinities and values out of range, whose result Go leaves to the machine, are havoc |
+| float → integer | `ftoi`, `ftoiAmd64` | exact when the truncation fits the type. NaN, infinities and values out of range, whose result Go leaves to the machine, are converted as Go does on amd64 when the replay runs there (#207: the most negative value through CVTTSD2SQ/SL; `int16`, `int8`, `uint16`, `uint8` through the 32-bit conversion, `uint32` through the 64-bit one, `uint64` with the 2^63 split), havoc on other machines. Checked by `go2lean_ftoi.go` |
+| complex `+ - * /`, `==`, `complex`, `real`, `imag`, `complex64` ↔ `complex128` | `cbin`, `ceq`, `cmake`, `field`, `cconv` | exact (#207): `+ -` part by part, `*` as Go's SSA expands it (no fused multiply-add), `/` as `runtime.complex128div` (Smith's algorithm with C99's corrections of a NaN result; `complex64` widened and rounded back). Checked by `go2lean_complex.go` |
 | others | — | rejected |
 
 ### 4.9 Floats (#148)
