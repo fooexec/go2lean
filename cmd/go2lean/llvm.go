@@ -5,10 +5,10 @@ import (
 	"flag"
 	"os"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	llvmfe "github.com/andreasfoo/go2lean/internal/frontend/llvm"
-	"github.com/andreasfoo/go2lean/internal/llvmhunt"
-	"github.com/andreasfoo/go2lean/internal/repo"
+	"github.com/fooexec/go2lean/internal/contract"
+	llvmfe "github.com/fooexec/go2lean/internal/frontend/llvm"
+	"github.com/fooexec/go2lean/internal/llvmhunt"
+	"github.com/fooexec/go2lean/internal/repo"
 )
 
 // cmdLLVM runs the LLVM line on C or LLVM IR files.

@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	llvmfe "github.com/andreasfoo/go2lean/internal/frontend/llvm"
-	"github.com/andreasfoo/go2lean/internal/sandbox"
+	"github.com/fooexec/go2lean/internal/contract"
+	llvmfe "github.com/fooexec/go2lean/internal/frontend/llvm"
+	"github.com/fooexec/go2lean/internal/sandbox"
 )
 
 // Options configure the search.

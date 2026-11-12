@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	"github.com/andreasfoo/go2lean/examples/portable/meta"
+	"github.com/fooexec/go2lean/examples/portable/meta"
 )
 
 // URL is the first byte of the base URL. Bug: panics on an empty BaseURL.

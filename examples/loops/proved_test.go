@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	pkg "github.com/andreasfoo/go2lean/examples/loops"
+	pkg "github.com/fooexec/go2lean/examples/loops"
 )
 
 var edges = []int{math.MinInt64, math.MinInt64 + 1, -2, -1, 0, 1, 2, math.MaxInt64 - 1, math.MaxInt64}

@@ -6,9 +6,9 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/andreasfoo/go2lean/internal/builtin"
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/ir"
+	"github.com/fooexec/go2lean/internal/builtin"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/ir"
 )
 
 // ConfigureCompareOrder explicitly selects the builtin role, enforces a

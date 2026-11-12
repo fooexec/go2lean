@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	leanassets "github.com/andreasfoo/go2lean/lean"
+	leanassets "github.com/fooexec/go2lean/lean"
 )
 
 func TestBundledCore(t *testing.T) {

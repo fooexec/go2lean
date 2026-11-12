@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/agent"
+	"github.com/fooexec/go2lean/internal/agent"
 )
 
 func cmdAgent(args []string) error {

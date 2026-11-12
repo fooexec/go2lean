@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/ir"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/ir"
 )
 
 // ModuleName is the Lean module a package's model is written to. The full

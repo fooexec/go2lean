@@ -1,4 +1,4 @@
-module github.com/andreasfoo/go2lean
+module github.com/fooexec/go2lean
 
 go 1.26.0
 

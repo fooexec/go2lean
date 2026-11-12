@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/contract"
 )
 
 // Link merges main with the programs it reaches through cross-package

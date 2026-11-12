@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/sandbox"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/sandbox"
 )
 
 // Options of a fuzzing run.

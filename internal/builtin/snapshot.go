@@ -11,8 +11,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	leanassets "github.com/andreasfoo/go2lean/lean"
+	"github.com/fooexec/go2lean/internal/contract"
+	leanassets "github.com/fooexec/go2lean/lean"
 )
 
 type Snapshot struct {

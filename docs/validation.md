@@ -77,7 +77,7 @@ divide by zero in `smetrics.Ukkonen`, confirmed in Go. For the other 11, the
 contract is false only in the model, through its own over-approximations:
 untyped havoc values, harmless recorded assumptions, a size bound. These
 are fixed next. The 85 tingly-box findings
-were triaged by hand ([go2lean-tingly-box](https://github.com/andreasfoo/go2lean-tingly-box)).
+were triaged by hand ([go2lean-tingly-box](https://github.com/fooexec/go2lean-tingly-box)).
 
 ## Ground truth
 

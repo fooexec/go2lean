@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/contract"
 )
 
 // TestPropertyFilters checks -specs-only and -run: the templates go, and

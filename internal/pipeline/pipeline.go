@@ -18,17 +18,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/builtin"
-	"github.com/andreasfoo/go2lean/internal/constraint"
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/frontend/gossa"
-	"github.com/andreasfoo/go2lean/internal/fuzzimport"
-	"github.com/andreasfoo/go2lean/internal/geninst"
-	"github.com/andreasfoo/go2lean/internal/ir"
-	"github.com/andreasfoo/go2lean/internal/memgov"
-	"github.com/andreasfoo/go2lean/internal/poc"
-	"github.com/andreasfoo/go2lean/internal/repo"
-	"github.com/andreasfoo/go2lean/internal/ssaout"
+	"github.com/fooexec/go2lean/internal/builtin"
+	"github.com/fooexec/go2lean/internal/constraint"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/frontend/gossa"
+	"github.com/fooexec/go2lean/internal/fuzzimport"
+	"github.com/fooexec/go2lean/internal/geninst"
+	"github.com/fooexec/go2lean/internal/ir"
+	"github.com/fooexec/go2lean/internal/memgov"
+	"github.com/fooexec/go2lean/internal/poc"
+	"github.com/fooexec/go2lean/internal/repo"
+	"github.com/fooexec/go2lean/internal/ssaout"
 )
 
 // Env says where things are: Root is the default Go module directory,

@@ -16,9 +16,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/repo"
-	"github.com/andreasfoo/go2lean/internal/sandbox"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/repo"
+	"github.com/fooexec/go2lean/internal/sandbox"
 )
 
 // PermittedAxioms are the axioms a proved theorem may depend on: Lean's

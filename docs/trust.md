@@ -3,7 +3,7 @@
 What a `proved` record from `go2lean prove`, or from the WP route of the spec & search stage, asserts. Which parts of
 go2lean and Lean that assertion rests on. What an agent writing the proof
 can and cannot do to it. Issue
-[#22](https://github.com/andreasfoo/go2lean/issues/22).
+[#22](https://github.com/fooexec/go2lean/issues/22).
 
 ## What a `proved` record asserts
 

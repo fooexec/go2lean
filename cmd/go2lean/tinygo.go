@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	llvmfe "github.com/andreasfoo/go2lean/internal/frontend/llvm"
-	"github.com/andreasfoo/go2lean/internal/llvmhunt"
-	"github.com/andreasfoo/go2lean/internal/pipeline"
+	"github.com/fooexec/go2lean/internal/contract"
+	llvmfe "github.com/fooexec/go2lean/internal/frontend/llvm"
+	"github.com/fooexec/go2lean/internal/llvmhunt"
+	"github.com/fooexec/go2lean/internal/pipeline"
 )
 
 // cmdTinyGo runs a Go package through TinyGo's LLVM IR and, with -compare,

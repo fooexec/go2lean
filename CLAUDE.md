@@ -9,7 +9,7 @@ replays each candidate as a real `go test`. Keep the name go2lean.
   to `main` directly. Once CI is green and the PR mergeable, merge it and
   carry on with the next item; no need to wait for a go-ahead between PRs.
 - Plans live in GitHub issues. The roadmap, its milestones and the periodic
-  reviews are in andreasfoo/go2lean#53. Every problem a run or an
+  reviews are in fooexec/go2lean#53. Every problem a run or an
   evaluation turns up becomes an issue under a milestone there.
 - Evaluations find problems; development fixes them. They run at the same
   time: an evaluation uses a frozen build of the tool, so work on `main`

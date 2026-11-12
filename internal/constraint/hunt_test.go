@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/contract"
 )
 
 func TestGensAndTypeTable(t *testing.T) {

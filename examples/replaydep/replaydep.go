@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/andreasfoo/go2lean/examples/replaydep/queue"
+	"github.com/fooexec/go2lean/examples/replaydep/queue"
 )
 
 var errClosed = errors.New("dispatcher closed")

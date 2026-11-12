@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/tools/go/ssa"
 
-	"github.com/andreasfoo/go2lean/internal/ir"
+	"github.com/fooexec/go2lean/internal/ir"
 )
 
 // jsonTable collects the JSON descriptions (Go2Lean.GoSSA.JDesc) of the

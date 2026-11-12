@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
-	"github.com/andreasfoo/go2lean/internal/repo"
+	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/repo"
 )
 
 // TestExportBuildsAndFinds exports a postcondition over strings and a
@@ -45,7 +45,7 @@ func SpecBeforePlantedWrong(a, b string, ret bool) bool { return !ret || len(a) 
 `)
 	dir := filepath.Join(root, "examples", "strs")
 	overlay := map[string][]byte{filepath.Join(dir, "zz_extra_test.go"): extra}
-	src, targets, skipped, err := Export(root, "github.com/andreasfoo/go2lean/examples/strs", overlay, []Spec{
+	src, targets, skipped, err := Export(root, "github.com/fooexec/go2lean/examples/strs", overlay, []Spec{
 		{Property: "p_true", Kind: contract.KindSequence, Spec: "SeqBeforeNeverBoth"},
 		{Property: "p_wrong", Kind: contract.KindPostcondition, Spec: "SpecBeforePlantedWrong", Target: "Before"},
 		{Property: "p_missing", Kind: contract.KindPostcondition, Spec: "SpecNoSuch", Target: "Before"},
@@ -110,7 +110,7 @@ func JoinAll(sep string, parts ...string) string {
 func SpecJoinAllLen(sep string, parts []string, ret string) bool { return len(parts) > 0 || ret == "" }
 `),
 	}
-	src, targets, skipped, err := Export(root, "github.com/andreasfoo/go2lean/examples/strs", overlay, []Spec{
+	src, targets, skipped, err := Export(root, "github.com/fooexec/go2lean/examples/strs", overlay, []Spec{
 		{Property: "p_join", Kind: contract.KindPostcondition, Spec: "SpecJoinAllLen", Target: "JoinAll"},
 	})
 	if err != nil {

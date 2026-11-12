@@ -3,7 +3,7 @@ package prover
 import (
 	"testing"
 
-	"github.com/andreasfoo/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/contract"
 )
 
 func TestAxiomLine(t *testing.T) {

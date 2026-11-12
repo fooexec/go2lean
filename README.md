@@ -73,14 +73,14 @@ Requires **Git, Go 1.26 and [elan](https://github.com/leanprover/elan)**.
 The pinned Lean toolchain is fetched, and go2lean's Lean runtime built, on
 the first run: a few minutes, once per machine. No LLM API key is needed.
 The binary bundles its Lean sources and can be installed with
-`go install github.com/andreasfoo/go2lean/cmd/go2lean@latest`; it does not
+`go install github.com/fooexec/go2lean/cmd/go2lean@latest`; it does not
 need a source checkout at runtime. From a Go module, use
 `go2lean run ./...` (automatic templates are panic checks).
 An [experimental explicit ordering mode](docs/builtins.md) supplies non-panic
 laws for a selected comparator under documented role/domain assumptions.
 
 ```sh
-git clone https://github.com/andreasfoo/go2lean.git
+git clone https://github.com/fooexec/go2lean.git
 cd go2lean
 go run ./cmd/go2lean run ./examples/overflow
 ```
@@ -178,7 +178,7 @@ fixing the first of them, go2lean found **10**, then **11**, then **12**; with
 large arrays updated in place it also finds k016 at the default budget
 ([details](docs/eval/conc-recent.md#rerun-at-main-2026-10-30),
 [rerun 6](docs/eval/conc-recent.md#rerun-of-the-fuel-cases-after-in-place-arrays-2026-11-05),
-[roadmap](https://github.com/andreasfoo/go2lean/issues/53)).
+[roadmap](https://github.com/fooexec/go2lean/issues/53)).
 
 [Validation and regression cases](docs/validation.md) ·
 [semver evaluation](docs/eval/semver.md) · [glob evaluation](docs/eval/glob.md) ·

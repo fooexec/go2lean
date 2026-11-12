@@ -52,7 +52,7 @@ and default native build configuration; it is not automatic contract inference
 or a completed real-project release evaluation.
 
 ```sh
-go install github.com/andreasfoo/go2lean/cmd/go2lean@latest
+go install github.com/fooexec/go2lean/cmd/go2lean@latest
 cd /path/to/your/go/module
 go2lean compile ./...
 ```
@@ -74,7 +74,7 @@ The latter flag does not change how workspace paths are resolved.
 To run the included example instead:
 
 ```sh
-git clone https://github.com/andreasfoo/go2lean.git
+git clone https://github.com/fooexec/go2lean.git
 cd go2lean
 go run ./cmd/go2lean run ./examples/overflow
 ```
@@ -89,7 +89,7 @@ Illustrative output (search details may vary):
 
 ```
 == Compile stage
-compiled github.com/andreasfoo/go2lean/examples/overflow: 2 functions (2 complete, 0 partial, 0 rejected; -v lists them)
+compiled github.com/fooexec/go2lean/examples/overflow: 2 functions (2 complete, 0 partial, 0 rejected; -v lists them)
 == Spec & search stage: properties
   2 properties to search (-v lists them)
 == Spec & search stage: hunt
@@ -379,7 +379,7 @@ using at most 4.8 GB in one Lean process and 9.3 GB across the four jobs
 
 The tingly-box case study (hand-written specs, the rounds of hunting,
 PoCs, full-pass history and one page per finding) lives in its own
-repository, [andreasfoo/go2lean-tingly-box](https://github.com/andreasfoo/go2lean-tingly-box).
+repository, [fooexec/go2lean-tingly-box](https://github.com/fooexec/go2lean-tingly-box).
 Its first finding: a hand-written postcondition on
 `ConvertAnthropicBetaToOpenAIRequest` is refuted by the search and confirmed by the replay stage:
 tool_use ids of 43 to 51 characters reach the assistant `tool_calls[].id`

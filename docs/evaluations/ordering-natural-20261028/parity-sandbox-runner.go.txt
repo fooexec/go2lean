@@ -1,3 +1,3 @@
 package main
-import("fmt";"os";"strings";"github.com/andreasfoo/go2lean/internal/sandbox")
+import("fmt";"os";"strings";"github.com/fooexec/go2lean/internal/sandbox")
 func main(){if sandbox.Mode()!=sandbox.ModeBwrap{panic("real isolation required")};out,errout,code,err:=sandbox.Run(os.Args[1],os.Args[2],[]string{"-test.count=1","-test.v","-test.run","^TestGo2LeanExternalParity$"},nil,sandbox.Default);fmt.Print(out);fmt.Fprint(os.Stderr,errout);if err!=nil||code!=0||!strings.Contains(out,"GO2LEAN_PARITY_RESULT matched=2000 mismatched=0 panics=0"){panic(fmt.Sprintf("parity failed: %v exit %d",err,code))}}

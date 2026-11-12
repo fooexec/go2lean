@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"testing"
 
-	pkg "github.com/andreasfoo/go2lean/examples/strloops"
+	pkg "github.com/fooexec/go2lean/examples/strloops"
 )
 
 func check(t *testing.T, s string, c byte) {

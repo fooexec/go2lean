@@ -8,7 +8,7 @@ import (
 	"math/rand"
 	"testing"
 
-	pkg "github.com/andreasfoo/go2lean/examples/proofs"
+	pkg "github.com/fooexec/go2lean/examples/proofs"
 )
 
 var edges = []int{math.MinInt64, -1, 0, 1, math.MaxInt64}

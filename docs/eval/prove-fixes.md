@@ -145,7 +145,7 @@ Not done: a comparison with Gobra or another Go verifier.
   timed out aborted `prove` (exit 137 on natsort).
 
 None of these runs proved a goal; nothing from them is counted. Fixed in
-[#34](https://github.com/andreasfoo/go2lean/pull/34):
+[#34](https://github.com/fooexec/go2lean/pull/34):
 - the prompt carries only the function and what it reaches;
 - the recursion limits are raised;
 - a check that times out or runs out of memory (capped at 6 GB) leaves
