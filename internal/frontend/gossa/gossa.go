@@ -4611,6 +4611,11 @@ func (t *fnState) call(x *ssa.Call) error {
 		}
 		return t.emitCall(x, ir.Term{Kind: ir.TermCallV, FV: fv}, x.Call.Value.Name())
 	}
+	if callee != nil {
+		if done, err := t.debugSwitchCall(x, callee); done || err != nil {
+			return err
+		}
+	}
 	if callee == nil {
 		// fall through to the unmodelled cases below
 	} else if xr, ok := t.prog.xrefs[callee.String()]; ok && xr.Package != t.prog.prog.Package {
@@ -8038,6 +8043,51 @@ func (t *fnState) atomicPointerCall(x *ssa.Call, callee *ssa.Function, st *types
 // interfaceMethod starts the havoc site name of an unmodelled call through
 // an interface: "call interface method (reflect.Type).Implements".
 const interfaceMethod = "interface method "
+
+// debugNoOps are calls with no effect a program can observe: the race
+// detector's annotations, KeepAlive, and godebug's counter of non-default
+// settings (std audit, #207).
+var debugNoOps = map[string]bool{
+	"runtime.KeepAlive":                         true,
+	"(*internal/godebug.Setting).IncNonDefault": true,
+	"internal/race.Acquire":                     true,
+	"internal/race.Release":                     true,
+	"internal/race.ReleaseMerge":                true,
+	"internal/race.Disable":                     true,
+	"internal/race.Enable":                      true,
+	"internal/race.Read":                        true,
+	"internal/race.Write":                       true,
+	"internal/race.ReadRange":                   true,
+	"internal/race.WriteRange":                  true,
+	"internal/race.ReadPC":                      true,
+	"internal/race.WritePC":                     true,
+	"internal/race.ReadObjectPC":                true,
+	"internal/race.WriteObjectPC":               true,
+}
+
+// debugSwitchCall lowers the debug switches of the standard library to
+// what they are in a default environment (no GODEBUG, FIPS mode off, no
+// race detector): no-ops, or their default results.
+func (t *fnState) debugSwitchCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
+	name := callee.String()
+	if debugNoOps[name] {
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
+		return true, nil
+	}
+	var v ir.Val
+	switch name {
+	case "(*internal/godebug.Setting).Value":
+		v = ir.EmptyStr{} // GODEBUG unset
+	case "crypto/internal/fips140only.Enforced":
+		v = ir.BoolVal(false)
+	case "internal/race.Errors":
+		v = ir.IntVal{Width: 64, Bits: "0"}
+	default:
+		return false, nil
+	}
+	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: v}})
+	return true, nil
+}
 
 // isSyncMap says whether t is sync.Map.
 func isSyncMap(t types.Type) bool {
