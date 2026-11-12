@@ -4190,6 +4190,35 @@ func (t *fnState) call(x *ssa.Call) error {
 			}
 			t.syncOp(ir.SyncOp{Kind: "close"}, t.def(x), ch)
 			return nil
+		case "print", "println":
+			// Output to standard error only: nothing the program reads.
+			return nil
+		case "clear":
+			v, err := t.val(x.Call.Args[0])
+			if err != nil {
+				return err
+			}
+			switch u := x.Call.Args[0].Type().Underlying().(type) {
+			case *types.Map:
+				return t.onKnown(x.Call.Args[0], v, func() error {
+					t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("mapClear"), Args: []ir.Var{v}})
+					return nil
+				}, func() error {
+					t.assume("clear of a map the model knows nothing about ignored")
+					return nil
+				})
+			case *types.Slice:
+				// clear(s): copy(s, make([]T, len(s))).
+				zero, ok := zeroVal(u.Elem())
+				if !ok {
+					break
+				}
+				n, z := t.fresh(), t.fresh()
+				t.emit(ir.Instr{Dst: n, Op: ir.Simple("len"), Args: []ir.Var{v}})
+				t.emit(ir.Instr{Dst: z, Op: ir.MakeSlice{Zero: zero}, Args: []ir.Var{n, n}})
+				t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("copySlice"), Args: []ir.Var{v, z}})
+				return nil
+			}
 		case "len", "cap":
 			if _, isChan := x.Call.Args[0].Type().Underlying().(*types.Chan); isChan {
 				ch, err := t.val(x.Call.Args[0])

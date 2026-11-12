@@ -173,6 +173,15 @@ func SeqTestChanRangeClosed() bool { return testChanRangeClosed() }
 // go2lean:sequence testChanUnbufferedHandoff
 func SeqTestChanUnbufferedHandoff() bool { return testChanUnbufferedHandoff() }
 
+// go2lean:sequence testClearMap
+func SeqTestClearMap() bool { return testClearMap() }
+
+// go2lean:sequence testClearNilMap
+func SeqTestClearNilMap() bool { return testClearNilMap() }
+
+// go2lean:sequence testClearSlice
+func SeqTestClearSlice() bool { return testClearSlice() }
+
 // go2lean:sequence testClosureBasic
 func SeqTestClosureBasic() bool { return testClosureBasic() }
 
@@ -571,6 +580,9 @@ func SeqTestPoolGetFromNew() bool { return testPoolGetFromNew() }
 
 // go2lean:sequence testPrimitiveTypesEqual
 func SeqTestPrimitiveTypesEqual() bool { return testPrimitiveTypesEqual() }
+
+// go2lean:sequence testPrintIgnored
+func SeqTestPrintIgnored() bool { return testPrintIgnored() }
 
 // go2lean:sequence testRandReadDiffers
 func SeqTestRandReadDiffers() bool { return testRandReadDiffers() }

@@ -538,6 +538,8 @@ inductive Op where
   /-- `m[k]` (with `commaOk`, `(v, ok)`); `zero` for a missing key. -/
   | mapLookup (commaOk : Bool) (zero : Val)
   | mapUpdate | mapDelete | mapLen
+  /-- `clear(m)` on a map: every entry deleted. -/
+  | mapClear
   /-- `json.Unmarshal(data, p)` for `p` pointing at a `string` (kind 0),
   `bool` (1), `interface{}` (2), `map[string]interface{}` (3) or
   `[]interface{}` (4); args `[data, p]`, yields the error. Decoded values
@@ -3627,6 +3629,15 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
       | .panic k => .panic k
       | .outOfFuel => .outOfFuel
     | none => .panic .modelStuck
+  | .mapClear, [.opaqueNil] => .ok (.unit, heap)
+  | .mapClear, [m] =>
+    match mapEntries heap m with
+    | some (p, _) =>
+      match heapStore heap p (mapObj []) with
+      | .ok heap => .ok (.unit, heap)
+      | .panic k => .panic k
+      | .outOfFuel => .outOfFuel
+    | none => .panic .modelStuck
   | .mapDelete, [.opaqueNil, _] => .ok (.unit, heap)
   | .mapDelete, [m, k] =>
     match mapEntries heap m with
@@ -4058,6 +4069,7 @@ def accesses : Op → List Val → List (Val × Nat)
   | .mapRange, [m] => [(objOf m, 0)]
   | .mapUpdate, m :: _ => [(objOf m, 1)]
   | .mapDelete, m :: _ => [(objOf m, 1)]
+  | .mapClear, m :: _ => [(objOf m, 1)]
   | .appendSlice _, [s, t] => [(objOf t, 0), (objOf s, 1)]
   | .copySlice, [d, t] => [(objOf t, 0), (objOf d, 1)]
   | .bytesToStr, [b] => [(objOf b, 0)]
