@@ -254,6 +254,13 @@ structure Func (Op : Type) where
   /-- The Go package it is from: the schedule trace names it with each
   operation, so the replay can tell the ones it does not gate (#56). -/
   pkg : String := ""
+  /-- The blocks whose instructions' panics the function recovers (#209):
+  one there goes on at `catchB`, the recovery block, with the environment
+  as it was before the failing instruction. Empty for a function with no
+  deferred recover(), and the recovery path itself is not in it, so a
+  panic there goes on, as in Go. -/
+  catchIn : List BlockId := []
+  catchB : BlockId := 0
   deriving Repr
 
 structure Prog (Op : Type) where
@@ -408,6 +415,16 @@ def enter (fn : Func Op) (b : BlockId) (env : Env Val) (args : List Var) : Env V
 def stuckCallNote (p : Prog Op) (f : FuncId) : String :=
   s!"the model got stuck in {(p.funcs[f]?.map (·.name)).getD "a callee"}: its result is havoc, its effects are dropped"
 
+/-- `exec` one instruction at a time, keeping the environment before each:
+on a failure, it is the one the failing instruction ran in (#209). -/
+def execEach (exec : List (Instr Op) → Env Val → HState Val → Res (Env Val) × HState Val) :
+    List (Instr Op) → Env Val → HState Val → Res (Env Val) × Env Val × HState Val
+  | [], env, s => (.ok env, env, s)
+  | i :: rest, env, s =>
+    match exec [i] env s with
+    | (.ok env', s') => execEach exec rest env' s'
+    | (r, s') => (r, env, s')
+
 mutual
 
 /-- Run block `bid` of `fn` in environment `env`. Each block entry and each
@@ -419,16 +436,25 @@ def runBlock (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fn : Fu
     match fn.blocks[bid]? with
     | none => (.panic .modelStuck, s)
     | some blk =>
-      match execInstrs or h track blk.instrs.toList env s with
-      | (.panic k, s) =>
+      let catching := fn.catchIn.contains bid
+      let (r, envAt, s1) := if catching then execEach (execInstrs or h track) blk.instrs.toList env s
+        else let (r, s1) := execInstrs or h track blk.instrs.toList env s; (r, env, s1)
+      match r, s1 with
+      | .panic k, s1 =>
+        if catching && !k.isStuck then
+          -- Recovered (#209): the recovery block, in the environment of
+          -- the failing instruction, the panic site forgotten.
+          runBlock p or h track fn fn.catchB envAt { s1 with panicAt := s.panicAt } fuel
+        else
+        let s := s1
         -- Name the function and block of the op the instructions recorded
         -- (once: callers see the innermost site).
         let s := match s.panicAt with
           | some site => if site.startsWith "@" then s else { s with panicAt := some s!"@{fn.name}#{bid}: {site}" }
           | none => { s with panicAt := some s!"@{fn.name}#{bid}" }
         (.panic k, s)
-      | (.outOfFuel, s) => (.outOfFuel, s)
-      | (.ok env, s) =>
+      | .outOfFuel, s => (.outOfFuel, s)
+      | .ok env, s =>
         match blk.term with
         | .ret v => (.ok env[v]!, { s with exit := some (fn.name, bid) })
         | .panic k => (.panic k, { s with panicAt := s.panicAt <|> some s!"@{fn.name}#{bid}: panic" })
@@ -577,16 +603,25 @@ def runBlockF (p : Prog Op) (or : Oracle) (h : Havoc Val) (track : Bool) (fn : F
     match fn.blocks[bid]? with
     | none => (.panic .modelStuck, s)
     | some blk =>
-      match execInstrsF or h track blk.instrs.toList env s with
-      | (.panic k, s) =>
+      let catching := fn.catchIn.contains bid
+      let (r, envAt, s1) := if catching then execEach (execInstrsF or h track) blk.instrs.toList env s
+        else let (r, s1) := execInstrsF or h track blk.instrs.toList env s; (r, env, s1)
+      match r, s1 with
+      | .panic k, s1 =>
+        if catching && !k.isStuck then
+          -- Recovered (#209): the recovery block, in the environment of
+          -- the failing instruction, the panic site forgotten.
+          runBlockF p or h track fn fn.catchB envAt { s1 with panicAt := s.panicAt } fuel
+        else
+        let s := s1
         -- Name the function and block of the op the instructions recorded
         -- (once: callers see the innermost site).
         let s := match s.panicAt with
           | some site => if site.startsWith "@" then s else { s with panicAt := some s!"@{fn.name}#{bid}: {site}" }
           | none => { s with panicAt := some s!"@{fn.name}#{bid}" }
         (.panic k, s)
-      | (.outOfFuel, s) => (.outOfFuel, s)
-      | (.ok env, s) =>
+      | .outOfFuel, s => (.outOfFuel, s)
+      | .ok env, s =>
         match blk.term with
         | .ret v => (.ok env[v]!, { s with exit := some (fn.name, bid) })
         | .panic k => (.panic k, { s with panicAt := s.panicAt <|> some s!"@{fn.name}#{bid}: panic" })

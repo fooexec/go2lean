@@ -599,6 +599,18 @@ func SeqTestRecoverNilAndCallee() bool { return testRecoverNilAndCallee() }
 // go2lean:sequence testRecoverNilWithoutPanic
 func SeqTestRecoverNilWithoutPanic() bool { return testRecoverNilWithoutPanic() }
 
+// go2lean:sequence testRecoverValueNoPanic
+func SeqTestRecoverValueNoPanic() bool { return testRecoverValueNoPanic() }
+
+// go2lean:sequence testRecoverValueOwnPanic
+func SeqTestRecoverValueOwnPanic() bool { return testRecoverValueOwnPanic() }
+
+// go2lean:sequence testRecoverValueRuntimeError
+func SeqTestRecoverValueRuntimeError() bool { return testRecoverValueRuntimeError() }
+
+// go2lean:sequence testRecoverValueString
+func SeqTestRecoverValueString() bool { return testRecoverValueString() }
+
 // go2lean:sequence testReflectCallIfaceResult
 func SeqTestReflectCallIfaceResult() bool { return testReflectCallIfaceResult() }
 

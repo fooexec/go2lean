@@ -670,6 +670,10 @@ type Func struct {
 	Sync bool
 	// Daemon: a goroutine running it does not keep a run alive (a ticker).
 	Daemon bool
+	// CatchIn are the blocks whose instructions' panics go to CatchB, the
+	// recovery block (#209): a function with a deferred recover().
+	CatchIn []int
+	CatchB  int
 	// File and Lines are the function's source file and its first and last
 	// line, when it has source: a run with -changed searches first the
 	// targets that reach a function a diff touches (#45).

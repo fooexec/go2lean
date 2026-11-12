@@ -161,6 +161,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	}
 	sprog, spkgs := build(pkgs, ssa.InstantiateGenerics)
 	sprog.Build()
+	programRecovers = callsRecover(sprog)
 	if stdAll {
 		stdImports = map[string][]string{}
 		for _, p := range sprog.AllPackages() {
@@ -2541,6 +2542,8 @@ type fnState struct {
 	// a panic in a deferred call is not recovered.
 	catchB  int
 	noCatch bool
+	// noCatchBlocks: the ranges of blocks made while noCatch was set.
+	noCatchBlocks [][2]int
 	// sync: the body starts a goroutine or synchronises (syncTerm).
 	sync bool
 	// setup, for a concurrent sequence harness: its entry block's
@@ -2663,6 +2666,21 @@ func (t *fnState) translate() error {
 		}
 	}
 	if t.catchB != 0 {
+		// The body's blocks recover their instructions' panics (#209): all
+		// made so far but the recovery block, Go's Recover block, and the
+		// deferred calls of a normal return.
+		skip := map[int]bool{t.catchB: true, t.blockID[f.Recover]: true}
+		for _, r := range t.noCatchBlocks {
+			for id := r[0]; id < r[1]; id++ {
+				skip[id] = true
+			}
+		}
+		for id := range t.out.Blocks {
+			if !skip[id] {
+				t.out.CatchIn = append(t.out.CatchIn, id)
+			}
+		}
+		t.out.CatchB = t.catchB
 		if err := t.recoverBlock(); err != nil {
 			return fmt.Errorf("recover: %w", err)
 		}
@@ -3751,6 +3769,16 @@ func (t *fnState) instr(b *ssa.BasicBlock, in ssa.Instruction) error {
 		t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: c, T: t.blockID[b.Succs[0]], TArgs: targs, F: t.blockID[b.Succs[1]], FArgs: fargs}
 		return nil
 	case *ssa.Panic:
+		if programRecovers {
+			// The value a deferred recover() returns (#209).
+			v, err := t.val(x.X)
+			if err != nil {
+				return err
+			}
+			c := t.fresh()
+			t.emit(ir.Instr{Dst: c, Op: panicValueCell()})
+			t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{c, v}})
+		}
 		if t.catchB != 0 && !t.noCatch {
 			// A panic of the function itself, which its defer recovers.
 			t.cur.Term = ir.Term{Kind: ir.TermJump, B: t.catchB}
@@ -4204,11 +4232,16 @@ func (t *fnState) call(x *ssa.Call) error {
 			t.out.Blocks = append(t.out.Blocks, ir.Block{Name: name + ".recovered"}, ir.Block{Name: name + ".not-panicking"},
 				ir.Block{Name: name + ".recover-join", Params: []ir.Var{res}})
 			t.cur = &t.out.Blocks[yes]
-			off, nonNil := t.fresh(), t.fresh()
+			off, pv, val, deflt := t.fresh(), t.fresh(), t.fresh(), t.fresh()
 			t.emit(ir.Instr{Dst: off, Op: ir.Const{V: ir.BoolVal(false)}})
 			t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{p, off}})
-			t.emit(ir.Instr{Dst: nonNil, Op: ir.Const{V: ir.OpaqueNonNil{}}})
-			t.cur.Term = ir.Term{Kind: ir.TermJump, B: join, Args: []ir.Var{nonNil}}
+			// The panic's value (#209), and the cell back to its default for
+			// the next panic, which may be a runtime error.
+			t.emit(ir.Instr{Dst: pv, Op: panicValueCell()})
+			t.emit(ir.Instr{Dst: val, Op: ir.Simple("loadPath"), Args: []ir.Var{pv}})
+			t.emit(ir.Instr{Dst: deflt, Op: ir.Const{V: ir.OpaqueNonNil{}}})
+			t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{pv, deflt}})
+			t.cur.Term = ir.Term{Kind: ir.TermJump, B: join, Args: []ir.Var{val}}
 			t.cur = &t.out.Blocks[no]
 			none := t.fresh()
 			t.emit(ir.Instr{Dst: none, Op: ir.Const{V: ir.OpaqueNil{}}})
@@ -7035,6 +7068,9 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 			// {...}(), #176).
 			return true
 		}
+		if fn != nil && fn.String() == "internal/godebug.New" {
+			return true // a fresh zero Setting (debugSwitchCall)
+		}
 		return fn != nil && fn.Parent() == nil && !isInit(fn.Name()) &&
 			(fn.Pkg == spkg || fn.Pkg != nil && stdTranslated(fn.Pkg.Pkg.Path()))
 	}
@@ -8122,6 +8158,18 @@ func (t *fnState) debugSwitchCall(x *ssa.Call, callee *ssa.Function) (bool, erro
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
 		return true, nil
 	}
+	if name == "internal/godebug.New" {
+		// A setting whose methods are the no-ops and defaults above: a
+		// fresh zero Setting (msgpack's and crypto/tls's package variables
+		// var x = godebug.New("x"), #207).
+		if pt, ok := x.Type().(*types.Pointer); ok {
+			if zero, ok := zeroVal(pt.Elem()); ok {
+				t.emit(ir.Instr{Dst: t.def(x), Op: ir.Alloc{Zero: zero}})
+				return true, nil
+			}
+		}
+		return false, nil
+	}
 	var v ir.Val
 	switch name {
 	case "(*internal/godebug.Setting).Value":
@@ -8404,6 +8452,10 @@ func (t *fnState) known(v ssa.Value, seen map[ssa.Value]bool) bool {
 		return t.readsOnly() && t.known(v.X, seen)
 	case *ssa.Call:
 		if reflectTypeExpr(v) {
+			return true
+		}
+		if bi, ok := v.Call.Value.(*ssa.Builtin); ok && bi.Name() == "recover" {
+			// The panic's value, or nil (#209): a value the model holds.
 			return true
 		}
 		// A value read from a sync.Map (syncMapCall), as from a map.
@@ -8733,7 +8785,11 @@ func (t *fnState) runDefers() error {
 	// A panic in a deferred call is not recovered by the function's defer.
 	saved := t.noCatch
 	t.noCatch = true
-	defer func() { t.noCatch = saved }()
+	start := len(t.out.Blocks)
+	defer func() {
+		t.noCatch = saved
+		t.noCatchBlocks = append(t.noCatchBlocks, [2]int{start, len(t.out.Blocks)})
+	}()
 	if t.deferStack != nil {
 		t.popDefers()
 		return nil
@@ -8765,6 +8821,42 @@ var panickingKey = func() uint32 {
 
 func panickingCell() ir.Op {
 	return ir.GlobalAddr{Key: panickingKey, Zero: ir.BoolVal(false)}
+}
+
+// programRecovers: some function of the program calls recover(), so a
+// panic(v) stores v for it (#209). Set by TranslateAllOpts.
+var programRecovers bool
+
+// callsRecover says whether a function of the program calls recover().
+func callsRecover(sprog *ssa.Program) bool {
+	for f := range ssautil.AllFunctions(sprog) {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				if c, ok := in.(*ssa.Call); ok {
+					if bi, ok := c.Call.Value.(*ssa.Builtin); ok && bi.Name() == "recover" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// panicValueKey is the cell that holds the value of the panic a recovery
+// block is handling (#209): panic(v) stores v there, and recover() returns
+// it, so a deferred handler can tell its own panics from others
+// (text/tabwriter's handlePanic asserts e.(osError)). A runtime error
+// leaves the cell's default, a value of no type the program names: an
+// assertion to one of its types fails, as on Go's runtime.Error.
+var panicValueKey = func() uint32 {
+	h := fnv.New32a()
+	h.Write([]byte("go2lean.panicvalue"))
+	return h.Sum32()
+}()
+
+func panicValueCell() ir.Op {
+	return ir.GlobalAddr{Key: panicValueKey, Zero: ir.OpaqueNonNil{}}
 }
 
 // recoversPanic says whether one of f's defer statements defers a function

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/fooexec/go2lean/internal/contract"
@@ -318,12 +319,24 @@ func printFunc(b *strings.Builder, p *ir.Prog, i int) {
 		}
 		b.WriteString("\n")
 	}
-	if f.Sync && f.Daemon {
-		b.WriteString("  ],\n  sync := true, daemon := true }\n\n")
-	} else if f.Sync {
-		b.WriteString("  ],\n  sync := true }\n\n")
-	} else {
+	var extra []string
+	if f.Sync {
+		extra = append(extra, "sync := true")
+	}
+	if f.Daemon {
+		extra = append(extra, "daemon := true")
+	}
+	if len(f.CatchIn) > 0 {
+		ids := make([]string, len(f.CatchIn))
+		for i, id := range f.CatchIn {
+			ids[i] = strconv.Itoa(id)
+		}
+		extra = append(extra, "catchIn := ["+strings.Join(ids, ", ")+"]", fmt.Sprintf("catchB := %d", f.CatchB))
+	}
+	if len(extra) == 0 {
 		b.WriteString("  ] }\n\n")
+	} else {
+		b.WriteString("  ],\n  " + strings.Join(extra, ", ") + " }\n\n")
 	}
 }
 
