@@ -7068,6 +7068,9 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 			// {...}(), #176).
 			return true
 		}
+		if fn != nil && fn.String() == "internal/godebug.New" {
+			return true // a fresh zero Setting (debugSwitchCall)
+		}
 		return fn != nil && fn.Parent() == nil && !isInit(fn.Name()) &&
 			(fn.Pkg == spkg || fn.Pkg != nil && stdTranslated(fn.Pkg.Pkg.Path()))
 	}
@@ -8154,6 +8157,18 @@ func (t *fnState) debugSwitchCall(x *ssa.Call, callee *ssa.Function) (bool, erro
 	if debugNoOps[name] {
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
 		return true, nil
+	}
+	if name == "internal/godebug.New" {
+		// A setting whose methods are the no-ops and defaults above: a
+		// fresh zero Setting (msgpack's and crypto/tls's package variables
+		// var x = godebug.New("x"), #207).
+		if pt, ok := x.Type().(*types.Pointer); ok {
+			if zero, ok := zeroVal(pt.Elem()); ok {
+				t.emit(ir.Instr{Dst: t.def(x), Op: ir.Alloc{Zero: zero}})
+				return true, nil
+			}
+		}
+		return false, nil
 	}
 	var v ir.Val
 	switch name {
