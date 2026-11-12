@@ -18,7 +18,8 @@ far that holds today. `GO2LEAN_STD_ALL=1` widens the list in two ways:
   boundary package directly (`reflect`, `os`, `unsafe`, `syscall`, `net`,
   the runtime). `text/template` and `encoding/gob` stay out;
   `text/tabwriter`, `container/*`, `hash/*` and `compress/*` come in. This
-  is what `GO2LEAN_STD_ALL=1` does now.
+  is what `GO2LEAN_STD_ALL=1` did, and what the default does since the
+  [second measurement](#fourteen-projects-after-209-and-210-2026-11-12).
 
 Both are measured on the [standard-library audit](std-audit.md) and on the
 seven projects of the [fourth run](fourth-run.md). Every mode used the
@@ -87,7 +88,7 @@ The tier-1 findings are the same in every mode.
   - Every one of 2,000 random trials and 14,060 exhaustive inputs ran out
     of fuel before reaching the panic (#210).
 
-## Conclusion
+## Conclusion of the first measurement
 
 Translating more of the standard library is the direct way to need no
 hand-written models, and the audit shows its size. But each package it
@@ -96,7 +97,66 @@ adds also reaches what the model does not cover yet:
 - a language gap (`recover`, #209);
 - code too costly to run in every trial (#210).
 
-So `GO2LEAN_STD_ALL` stays off by default, and its gaps join the
+So `GO2LEAN_STD_ALL` stayed off by default, and its gaps joined the
 [language-completeness plan](https://github.com/fooexec/go2lean/issues/207).
-It becomes the default when the seven projects give the same findings in
-the same time.
+It was to become the default when the seven projects give the same
+findings in the same time.
+
+## Fourteen projects, after #209 and #210 (2026-11-12)
+
+#209 (`recover` in a deferred method) and #210 were fixed since:
+- package initializers and a `sync.Once` body over package variables run
+  once, before the trials, not in every trial;
+- a function the compile stage rejects gets the model stuck, which the
+  search reruns in its slow mode, instead of an "other" panic it read as
+  running out of fuel. This was what lost chi's finding:
+  `NewCompressor`'s stub, rejected, ended every trial.
+
+Both modes were measured again with one build (`main` after #217 and the
+stuck-stub fix), on the seven projects of the fourth run and the seven of
+the [fifth run](fifth-run.md). Each line is one `go2lean run ./...` with the
+default flags.
+
+| project | default: time | confirmed (tier 1) | spurious | inconclusive | `GO2LEAN_STD_ALL`: time | confirmed (tier 1) | spurious | inconclusive |
+|---|---|---|---|---|---|---|---|---|
+| golang-lru | 133 s | 1 (0) | 0 | 0 | 131 s | 1 (0) | 0 | 0 |
+| conc | 78 s | 9 (4) | 0 | 1 | 59 s | 9 (4) | 0 | 1 |
+| chi | 64 s | 31 (7) | 0 | 0 | 67 s | 31 (7) | 0 | 0 |
+| envconfig | 55 s | 1 (1) | 0 | 0 | 54 s | 1 (1) | 0 | 0 |
+| go-multierror | 7 s | 3 (0) | 0 | 0 | 6 s | 3 (0) | 0 | 0 |
+| msgpack | 235 s | 70 (0) | 2 | 0 | 222 s | 70 (0) | 2 | 0 |
+| go-toml | 239 s | 32 (28) | 3 | 0 | 228 s | 32 (28) | 3 | 0 |
+| go-version | 21 s | 8 (6) | 0 | 0 | 21 s | 8 (6) | 0 | 0 |
+| btree | 13 s | 27 (12) | 0 | 0 | 13 s | 27 (12) | 0 | 0 |
+| pkg/errors | 8 s | 2 (0) | 0 | 0 | 7 s | 2 (0) | 0 | 0 |
+| logrus | 355 s | 90 (5) | 0 | 0 | 347 s | 90 (5) | 0 | 0 |
+| websocket | 266 s | 11 (0) | 0 | 0 | 270 s | 11 (1) | 0 | 0 |
+| goldmark | 407 s | 68 (10) | 0 | 0 | 423 s | 68 (10) | 0 | 0 |
+| groupcache | 165 s | 13 (3) | 0 | 0 | 167 s | 13 (3) | 0 | 0 |
+| **total** | **2,046 s** | **366 (76)** | **5** | **1** | **2,015 s** | **366 (77)** | **5** | **1** |
+
+goldmark's two runs were timed alone; in the first pass each overlapped
+other work.
+
+- **The same findings.** Every project confirms the same properties in
+  both modes. websocket's one difference is the rank of the same finding
+  (`ReadJSON` on a forged `Conn`): the two modes drew different random
+  counterexamples, one ranked at tier 1, the other at tier 4.
+- **The same time.** No project is slower by more than a few seconds.
+  conc (204 s under every package in the first measurement) and chi
+  are back to the default's time.
+- **chi's finding is back,** and envconfig's spurious verdicts are gone.
+- **The same spurious verdicts, in both modes.** They are new since the
+  fourth run, and come from #217: with a zero `reflect.Value` modelled,
+  the `reflect` code under go-toml's `Marshal` and msgpack's `Unmarshal`
+  now translates and gets stuck at run time, and the caller continues
+  with the stuck callee's havoc results
+  ([#218](https://github.com/fooexec/go2lean/issues/218)). msgpack's
+  `Marshal` sized a `make` by a negative havoc `reflect.Type.NumField`:
+  fixed, a count method's havoc result is now non-negative, like `Len`'s.
+
+## Conclusion
+
+The criterion holds on fourteen projects, so translating the standard
+library beyond the list, the packages that import no boundary package,
+is now the default. `GO2LEAN_STD_ALL=0` keeps to the list.

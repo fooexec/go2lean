@@ -63,12 +63,13 @@ between rows holds.
 
 ## Translating more of the standard library
 
-`GO2LEAN_STD_ALL=1` translates more standard-library packages than the
-default list. Every package lifts the audit from 71.8% to 75.9% complete;
-the packages that import no boundary package give 74.4%. On real projects,
-each costs a spurious verdict and a lost finding, so it stays off: the
-data and the project-by-project details are in
-[std-translation.md](std-translation.md).
+Under `-deps`, every standard-library package that imports no boundary
+package is translated from source, not only a list of 22. On the audit
+that lifts the complete share from 71.8% to 74.4% (every package, boundary
+importers included: 75.9%). It became the default once fourteen real
+projects gave the same findings in the same time with it;
+`GO2LEAN_STD_ALL=0` keeps to the list. The data and the
+project-by-project details are in [std-translation.md](std-translation.md).
 
 ## The language gaps (3.4%)
 

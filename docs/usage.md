@@ -244,9 +244,13 @@ go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm clau
 
 `run` and `compile` model the dependencies the packages call by default
 (`-deps`): the dependency packages' functions, and the standard-library
-code the model translates from source (`strings`, `strconv`, `math`'s
-portable code, `slices`, the encodings, the environment and
-`crypto/rand`). `-deps=false` models only the compiled packages; their
+code the model translates from source: every standard-library package
+that imports no boundary package (the runtime, `unsafe`, `reflect`, `os`,
+`syscall`, `net`) and has no semantics of its own in the model, such as
+`strings`, `strconv`, `math`'s portable code, `slices`, the encodings,
+`compress/*` and `text/tabwriter`
+([std-translation.md](eval/std-translation.md)). `GO2LEAN_STD_ALL=0`
+keeps to the shorter list used before. `-deps=false` models only the compiled packages; their
 calls into anything else are then unmodelled, and their results havoc,
 which gives more spurious counterexamples.
 
