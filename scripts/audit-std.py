@@ -42,6 +42,11 @@ def cause(issue):
     if 'func value' in s and 'opaque' in s: return ('func value not modelled', 'language')
     if 'type assertion' in s: return ('type assertion on a value the model did not build', 'language')
     if 'lookup in map' in s or 'map update' in s or re.search(r'\bmap\b.*knows nothing', s): return ('map the model knows nothing about', 'language')
+    # The value a lookup in, or the length of, a map the model knows nothing
+    # about: the companion of 'lookup in map ... knows nothing', not a cause
+    # of its own.
+    if re.match(r'map lookup[^:]*: assumed', s) or re.match(r'len of .* assumed below', s):
+        return ('map the model knows nothing about', 'language')
     if 'nil comparison' in s: return ('nil comparison on an unknown value', 'language')
     if '== on an interface' in s or 'on an interface value the model did not build' in s: return ('== on an interface value the model did not build', 'language')
     if 'interface value' in s and 'opaque' in s: return ('interface value not modelled', 'language')
@@ -100,7 +105,7 @@ def family(k, kind):
     if k in ('type assertion on a value the model did not build', 'nil comparison on an unknown value',
              'map the model knows nothing about', '== on an interface value the model did not build',
              'interface value not modelled', 'func value not modelled', 'call through an unknown value') \
-            or 'float the model does not know' in k or 'complex number the model does not know' in k or k.startswith('load ') and 'havoc' in k:
+            or 'on a float the model' in k or 'on a complex number the m' in k or k.startswith('load ') and 'havoc' in k:
         return 'analysis'
     return 'language'
 

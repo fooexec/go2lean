@@ -104,6 +104,52 @@ func (c *callerIndex) load() {
 	}
 }
 
+// constructorOf names an exported function of pkg that returns a value of
+// method fn's receiver type, a struct, or a pointer to one ("" when there
+// is none, fn is not a method, or the module could not be loaded).
+func (c *callerIndex) constructorOf(pkg, fn string) string {
+	c.load()
+	if c.failed {
+		return ""
+	}
+	m, ok := c.funcs[pkg+"."+fn]
+	if !ok || m.Signature.Recv() == nil {
+		return ""
+	}
+	recv := m.Signature.Recv().Type()
+	if p, ok := recv.(*types.Pointer); ok {
+		recv = p.Elem()
+	}
+	named, ok := recv.(*types.Named)
+	if !ok {
+		return ""
+	}
+	if _, isStruct := named.Underlying().(*types.Struct); !isStruct {
+		return ""
+	}
+	var names []string
+	for key, f := range c.funcs {
+		if f.Signature.Recv() != nil || !strings.HasPrefix(key, pkg+".") || strings.Contains(key[len(pkg)+1:], ".") {
+			continue
+		}
+		if !exportedFunc(f.Name()) || f.Signature.Results().Len() == 0 {
+			continue
+		}
+		r := f.Signature.Results().At(0).Type()
+		if p, ok := r.(*types.Pointer); ok {
+			r = p.Elem()
+		}
+		if rn, ok := r.(*types.Named); ok && rn.Obj() == named.Obj() {
+			names = append(names, f.Name())
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return names[0]
+}
+
 // nilSites traces, at every static call site of pkg.fn, the arguments for
 // the named parameters (the receiver included). yes are the call sites
 // that can pass nil, with how; maybe those that pass a value whose nil-ness

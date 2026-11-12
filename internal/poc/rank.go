@@ -21,7 +21,8 @@ import (
 //	   module can pass the same nil (traced through its SSA, nilflow.go)
 //	2: plain inputs to an unexported function (depends on its callers), a
 //	   caller passes a value whose nil-ness is unknown (a field, a
-//	   global), or a hand-written spec violated
+//	   global), a receiver built field by field where the package has a
+//	   constructor for its type (#195), or a hand-written spec violated
 //	3: a nil argument no caller in the module can pass, or an agent-written
 //	   spec violated (check the spec)
 //	4: an input the test forged (an opaque value left nil, package state
@@ -65,6 +66,16 @@ func rankOf(p *prepared, callers *callerIndex) *contract.Rank {
 		}
 	}
 	if exportedFunc(fn) {
+		// A method whose receiver the test built field by field, of a type
+		// the package builds with a constructor (#195): the fields can break
+		// an invariant the package keeps (chi's Context.URLParam, Keys and
+		// Values filled together by RouteParams.Add). The ~NewT target runs
+		// the method on the constructor's value instead.
+		if !strings.Contains(p.target.Func, "~") {
+			if ctor := callers.constructorOf(p.target.Package, fn); ctor != "" {
+				return &contract.Rank{Tier: 2, Reason: "a receiver built field by field, where the package builds one with " + ctor + ": check that the package's own values can get here"}
+			}
+		}
 		return &contract.Rank{Tier: 1, Reason: "plain inputs to the package's API"}
 	}
 	// An unexported function whose callers all pass constants for the

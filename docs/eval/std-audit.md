@@ -37,6 +37,29 @@ Each change rerun on the audit (#207):
 | `clear`, `print`, `println`; debug switches as no-ops | 71.8% | 3.1% | 7.9% |
 | `recover` of the panic's value and of a function's own operations (#209); `godebug.New` | 72.1% | 3.1% | 7.7% |
 | complex numbers; float-to-integer conversions as amd64 does them | 72.2% | 2.7% | 7.8% |
+| the audit's classification corrected (below) | 72.2% | **1.8%** | 7.9% |
+
+The last row changes no translation. Two kinds of message were counted as
+language gaps by mistake: the value read from a map of unknown origin (`map
+lookup: assumed ...`, `len of map ... assumed below 16`), which always comes
+with "a map the model knows nothing about", and floats of unknown origin,
+whose description the report cut before the words its rule looked for.
+Both are values compiled out of context (an input supplies them in a run).
+So the earlier language shares were 0.9 points too high; the trend
+between rows holds.
+
+### What the 1.8% is now (291 functions)
+
+| about | functions |
+|---|---|
+| package variables the model does not build: `flag` variables and `os.Args` (the OS), tables a call of another package fills | 64 |
+| calls ignored, deferred calls ignored | 38 |
+| `sync.Pool.Get` returns `New`'s object: an object `Put` back is not returned (one of Go's behaviours, the only one modelled) | 26 |
+| `unsafe.Slice`, `unsafe.String`, `unsafe.SliceData` | 15 |
+| `time.Timer.Reset` and other `time` calls | 13 |
+| stores to package variables ignored | 12 |
+| package variables used by address that the model has no value for (`&crctab[i]`, `zeroBlock[:]`) | ~60 |
+| a long tail, none above 10 functions | ~63 |
 
 ## Translating more of the standard library
 
@@ -63,7 +86,7 @@ data and the project-by-project details are in
 | about | functions | how |
 |---|---|---|
 | `os`, `syscall`, `internal/poll`, `os/exec` | ~360 | an environment model, as `osmodel` and `netloop` do for the environment and the network |
-| `reflect` | ~290 | `Value` and `Type` are partly modelled (`Kind`, `IsNil`, `Call(nil)`, `TypeOf`, `Implements`, #200); the rest are `Value`'s setters and accessors |
+| `reflect` | ~290 | `Value` and `Type` are partly modelled (`Kind`, `IsNil`, `Call(nil)`, `TypeOf`, `Implements`, #200; `Interface`, `IsValid`, `Int`, `Uint`, `Bool`, `String`, `Len`, `Elem`, #215); the rest are `Value`'s setters, `Field`, `Index` and `Zero` |
 | runtime internals, `internal/abi` | ~210 | |
 | functions with no Go body (assembly, `linkname`) | 200 | a pure-Go build tag where one exists (`math/big` with `math_big_pure_go`, #171), else a model |
 | `unsafe` | ~180 | conversions through `unsafe.Pointer`, `unsafe.Slice`/`String` |

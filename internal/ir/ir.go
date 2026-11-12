@@ -179,6 +179,32 @@ func (o ReflectKind) Lean() string {
 	return fmt.Sprintf("(.%s [%s])", name, strings.Join(parts, ", "))
 }
 
+// ReflectVal is reflectVal: a (reflect.Value) method on a value the
+// model built (#215). Method: 0 Interface, 1 IsValid, 2 Int, 3 Uint,
+// 4 Bool, 5 String, 6 Len, 7 Elem. Kinds maps a type tag to its
+// reflect.Kind, Elems a pointer type's tag to its element type's.
+type ReflectVal struct {
+	Method       int
+	Kinds, Elems [][2]uint32
+	// Ok: reflectValOk, whether reflectVal can answer.
+	Ok bool
+}
+
+func (o ReflectVal) Lean() string {
+	pairs := func(t [][2]uint32) string {
+		parts := make([]string, len(t))
+		for i, e := range t {
+			parts[i] = fmt.Sprintf("(%d, %d)", e[0], e[1])
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	}
+	name := "reflectVal"
+	if o.Ok {
+		name = "reflectValOk"
+	}
+	return fmt.Sprintf("(.%s %d %s %s)", name, o.Method, pairs(o.Kinds), pairs(o.Elems))
+}
+
 // ReflectType is one of the reflect.Type ops (#200): reflectTypeOf,
 // reflectTypeKind and reflectTypeMap (Table: tag to kind or to tag), or
 // reflectImplements (Yes and No: the (type, interface) pairs). RT is the
