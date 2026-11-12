@@ -148,7 +148,8 @@ less for the successor. -/
 theorem wpPtN_of_block {n fid b : Nat} {fn : GoSSA.Func} {blk : GoSSA.Block}
     (hf : p.funcs[fid]? = some fn) (hb : fn.blocks[b]? = some blk)
     {Q : Val → HState Val → Prop} {env : Env Val} {s : HState Val}
-    (h : wpBlockN p or hv n fid fn b blk Q env s) : wpPtN p or hv (n + 1) ⟨fid, b⟩ Q env s := by
+    (h : wpBlockN p or hv n fid fn b blk Q env s)
+    (hc : fn.catchIn = [] := by rfl) : wpPtN p or hv (n + 1) ⟨fid, b⟩ Q env s := by
   unfold wpPtN; simp only [hf]
   intro fuel hfuel
   cases fuel with
@@ -156,7 +157,7 @@ theorem wpPtN_of_block {n fid b : Nat} {fn : GoSSA.Func} {blk : GoSSA.Block}
   | succ m =>
     have hm : m ≤ n := Nat.le_of_succ_le_succ hfuel
     unfold wpBlockN at h
-    simp only [runBlock, hb]
+    simp only [runBlock, hb, hc, List.contains_nil, Bool.false_eq_true, if_false]
     rcases he : execInstrs (Op := GoSSA.Op) or hv false blk.instrs.toList env s with ⟨r, s'⟩
     rw [he] at h
     cases r with
@@ -198,10 +199,11 @@ unfolded with one fuel less (`wp_step`). -/
 theorem wpPtN_step {n fid b : Nat} {fn : GoSSA.Func} {blk : GoSSA.Block}
     (hf : p.funcs[fid]? = some fn) (hb : fn.blocks[b]? = some blk)
     {Q : Val → HState Val → Prop} {env : Env Val} {s : HState Val}
-    (h : ∀ m, n = m + 1 → wpBlockN p or hv m fid fn b blk Q env s) : wpPtN p or hv n ⟨fid, b⟩ Q env s := by
+    (h : ∀ m, n = m + 1 → wpBlockN p or hv m fid fn b blk Q env s)
+    (hc : fn.catchIn = [] := by rfl) : wpPtN p or hv n ⟨fid, b⟩ Q env s := by
   cases n with
   | zero => exact wpPtN_zero hf
-  | succ m => exact wpPtN_of_block hf hb (h m rfl)
+  | succ m => exact wpPtN_of_block hf hb (h m rfl) hc
 
 /-- A callee's partial correctness from its entry block is its contract
 for every call: `wpFun` on the arguments, bound to its parameters. -/
@@ -234,12 +236,13 @@ theorem wpFun_mono {f : Nat} {args : List Val} {Q Q' : Val → HState Val → Pr
 theorem wpPt_of_block {fid b : Nat} {fn : GoSSA.Func} {blk : GoSSA.Block}
     (hf : p.funcs[fid]? = some fn) (hb : fn.blocks[b]? = some blk)
     {Q : Val → HState Val → Prop} {env : Env Val} {s : HState Val}
-    (h : ∀ n, wpBlockN p or hv n fid fn b blk Q env s) : wpPt p or hv ⟨fid, b⟩ Q env s := by
+    (h : ∀ n, wpBlockN p or hv n fid fn b blk Q env s)
+    (hc : fn.catchIn = [] := by rfl) : wpPt p or hv ⟨fid, b⟩ Q env s := by
   apply wpPt_of_N
   intro n
   cases n with
   | zero => exact wpPtN_zero hf
-  | succ n => exact wpPtN_of_block hf hb (h n)
+  | succ n => exact wpPtN_of_block hf hb (h n) hc
 
 /-- The cut-point rule: an invariant `I` at a loop header that every run from
 the header re-establishes when it comes back (with less fuel), or leaves
