@@ -1407,7 +1407,7 @@ func ctorWrapper(p *ir.Prog, ctor, m *ssa.Function, ctorID, mID int, deref bool)
 	w.Blocks[2] = ir.Block{Name: "method", Instrs: b2, Term: ir.Term{Kind: ir.TermCall, Callee: mID, CArgs: append([]ir.Var{recv}, w.Params[nc:]...), Dst: res, Next: 3, Fallback: 5}}
 	w.Blocks[3] = ir.Block{Name: "ret", Term: ir.Term{Kind: ir.TermRet, V: res}}
 	w.Blocks[4] = ir.Block{Name: "ctor-error", Instrs: []ir.Instr{{Dst: unit, Op: ir.Const{V: ir.UnitVal{}}}}, Term: ir.Term{Kind: ir.TermRet, V: unit}}
-	w.Blocks[5] = ir.Block{Name: "stuck", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicOther}}
+	w.Blocks[5] = ir.Block{Name: "stuck", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicModelStuck}}
 	w.NVals = v
 	return w, nil
 }
@@ -1548,10 +1548,12 @@ func stdlibOp(name string) (ir.Op, bool) {
 	return op, true
 }
 
-// stdAll (GO2LEAN_STD_ALL=1, an experiment, #207) translates every
-// standard-library package from source under -deps, except stdDenied's,
-// instead of modelledStdlib's only.
-var stdAll = os.Getenv("GO2LEAN_STD_ALL") == "1"
+// stdAll translates every standard-library package from source under
+// -deps, except stdDenied's and those importing the boundary, instead of
+// modelledStdlib's only (#207). The default since the 14 projects of the
+// fourth and fifth runs gave the same findings with it (#210);
+// GO2LEAN_STD_ALL=0 keeps to modelledStdlib.
+var stdAll = os.Getenv("GO2LEAN_STD_ALL") != "0"
 
 // stdDenied are the standard-library packages never translated from
 // source: the boundary below Go (the runtime, unsafe memory, the OS), and
@@ -2581,7 +2583,7 @@ func rejectStub(out *ir.Func, err error) {
 	out.Params = nil
 	out.NVals = 0
 	out.Entry = 0
-	out.Blocks = []ir.Block{{Name: "rejected", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicOther}}}
+	out.Blocks = []ir.Block{{Name: "rejected", Term: ir.Term{Kind: ir.TermPanic, Panic: contract.PanicModelStuck}}}
 }
 
 type fnState struct {
@@ -9668,8 +9670,14 @@ func (t *fnState) havocResult(dst ir.Var, x ssa.Value, site, reason string) erro
 	return t.havocInto(dst, x.Type(), t.f.Name()+": "+site, reason, "")
 }
 
+// countMethod names the no-argument methods that return a count, never
+// negative: reflect.Type's NumField, NumMethod, NumIn and NumOut (and any
+// method so named). A negative havoc count makes a spurious panic in the
+// make that sizes a slice by it (msgpack's Marshal).
+var countMethod = map[string]bool{"NumField": true, "NumMethod": true, "NumIn": true, "NumOut": true}
+
 // contractHavoc binds dst to a havoc result of a single-result call kept
-// within its callee's documented contract (#85): a Len or Cap is from 0 to
+// within its callee's documented contract (#85): a Len, Cap or count method is from 0 to
 // the model's slice bound; runtime.Callers fills at most len(pc).
 func (t *fnState) contractHavoc(dst ir.Var, x ssa.Value, site, reason, goHint string) (bool, error) {
 	c, ok := x.(*ssa.Call)
@@ -9701,7 +9709,7 @@ func (t *fnState) contractHavoc(dst ir.Var, x ssa.Value, site, reason, goHint st
 			t.emit(ir.Instr{Dst: bound, Op: ir.Simple("add"), Args: []ir.Var{n, one}})
 		}
 	}
-	if !bounded && (name == "Len" || name == "Cap") && nargs == 0 {
+	if !bounded && (name == "Len" || name == "Cap" || countMethod[name]) && nargs == 0 {
 		bound, bounded = t.fresh(), true
 		t.emit(ir.Instr{Dst: bound, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: "16385"}}})
 	}

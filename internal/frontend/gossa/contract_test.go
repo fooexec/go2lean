@@ -23,8 +23,11 @@ import (
 	"hash"
 	"io"
 	"math/rand"
+	"reflect"
 	"runtime"
 )
+
+func NF(t reflect.Type) int { return t.NumField() }
 
 func ReadN(rd io.Reader, p []byte) int { n, _ := rd.Read(p); return n }
 
@@ -73,7 +76,7 @@ func S() int { return len(start) }
 	op := func(s string) func(ir.Instr) bool {
 		return func(in ir.Instr) bool { o, ok := in.Op.(ir.Simple); return ok && string(o) == s }
 	}
-	for _, name := range []string{"ReadN", "L", "C"} {
+	for _, name := range []string{"ReadN", "L", "C", "NF"} {
 		if !has(name, op("urem")) {
 			t.Errorf("%s: havoc count not bounded (no urem)", name)
 		}

@@ -121,6 +121,11 @@ const (
 	PanicGoroutineLeak PanicKind = "goroutine_leak"
 	PanicDataRace      PanicKind = "data_race"
 	PanicOther         PanicKind = "other"
+	// PanicModelStuck: the model cannot follow the code (a rejected
+	// function's stub). Like a stuck op, a call into it takes the call's
+	// fallback; the concurrent machine reads "other" as a goroutine out of
+	// fuel, so a stub must not panic with it (#210).
+	PanicModelStuck PanicKind = "model_stuck"
 )
 
 // HavocRead names one read of a havoc site: its index and iteration.

@@ -90,6 +90,8 @@ func panicCtor(k contract.PanicKind) string {
 		return "nilMapWrite"
 	case contract.PanicExplicit:
 		return "explicit"
+	case contract.PanicModelStuck:
+		return "modelStuck"
 	}
 	return "other"
 }
