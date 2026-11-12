@@ -416,6 +416,11 @@ inductive Op where
   | sprintf
   /-- Can `sprintf` format these arguments? -/
   | sprintfOk
+  /-- `fmt.Sprintln(args...)`: `sprintf` of `"%v %v ... %v\n"`, one `%v` per
+  operand, as Go formats each operand with `%v`, spaces between them. -/
+  | sprintln
+  /-- Can `sprintln` format these arguments? -/
+  | sprintlnOk
   /-- `regexp.MustCompile(p)` of a pattern built at run time: 0 when the
   model compiles it (`reCompile`), 1 when Go rejects it, 2 when the model
   does not take its syntax (#46). -/
@@ -1166,6 +1171,11 @@ def fmtPad (zero minus : Bool) (width : Nat) (isInt : Bool) (x : List Nat) : Opt
         | 45 :: digits => some (45 :: List.replicate n 48 ++ digits)
         | _ => some (List.replicate n 48 ++ x)
     else some (List.replicate n 32 ++ x)
+
+/-- The format `fmt.Sprintln` amounts to for `n` operands: `%v` each,
+spaces between, a newline at the end. -/
+def sprintlnFormat (n : Nat) : List Nat :=
+  List.intercalate [32] (List.replicate n [37, 118]) ++ [10]
 
 mutual
 /-- Format `fmt` with `args` (see `Op.sprintf`): the verbs `%v %s %d %t %x
@@ -3814,6 +3824,17 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
     match strBytes heap f, sliceElems heap args with
     | some fb, some xs => .ok (.bool ((sprintfBytes heap bt.toNat (natsOf us) fb xs).isSome), heap)
     | _, _ => .ok (.bool false, heap)
+  | .sprintlnOk, [args, .int _ bt, .arr us] =>
+    match sliceElems heap args with
+    | some xs => .ok (.bool ((sprintfBytes heap bt.toNat (natsOf us) (sprintlnFormat xs.length) xs).isSome), heap)
+    | none => .ok (.bool false, heap)
+  | .sprintln, [args, .int _ bt, .arr us] =>
+    match sliceElems heap args with
+    | some xs =>
+      match sprintfBytes heap bt.toNat (natsOf us) (sprintlnFormat xs.length) xs with
+      | some r => if r.length > strLimit then .panic .modelStuck else .ok (strAlloc heap r)
+      | none => .panic .modelStuck
+    | none => .panic .modelStuck
   | .sprintf, [f, args, .int _ bt, .arr us] =>
     match strBytes heap f, sliceElems heap args with
     | some fb, some xs =>

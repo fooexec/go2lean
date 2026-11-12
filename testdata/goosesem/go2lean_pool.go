@@ -23,3 +23,23 @@ func testPoolGetFromNew() bool {
 	poolBufs.Put(p)
 	return ok
 }
+
+// A pool in a struct field, as logrus keeps its entries: Get calls New
+// when it is set and gives nil when it is not.
+
+type poolOwner struct {
+	pool sync.Pool
+	made int
+}
+
+func testPoolFieldNoNew() bool {
+	var o poolOwner
+	return o.pool.Get() == nil
+}
+
+func testPoolFieldNew() bool {
+	o := &poolOwner{}
+	o.pool.New = func() any { o.made++; return new(poolBuf) }
+	p, ok := o.pool.Get().(*poolBuf)
+	return ok && p.n == 0 && o.made == 1
+}

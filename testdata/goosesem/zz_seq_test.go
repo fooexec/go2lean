@@ -362,6 +362,12 @@ func SeqTestFloatToInt() bool { return testFloatToInt() }
 // go2lean:sequence testFmtHexByte
 func SeqTestFmtHexByte() bool { return testFmtHexByte() }
 
+// go2lean:sequence testFmtSprintln
+func SeqTestFmtSprintln() bool { return testFmtSprintln() }
+
+// go2lean:sequence testFmtSprintlnSpread
+func SeqTestFmtSprintlnSpread() bool { return testFmtSprintlnSpread() }
+
 // go2lean:sequence testFmtWidthNarrow
 func SeqTestFmtWidthNarrow() bool { return testFmtWidthNarrow() }
 
@@ -589,6 +595,12 @@ func SeqTestPointerAssignment() bool { return testPointerAssignment() }
 
 // go2lean:sequence testPolymorphismInterface
 func SeqTestPolymorphismInterface() bool { return testPolymorphismInterface() }
+
+// go2lean:sequence testPoolFieldNew
+func SeqTestPoolFieldNew() bool { return testPoolFieldNew() }
+
+// go2lean:sequence testPoolFieldNoNew
+func SeqTestPoolFieldNoNew() bool { return testPoolFieldNoNew() }
 
 // go2lean:sequence testPoolGetFromNew
 func SeqTestPoolGetFromNew() bool { return testPoolGetFromNew() }

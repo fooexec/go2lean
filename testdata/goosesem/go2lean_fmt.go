@@ -33,3 +33,17 @@ func testFmtHexByte() bool {
 	}
 	return fmt.Sprintf("%02x", uint8(10)) == "0a"
 }
+
+// fmt.Sprintln: every operand with %v, spaces between them and a newline,
+// as logrus's Infoln formats its arguments.
+
+func testFmtSprintln() bool {
+	return fmt.Sprintln("a", 1, true) == "a 1 true\n" && fmt.Sprintln() == "\n" &&
+		fmt.Sprintln("x") == "x\n"
+}
+
+func sprintlnOf(args ...any) string { return fmt.Sprintln(args...) }
+
+func testFmtSprintlnSpread() bool {
+	return sprintlnOf("level", 7) == "level 7\n"
+}
