@@ -4465,10 +4465,15 @@ func (t *fnState) call(x *ssa.Call) error {
 			}
 		}
 	}
-	if callee != nil && callee.Pkg != nil && loggingPkg(callee.Pkg.Pkg.Path()) {
+	if callee != nil && callee.Pkg != nil && loggingPkg(callee.Pkg.Pkg.Path()) &&
+		(t.f.Pkg == nil || t.f.Pkg.Pkg.Path() != callee.Pkg.Pkg.Path()) {
 		// A logger (logrus.WithContext, WithField, Debugf): its results only
 		// feed more logging calls. Not followed, even where its package is
-		// modelled (its internals get stuck on locks and formatting).
+		// modelled (its internals get stuck on locks and formatting). Only
+		// from outside the logger: when the logger's own package is the
+		// target, its calls are its code (logrus's SetOutput locks its
+		// mutex, and a skipped Lock left the deferred Unlock unlocking an
+		// unlocked mutex, the fifth run's 5 spurious verdicts).
 		if _, tuple := x.Type().(*types.Tuple); hasResult && !tuple {
 			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.Opaque{}}})
 			return nil
@@ -4509,6 +4514,9 @@ func (t *fnState) call(x *ssa.Call) error {
 	}
 	if callee != nil && callee.String() == "fmt.Sprintf" && len(x.Call.Args) == 2 {
 		return t.sprintf(x)
+	}
+	if callee != nil && callee.String() == "fmt.Sprintln" && len(x.Call.Args) == 1 {
+		return t.sprintln(x)
 	}
 	if callee != nil && callee.String() == "fmt.Fprintf" && len(x.Call.Args) == 3 {
 		if done, err := t.fprintf(x); done || err != nil {
@@ -4664,6 +4672,9 @@ func (t *fnState) call(x *ssa.Call) error {
 				return t.emitCallArgs(x, ir.Term{Kind: ir.TermCall, Callee: id}, nf.String(), nil)
 			}
 		}
+	}
+	if done, err := t.poolFieldGet(x, callee); done || err != nil {
+		return err
 	}
 	if done, err := t.concCall(x); done || err != nil {
 		return err
@@ -5747,6 +5758,16 @@ func (t *fnState) sprintf(x *ssa.Call) error {
 	return t.sprintfTo(t.def(x), x.Call.Args[0], x.Call.Args[1], "call fmt.Sprintf")
 }
 
+// sprintln lowers fmt.Sprintln(args...): Sprintf with one %v per operand,
+// spaces between them and a newline, which is how Go formats it.
+func (t *fnState) sprintln(x *ssa.Call) error {
+	args, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return err
+	}
+	return t.formatInto(t.def(x), "sprintln", nil, args, "call fmt.Sprintln")
+}
+
 // sprintfTo binds dst to fmt.Sprintf(format, args...) (args the variadic
 // slice), havoc when the model cannot format them.
 func (t *fnState) sprintfTo(dst ir.Var, format, argSlice ssa.Value, site string) error {
@@ -5758,6 +5779,13 @@ func (t *fnState) sprintfTo(dst ir.Var, format, argSlice ssa.Value, site string)
 	if err != nil {
 		return err
 	}
+	return t.formatInto(dst, "sprintf", []ir.Var{f}, args, site)
+}
+
+// formatInto binds dst to the model's op (sprintf or sprintln) on lead
+// (the format, if any) and the operand slice args, havoc when the model
+// cannot format them.
+func (t *fnState) formatInto(dst ir.Var, op string, lead []ir.Var, args ir.Var, site string) error {
 	// %x formats a byte slice; the model tells one by its boxed type tag
 	// (the tag of []byte as the program spells it: byte, not uint8).
 	bytesTag := t.fresh()
@@ -5772,22 +5800,32 @@ func (t *fnState) sprintfTo(dst ir.Var, format, argSlice ssa.Value, site string)
 	}
 	unsigned := t.fresh()
 	t.emit(ir.Instr{Dst: unsigned, Op: ir.Const{V: ir.ArrVal{Elems: us}}})
+	opArgs := append(slices.Clone(lead), args, bytesTag, unsigned)
 	ok := t.fresh()
-	t.emit(ir.Instr{Dst: ok, Op: ir.Simple("sprintfOk"), Args: []ir.Var{f, args, bytesTag, unsigned}})
+	t.emit(ir.Instr{Dst: ok, Op: ir.Simple(op + "Ok"), Args: opArgs})
 	yes := len(t.out.Blocks)
 	no, join := yes+1, yes+2
 	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: ok, T: yes, F: no}
 	name := t.cur.Name
 	t.out.Blocks = append(t.out.Blocks,
-		ir.Block{Name: name + ".sprintf"},
-		ir.Block{Name: name + ".sprintf-unknown"},
-		ir.Block{Name: name + ".sprintf-join"})
+		ir.Block{Name: name + "." + op},
+		ir.Block{Name: name + "." + op + "-unknown"},
+		ir.Block{Name: name + "." + op + "-join"})
 	t.cur = &t.out.Blocks[yes]
-	t.emit(ir.Instr{Dst: dst, Op: ir.Simple("sprintf"), Args: []ir.Var{f, args, bytesTag, unsigned}})
+	t.emit(ir.Instr{Dst: dst, Op: ir.Simple(op), Args: opArgs})
 	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
 	t.cur = &t.out.Blocks[no]
-	if err := t.havocInto(dst, types.Typ[types.String], t.f.Name()+": "+site, "unmodeled-call", ""); err != nil {
+	h := dst
+	if op == "sprintln" {
+		h = t.fresh() // Sprintln's text always ends in a newline (logrus slices it off)
+	}
+	if err := t.havocInto(h, types.Typ[types.String], t.f.Name()+": "+site, "unmodeled-call", ""); err != nil {
 		return err
+	}
+	if op == "sprintln" {
+		nl := t.fresh()
+		t.emit(ir.Instr{Dst: nl, Op: ir.StrConst{Bytes: []byte("\n")}})
+		t.emit(ir.Instr{Dst: dst, Op: ir.Simple("strConcat"), Args: []ir.Var{h, nl}})
 	}
 	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
 	t.cur = &t.out.Blocks[join]
@@ -7210,6 +7248,66 @@ func poolGet(c ssa.CallCommon) *ssa.Global {
 	}
 	g, _ := c.Args[0].(*ssa.Global)
 	return g
+}
+
+// poolFieldGet lowers (*sync.Pool).Get on a pool that is not a package
+// variable (logrus's logger.entryPool): Go calls the
+// pool's New field when it is set and returns nil when it is not. Objects
+// Put back are not modelled, as for package variables (#105).
+func (t *fnState) poolFieldGet(x *ssa.Call, callee *ssa.Function) (bool, error) {
+	if callee == nil || callee.String() != "(*sync.Pool).Get" || len(x.Call.Args) != 1 {
+		return false, nil
+	}
+	if _, global := x.Call.Args[0].(*ssa.Global); global {
+		return false, nil // package variables holding sync values are not values the model has
+	}
+	pt, ok := x.Call.Args[0].Type().Underlying().(*types.Pointer)
+	if !ok {
+		return false, nil
+	}
+	st, ok := pt.Elem().Underlying().(*types.Struct)
+	if !ok {
+		return false, nil
+	}
+	field := -1
+	for i := range st.NumFields() {
+		if st.Field(i).Name() == "New" {
+			field = i
+		}
+	}
+	if field < 0 {
+		return false, nil
+	}
+	p, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return true, err
+	}
+	t.assume("sync.Pool.Get returns a new object from the pool's New, or nil without one: objects Put back are not modelled")
+	addr, fv, isNil := t.fresh(), t.fresh(), t.fresh()
+	t.emit(ir.Instr{Dst: addr, Op: ir.FieldAddr{I: field}, Args: []ir.Var{p}})
+	t.emit(ir.Instr{Dst: fv, Op: ir.Simple("loadPath"), Args: []ir.Var{addr}})
+	t.emit(ir.Instr{Dst: isNil, Op: ir.Simple("isNilOpaque"), Args: []ir.Var{fv}})
+	dst := t.def(x)
+	n := len(t.out.Blocks)
+	none, call, unknown, join := n, n+1, n+2, n+3
+	name := t.cur.Name
+	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: isNil, T: none, F: call}
+	t.addBlocks(name+".pool-none", name+".pool-new", name+".pool-unknown", name+".pool-join")
+	t.cur = &t.out.Blocks[none]
+	t.emit(ir.Instr{Dst: dst, Op: ir.Const{V: ir.OpaqueNil{}}})
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[call]
+	t.cur.Term = ir.Term{Kind: ir.TermCallV, FV: fv, Dst: dst, Next: join, Fallback: unknown}
+	if t.catchB != 0 && !t.noCatch {
+		t.cur.Term.Catch = t.catchB
+	}
+	t.cur = &t.out.Blocks[unknown]
+	if err := t.havocResult(dst, x, "sync.Pool.Get", "unmodeled-call"); err != nil {
+		return true, err
+	}
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[join]
+	return true, nil
 }
 
 // poolNew is the function the initializer of g, a package variable of

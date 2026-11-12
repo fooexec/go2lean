@@ -24,8 +24,8 @@ Lean finds the inputs; `go test` is the judge.
 
 
 > **Scope.** A bounded, search-based bug finder—not a guarantee of
-> correctness. Tried on 28 open-source projects it had never seen
-> ([runs](docs/eval/fourth-run.md)); it translates 71% of the standard
+> correctness. Tried on 35 open-source projects it had never seen
+> ([runs](docs/eval/fifth-run.md)); it translates 72% of the standard
 > library's functions completely ([audit](docs/eval/std-audit.md)). See
 > [limitations](docs/limitations.md) and [validation](docs/validation.md)
 > for scope and evidence.
@@ -188,7 +188,7 @@ large arrays updated in place it also finds k016 at the default budget
 [what defects Go code has](docs/eval/go-defects.md) ·
 [go2lean's search against fuzzing](docs/eval/search-vs-fuzz.md) ·
 [recent concurrency bugs](docs/eval/conc-recent.md) ·
-[runs on unseen projects](docs/eval/first-run.md) ([second](docs/eval/second-run.md), [third](docs/eval/third-run.md), [fourth](docs/eval/fourth-run.md)) ·
+[runs on unseen projects](docs/eval/first-run.md) ([second](docs/eval/second-run.md), [third](docs/eval/third-run.md), [fourth](docs/eval/fourth-run.md), [fifth](docs/eval/fifth-run.md)) ·
 [how much of the standard library it translates](docs/eval/std-audit.md) ([translating more of it](docs/eval/std-translation.md))
 
 ## Documentation
