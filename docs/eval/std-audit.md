@@ -36,6 +36,15 @@ Each change rerun on the audit (#207):
 | first audit (#205) | 71.4% | 3.4% | 7.9% |
 | `clear`, `print`, `println`; debug switches as no-ops | 71.8% | 3.1% | 7.9% |
 
+## Translating more of the standard library
+
+`GO2LEAN_STD_ALL=1` translates more standard-library packages than the
+default list. Every package lifts the audit from 71.8% to 75.9% complete;
+the packages that import no boundary package give 74.4%. On real projects,
+each costs a spurious verdict and a lost finding, so it stays off: the
+data and the project-by-project details are in
+[std-translation.md](std-translation.md).
+
 ## The language gaps (3.4%)
 
 | about | functions | |

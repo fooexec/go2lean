@@ -161,6 +161,14 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	}
 	sprog, spkgs := build(pkgs, ssa.InstantiateGenerics)
 	sprog.Build()
+	if stdAll {
+		stdImports = map[string][]string{}
+		for _, p := range sprog.AllPackages() {
+			for _, imp := range p.Pkg.Imports() {
+				stdImports[p.Pkg.Path()] = append(stdImports[p.Pkg.Path()], imp.Path())
+			}
+		}
+	}
 	if opts.Deps {
 		// Loopback networking: net.Listen and net.Dial call the model's
 		// listener over net.Pipe pairs (#126).
@@ -336,7 +344,7 @@ func withInitStdCallees(sprog *ssa.Program, units []unit) []unit {
 						continue
 					}
 					path := fn.Pkg.Pkg.Path()
-					if !modelledStdlib[path] {
+					if !stdTranslated(path) {
 						continue
 					}
 					if _, std := stdlibOp(fn.String()); std {
@@ -545,7 +553,7 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 					// except instances of its generic functions.
 					// The generic helpers of package slices (ContainsFunc,
 					// IndexFunc) are plain loops over func values: modelled.
-					if (mainPaths[path] && !instance) || (isStdlib(path) && !(instance && path == "slices") && !modelledStdlib[path] && !modelledFunc(callee.String())) {
+					if (mainPaths[path] && !instance) || (isStdlib(path) && !(instance && path == "slices") && !stdTranslated(path) && !modelledFunc(callee.String())) {
 						continue
 					}
 					if _, std := stdlibOp(callee.String()); std {
@@ -558,7 +566,7 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 					seen[callee] = true
 					count++
 					out[path] = append(out[path], callee)
-					if forced || modelledStdlib[path] || modelledFunc(callee.String()) || (f.Pkg != nil && f.Pkg.Pkg.Path() == path && !mainPaths[path] && smallHelper(callee)) {
+					if forced || stdTranslated(path) || modelledFunc(callee.String()) || (f.Pkg != nil && f.Pkg.Pkg.Path() == path && !mainPaths[path] && smallHelper(callee)) {
 						// Within a modelled standard-library package, every
 						// helper is needed (unescape calls ishex calls ...);
 						// within a dependency, its small helpers (xxhash's
@@ -1538,6 +1546,46 @@ func stdlibOp(name string) (ir.Op, bool) {
 	}
 	return op, true
 }
+
+// stdAll (GO2LEAN_STD_ALL=1, an experiment, #207) translates every
+// standard-library package from source under -deps, except stdDenied's,
+// instead of modelledStdlib's only.
+var stdAll = os.Getenv("GO2LEAN_STD_ALL") == "1"
+
+// stdDenied are the standard-library packages never translated from
+// source: the boundary below Go (the runtime, unsafe memory, the OS), and
+// the packages the model has its own semantics for.
+var stdDenied = regexp.MustCompile(`^(runtime|internal/(abi|runtime|poll|syscall|godebug|race|cpu|reflectlite|goarch|goos|asan|msan|testlog|sync|filepathlite)|syscall|unsafe|reflect|sync|os|time|fmt|errors|regexp|encoding/json|context|testing|log|net|crypto/rand|crypto/internal/(boring|sysrand|entropy|randutil)|plugin|weak|unique|iter|vendor)(/|$)`)
+
+// stdImports: the direct imports of each standard-library package of the
+// program, for stdTranslated (set by TranslateAllOpts under stdAll).
+var stdImports map[string][]string
+
+// stdTranslated says whether a standard-library package's functions are
+// translated from source under -deps. Under stdAll, a package is when it
+// is not denied and imports nothing denied but the packages the model has
+// its own semantics for: one that reaches reflect or the OS itself
+// (text/template, encoding/gob) would only bring their unmodelled calls
+// deeper into the run.
+func stdTranslated(path string) bool {
+	if modelledStdlib[path] {
+		return true
+	}
+	if !stdAll || !isStdlib(path) || stdDenied.MatchString(path) {
+		return false
+	}
+	for _, imp := range stdImports[path] {
+		if stdBoundary.MatchString(imp) {
+			return false
+		}
+	}
+	return true
+}
+
+// stdBoundary are the denied packages a translated package may not import
+// directly: the boundary below Go (fmt, errors, sync, ... have semantics
+// of their own and may be imported).
+var stdBoundary = regexp.MustCompile(`^(runtime|internal/(abi|runtime|poll|syscall|reflectlite)|syscall|unsafe|reflect|os|net)(/|$)`)
 
 // isStdlib says whether an import path belongs to the standard library
 // (no dot in its first element).
@@ -6988,7 +7036,7 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 			return true
 		}
 		return fn != nil && fn.Parent() == nil && !isInit(fn.Name()) &&
-			(fn.Pkg == spkg || fn.Pkg != nil && modelledStdlib[fn.Pkg.Pkg.Path()])
+			(fn.Pkg == spkg || fn.Pkg != nil && stdTranslated(fn.Pkg.Pkg.Path()))
 	}
 	return false
 }
