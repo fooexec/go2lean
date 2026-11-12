@@ -27,6 +27,15 @@ language, boundary, dependency, unknown value.
 Only the first two rows are work on the model. Both are finite, and each
 item in them is done once for every program.
 
+## Progress
+
+Each change rerun on the audit (#207):
+
+| change | complete | language | boundary |
+|---|---|---|---|
+| first audit (#205) | 71.4% | 3.4% | 7.9% |
+| `clear`, `print`, `println`; debug switches as no-ops | 71.8% | 3.1% | 7.9% |
+
 ## The language gaps (3.4%)
 
 | about | functions | |

@@ -4190,6 +4190,35 @@ func (t *fnState) call(x *ssa.Call) error {
 			}
 			t.syncOp(ir.SyncOp{Kind: "close"}, t.def(x), ch)
 			return nil
+		case "print", "println":
+			// Output to standard error only: nothing the program reads.
+			return nil
+		case "clear":
+			v, err := t.val(x.Call.Args[0])
+			if err != nil {
+				return err
+			}
+			switch u := x.Call.Args[0].Type().Underlying().(type) {
+			case *types.Map:
+				return t.onKnown(x.Call.Args[0], v, func() error {
+					t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("mapClear"), Args: []ir.Var{v}})
+					return nil
+				}, func() error {
+					t.assume("clear of a map the model knows nothing about ignored")
+					return nil
+				})
+			case *types.Slice:
+				// clear(s): copy(s, make([]T, len(s))).
+				zero, ok := zeroVal(u.Elem())
+				if !ok {
+					break
+				}
+				n, z := t.fresh(), t.fresh()
+				t.emit(ir.Instr{Dst: n, Op: ir.Simple("len"), Args: []ir.Var{v}})
+				t.emit(ir.Instr{Dst: z, Op: ir.MakeSlice{Zero: zero}, Args: []ir.Var{n, n}})
+				t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("copySlice"), Args: []ir.Var{v, z}})
+				return nil
+			}
 		case "len", "cap":
 			if _, isChan := x.Call.Args[0].Type().Underlying().(*types.Chan); isChan {
 				ch, err := t.val(x.Call.Args[0])
@@ -4581,6 +4610,11 @@ func (t *fnState) call(x *ssa.Call) error {
 			return err
 		}
 		return t.emitCall(x, ir.Term{Kind: ir.TermCallV, FV: fv}, x.Call.Value.Name())
+	}
+	if callee != nil {
+		if done, err := t.debugSwitchCall(x, callee); done || err != nil {
+			return err
+		}
 	}
 	if callee == nil {
 		// fall through to the unmodelled cases below
@@ -8009,6 +8043,51 @@ func (t *fnState) atomicPointerCall(x *ssa.Call, callee *ssa.Function, st *types
 // interfaceMethod starts the havoc site name of an unmodelled call through
 // an interface: "call interface method (reflect.Type).Implements".
 const interfaceMethod = "interface method "
+
+// debugNoOps are calls with no effect a program can observe: the race
+// detector's annotations, KeepAlive, and godebug's counter of non-default
+// settings (std audit, #207).
+var debugNoOps = map[string]bool{
+	"runtime.KeepAlive":                         true,
+	"(*internal/godebug.Setting).IncNonDefault": true,
+	"internal/race.Acquire":                     true,
+	"internal/race.Release":                     true,
+	"internal/race.ReleaseMerge":                true,
+	"internal/race.Disable":                     true,
+	"internal/race.Enable":                      true,
+	"internal/race.Read":                        true,
+	"internal/race.Write":                       true,
+	"internal/race.ReadRange":                   true,
+	"internal/race.WriteRange":                  true,
+	"internal/race.ReadPC":                      true,
+	"internal/race.WritePC":                     true,
+	"internal/race.ReadObjectPC":                true,
+	"internal/race.WriteObjectPC":               true,
+}
+
+// debugSwitchCall lowers the debug switches of the standard library to
+// what they are in a default environment (no GODEBUG, FIPS mode off, no
+// race detector): no-ops, or their default results.
+func (t *fnState) debugSwitchCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
+	name := callee.String()
+	if debugNoOps[name] {
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
+		return true, nil
+	}
+	var v ir.Val
+	switch name {
+	case "(*internal/godebug.Setting).Value":
+		v = ir.EmptyStr{} // GODEBUG unset
+	case "crypto/internal/fips140only.Enforced":
+		v = ir.BoolVal(false)
+	case "internal/race.Errors":
+		v = ir.IntVal{Width: 64, Bits: "0"}
+	default:
+		return false, nil
+	}
+	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: v}})
+	return true, nil
+}
 
 // isSyncMap says whether t is sync.Map.
 func isSyncMap(t types.Type) bool {
