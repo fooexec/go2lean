@@ -1792,6 +1792,14 @@ func translatePackage(pkgPath string, fns []*ssa.Function, xrefs map[string]cont
 			p.Inits = append(p.Inits, id)
 		}
 	}
+	// sync.Once bodies that read nothing a trial can change run once,
+	// with the initializer, instead of in every trial (#210).
+	for _, h := range hoistableOnces(pkgPath, fns) {
+		if id, ok := st.ids[h.f]; ok && st.globalsKnown(h) {
+			p.Inits = append(p.Inits, id)
+			st.hoistedOnce[h.g] = true
+		}
+	}
 	// Pass 2: bodies.
 	for _, f := range fns {
 		out := p.Funcs[st.ids[f]]
@@ -1958,7 +1966,10 @@ type progState struct {
 	// zeros holds the package-level variables nothing writes: a load of
 	// one is its zero value.
 	zeros map[*ssa.Global]ssa.Value
-	sprog *ssa.Program
+	// hoistedOnce: the package's sync.Once variables whose Do body runs
+	// once before the trials (hoistableOnces); their Do is a no-op.
+	hoistedOnce map[*ssa.Global]bool
+	sprog       *ssa.Program
 	// boxed lists the types modelled code boxes into interfaces.
 	boxed []types.Type
 	// rtypes: the reflect.Type tables, built on first use.
@@ -2267,6 +2278,67 @@ func (s *progState) kindTable() [][2]uint32 {
 	return out
 }
 
+// isReflectValue says whether t is reflect.Value.
+func isReflectValue(t types.Type) bool {
+	n, ok := t.(*types.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "reflect" && n.Obj().Name() == "Value"
+}
+
+// reflectValueMethods are the (reflect.Value) methods reflectVal answers
+// (#215), by its method number.
+var reflectValueMethods = map[string]int{
+	"(reflect.Value).Interface": 0,
+	"(reflect.Value).IsValid":   1,
+	"(reflect.Value).Int":       2,
+	"(reflect.Value).Uint":      3,
+	"(reflect.Value).Bool":      4,
+	"(reflect.Value).String":    5,
+	"(reflect.Value).Len":       6,
+	"(reflect.Value).Elem":      7,
+}
+
+// reflectValueCall lowers a (reflect.Value) method of reflectValueMethods
+// on a value the program built (#215): reflect.ValueOf is the identity, so
+// the Value is the boxed value, and the method reads it with its type's
+// kind. Where the model does not know the answer (a Value it did not
+// build, a kind Go would panic on or format), the result is havoc, as an
+// unmodelled call's.
+func (t *fnState) reflectValueCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
+	if callee == nil || len(x.Call.Args) != 1 {
+		return false, nil
+	}
+	m, ok := reflectValueMethods[callee.String()]
+	if !ok {
+		return false, nil
+	}
+	v, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return true, err
+	}
+	rt := t.prog.reflectTypeTables()
+	op := ir.ReflectVal{Method: m, Kinds: rt.kinds, Elems: rt.elems}
+	okOp := op
+	okOp.Ok = true
+	known := t.fresh()
+	t.emit(ir.Instr{Dst: known, Op: okOp, Args: []ir.Var{v}})
+	dst := t.def(x)
+	yes := len(t.out.Blocks)
+	no, join := yes+1, yes+2
+	t.cur.Term = ir.Term{Kind: ir.TermBr, Cond: known, T: yes, F: no}
+	name := t.cur.Name
+	t.addBlocks(name+".reflect-value", name+".reflect-value-unknown", name+".reflect-value-join")
+	t.cur = &t.out.Blocks[yes]
+	t.emit(ir.Instr{Dst: dst, Op: op, Args: []ir.Var{v}})
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[no]
+	if err := t.havocResult(dst, x, "call "+callee.String(), "unmodeled-call"); err != nil {
+		return true, err
+	}
+	t.cur.Term = ir.Term{Kind: ir.TermJump, B: join}
+	t.cur = &t.out.Blocks[join]
+	return true, nil
+}
+
 // rtTag is the tag a reflect.Type value is boxed with (the type of
 // reflect.TypeOf's result, *reflect.rtype).
 var rtTag = func() uint32 {
@@ -2477,7 +2549,7 @@ func (s *progState) newHavoc(width int, site, reason, goHint string) int {
 // assigned to fns (pass 1) so calls can be resolved.
 func newProgState(pkgPath string, fns []*ssa.Function, xrefs map[string]contract.XCall, zeros map[*ssa.Global]ssa.Value, sprog *ssa.Program, boxed []types.Type, plan *cellPlan) *progState {
 	p := &ir.Prog{Package: pkgPath, Frontend: Frontend}
-	st := &progState{prog: p, ids: map[*ssa.Function]int{}, xrefs: xrefs, zeros: zeros, sprog: sprog, boxed: boxed, json: newJSONTable(sprog)}
+	st := &progState{prog: p, ids: map[*ssa.Function]int{}, xrefs: xrefs, zeros: zeros, hoistedOnce: map[*ssa.Global]bool{}, sprog: sprog, boxed: boxed, json: newJSONTable(sprog)}
 	st.sharedGlobals, st.initCells = plan.shared, plan.init
 	for _, ty := range boxed {
 		if !types.Comparable(ty) && !slices.Contains(st.notComparable, typeTag(ty)) {
@@ -3508,6 +3580,12 @@ func (t *fnState) instr(b *ssa.BasicBlock, in ssa.Instruction) error {
 			if _, modelled := t.prog.ids[callee]; modelled {
 				return t.deferCall(x, callee, "")
 			}
+			if xr, ok := t.prog.xrefs[callee.String()]; ok && xr.Package != t.prog.prog.Package && len(callee.FreeVars) == 0 {
+				// A function of a sibling package the model translates
+				// (conc's defer panicCatcher.Repanic(), #198): called at the
+				// returns through its reference, as a deferred func value.
+				return t.deferCall(x, nil, "dynamic")
+			}
 		}
 		t.assume("deferred call %s ignored (effects not modelled)", x.Call.String())
 		return nil
@@ -4482,6 +4560,15 @@ func (t *fnState) call(x *ssa.Call) error {
 			return nil
 		}
 	}
+	if callee != nil && protoTextFuncs[callee.String()] && isString(x.Type()) {
+		// A protobuf message rendered as text, as every generated String()
+		// does (groupcache's GetRequest.String, #215). The runtime walks the
+		// message with reflect and unsafe, which the model does not follow;
+		// left unmodelled, its guesses gave spurious panics. It renders any
+		// message without panicking: some string.
+		t.assume("%s: %s renders the message as some string (not modelled; it does not panic)", t.f.Name(), callee.Name())
+		return t.havocInto(t.def(x), x.Type(), t.f.Name()+": call "+callee.String(), "unmodeled-call", "")
+	}
 	if pairs, ok := replacerFunc(x.Call.Value); ok && len(x.Call.Args) == 1 {
 		return t.replace(t.def(x), pairs, x.Call.Args[0])
 	}
@@ -4547,6 +4634,9 @@ func (t *fnState) call(x *ssa.Call) error {
 		}
 	}
 	if done, err := t.reflectTypeCall(x, callee); done || err != nil {
+		return err
+	}
+	if done, err := t.reflectValueCall(x, callee); done || err != nil {
 		return err
 	}
 	if callee != nil && (callee.String() == "(reflect.Value).Kind" || callee.String() == "(reflect.Value).IsNil") && len(x.Call.Args) == 1 {
@@ -4775,6 +4865,15 @@ func isGlobalLoad(v ssa.Value, pkg, name string) bool {
 
 // loggingPkg says whether path is a logging package: its calls have no
 // effect the model follows.
+// protoTextFuncs render a protobuf message as text (protoTextFuncs' call
+// in call): some string, no panic.
+var protoTextFuncs = map[string]bool{
+	"github.com/golang/protobuf/proto.CompactTextString":                    true,
+	"github.com/golang/protobuf/proto.MarshalTextString":                    true,
+	"google.golang.org/protobuf/encoding/prototext.Format":                  true,
+	"(google.golang.org/protobuf/encoding/prototext.MarshalOptions).Format": true,
+}
+
 func loggingPkg(path string) bool {
 	switch path {
 	case "github.com/sirupsen/logrus", "log", "log/slog", "go.uber.org/zap":
@@ -7132,6 +7231,148 @@ func builtValue(v ssa.Value, spkg *ssa.Package) bool {
 	return false
 }
 
+// onceHoist is a package variable of type sync.Once whose every use is
+// g.Do(f), with the same function f.
+type onceHoist struct {
+	g *ssa.Global
+	f *ssa.Function
+}
+
+// hoistableOnces finds the package's lazy initializations that can run
+// once, before the trials, instead of in every trial (#210): hash/crc32's
+// ieeeOnce.Do(ieeeInit) builds its tables, thousands of steps, and every
+// trial of a caller paid for them again. A variable qualifies when it is
+// used only as once.Do(f), always with the same static function f that
+// takes no argument, and no function other than the initializer and f
+// (with the package functions f calls) writes a package variable f uses.
+// Then f computes in a trial what it computes before it: its result
+// depends on nothing the trial changes. Go runs f at the first Do; the
+// model runs it first, which is the same state as far as f's code can
+// tell.
+func hoistableOnces(pkgPath string, fns []*ssa.Function) []onceHoist {
+	isOnce := func(v ssa.Value) *ssa.Global {
+		g, ok := v.(*ssa.Global)
+		if !ok || g.Pkg == nil || g.Pkg.Pkg.Path() != pkgPath {
+			return nil
+		}
+		n, ok := g.Type().(*types.Pointer).Elem().(*types.Named)
+		if !ok || n.Obj().Pkg() == nil || n.Obj().Pkg().Path() != "sync" || n.Obj().Name() != "Once" {
+			return nil
+		}
+		return g
+	}
+	bodies := map[*ssa.Global]*ssa.Function{}
+	bad := map[*ssa.Global]bool{}
+	for _, f := range fns {
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				c, isCall := in.(*ssa.Call)
+				if isCall && c.Call.StaticCallee() != nil && c.Call.StaticCallee().String() == "(*sync.Once).Do" && len(c.Call.Args) == 2 {
+					if g := isOnce(c.Call.Args[0]); g != nil {
+						body, ok := c.Call.Args[1].(*ssa.Function)
+						if !ok || body.Signature.Params().Len() != 0 || len(body.FreeVars) != 0 || (bodies[g] != nil && bodies[g] != body) {
+							bad[g] = true
+						} else {
+							bodies[g] = body
+						}
+						continue
+					}
+				}
+				for _, op := range in.Operands(nil) {
+					if g := isOnce(*op); g != nil {
+						bad[g] = true // another use: a reset, a copy, a pointer passed on
+					}
+				}
+			}
+		}
+	}
+	inPkg := map[*ssa.Function]bool{}
+	for _, f := range fns {
+		inPkg[f] = true
+	}
+	var out []onceHoist
+	for g, body := range bodies {
+		if bad[g] || !inPkg[body] {
+			continue
+		}
+		// f and the package functions it calls.
+		closure := map[*ssa.Function]bool{body: true}
+		work := []*ssa.Function{body}
+		for len(work) > 0 {
+			f := work[len(work)-1]
+			work = work[:len(work)-1]
+			for _, b := range f.Blocks {
+				for _, in := range b.Instrs {
+					if c, ok := in.(ssa.CallInstruction); ok {
+						if callee := c.Common().StaticCallee(); callee != nil && inPkg[callee] && !closure[callee] {
+							closure[callee] = true
+							work = append(work, callee)
+						}
+					}
+				}
+			}
+		}
+		uses := map[*ssa.Global]bool{}
+		for f := range closure {
+			for _, b := range f.Blocks {
+				for _, in := range b.Instrs {
+					for _, op := range in.Operands(nil) {
+						if u, ok := (*op).(*ssa.Global); ok {
+							uses[u] = true
+						}
+					}
+				}
+			}
+		}
+		ok := true
+		for _, f := range fns {
+			if closure[f] || (isInit(f.Name()) && f.Signature.Recv() == nil) || !ok {
+				continue
+			}
+			for _, b := range f.Blocks {
+				for _, in := range b.Instrs {
+					if st, isStore := in.(*ssa.Store); isStore {
+						if w := storedGlobal(st.Addr); w != nil && uses[w] {
+							ok = false
+						}
+					}
+				}
+			}
+		}
+		if ok {
+			out = append(out, onceHoist{g: g, f: body})
+		}
+	}
+	slices.SortFunc(out, func(a, b onceHoist) int { return strings.Compare(a.g.Name(), b.g.Name()) })
+	return out
+}
+
+// globalsKnown says whether every package variable h's body uses, other
+// than the Once itself, is one the model has (a cell, or a variable
+// nothing writes): a body that reaches another would get stuck before the
+// trials (compress/flate's fixedHuffmanDecoder), and is left to run in
+// each trial as before.
+func (s *progState) globalsKnown(h onceHoist) bool {
+	for _, b := range h.f.Blocks {
+		for _, in := range b.Instrs {
+			for _, op := range in.Operands(nil) {
+				g, ok := (*op).(*ssa.Global)
+				if !ok || g == h.g {
+					continue
+				}
+				if _, _, cell := s.cellGlobal(g); cell {
+					continue
+				}
+				if _, zero := s.zeros[g]; zero {
+					continue
+				}
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // storedGlobal is the package variable an address is in: the variable
 // itself, or an element or field of it (an array, a struct), else nil.
 func storedGlobal(v ssa.Value) *ssa.Global {
@@ -9301,6 +9542,11 @@ func (t *fnState) syncCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
 // onceDo lowers once.Do(f): f runs when this caller enters first; another
 // caller blocks until it is done.
 func (t *fnState) onceDo(x *ssa.Call, p ir.Var) error {
+	if g, ok := x.Call.Args[0].(*ssa.Global); ok && t.prog.hoistedOnce[g] {
+		// Done before the trials (hoistableOnces).
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
+		return nil
+	}
 	f, err := t.val(x.Call.Args[1])
 	if err != nil {
 		return err
@@ -9932,6 +10178,11 @@ func zeroVal(t types.Type) (ir.Val, bool) {
 	}
 	if isStringsBuilder(t) {
 		return ir.EmptyStr{}, true // a Builder is a string cell in the model
+	}
+	if isReflectValue(t) {
+		// A Value is the boxed value it reflects (reflect.ValueOf is the
+		// identity), so the zero Value is reflect.ValueOf(nil)'s: invalid.
+		return ir.OpaqueNil{}, true
 	}
 	if isBool(t) {
 		return ir.BoolVal(false), true

@@ -48,7 +48,7 @@ after `go mod init`.
 | logrus: calls into a logging package were skipped (a log line is not the code under test), also inside logrus itself. `SetOutput`'s skipped `Lock` left its deferred `Unlock` unlocking an unlocked mutex ([#214](https://github.com/fooexec/go2lean/issues/214)) | 5 | the skip applies only to calls from outside the logger's package. This let the search into much more of logrus, and showed the two next causes |
 | logrus: `logger.entryPool.Get()`, a `sync.Pool` in a struct field, was unmodelled; the model picked a non-nil `*Entry` with havoc fields (#214) | 10 | `Get` calls the pool's `New` field when it is set and returns nil when it is not, as Go does on an empty pool |
 | logrus: `Infoln`, `Println`, `Warnln`... format with `fmt.Sprintln`, unmodelled (#214) | 5 | `Sprintln` is `Sprintf` with one `%v` per operand, spaces between them and a newline |
-| groupcache: the protobuf messages' `String()` walk the message with `reflect` and reach `reflect.Zero` ([#215](https://github.com/fooexec/go2lean/issues/215)) | 8 | open: `reflect.Value` is on the boundary list of the [standard-library audit](std-audit.md) (M2) |
+| groupcache: the protobuf messages' `String()` walk the message with `reflect` and reach `reflect.Zero` ([#215](https://github.com/fooexec/go2lean/issues/215)) | 8 | protobuf's text rendering (`proto.CompactTextString`, `MarshalTextString`, `prototext.Format`) is modelled as what it does for any message: some string, no panic. The runtime under it reads messages through `unsafe` as well as `reflect`, so modelling `reflect.Value` alone would not reach it. groupcache after the fix: 13 confirmed (3 at tier 1), **0 spurious** |
 
 logrus after the fixes: 190 properties, 90 confirmed (7 at tier 1: the
 four `Writer` leaks and the three `Panic` functions; 63 at tier 4, which
@@ -60,7 +60,8 @@ the `...ln` functions (`-run 'ln$'`).
 ## What this run says
 
 - **Five of seven projects gave no spurious verdict**, on the first try,
-  installed as a user installs the tool.
+  installed as a user installs the tool. After the fixes, none of the
+  seven does.
 - **Every spurious verdict had a cause already on the audit's lists**: a
   library function not modelled (`sync.Pool` in a field, `fmt.Sprintln`)
   or the `reflect` boundary. None was a new kind of gap, and the summary

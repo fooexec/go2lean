@@ -205,3 +205,37 @@ func TestStdCallee(t *testing.T) {
 		}
 	}
 }
+
+func TestConstructorOf(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.22\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte(`package m
+
+type Context struct{ Keys, Values []string }
+
+func NewRouteContext() *Context { return &Context{} }
+
+func (c *Context) URLParam(k string) string {
+	for i, x := range c.Keys {
+		if x == k {
+			return c.Values[i]
+		}
+	}
+	return ""
+}
+
+type Collection []int
+
+func (c Collection) Less(i, j int) bool { return c[i] < c[j] }
+
+type Plain struct{ n int }
+
+func (p *Plain) Get() int { return p.n }
+`), 0o644)
+	c := newCallerIndex(dir)
+	for fn, want := range map[string]string{"Context.URLParam": "NewRouteContext", "Collection.Less": "", "Plain.Get": "", "NewRouteContext": ""} {
+		if got := c.constructorOf("m", fn); got != want {
+			t.Errorf("constructorOf(%q) = %q, want %q", fn, got, want)
+		}
+	}
+}

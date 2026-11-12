@@ -56,8 +56,8 @@ A [fifth run on seven more](../docs/eval/fifth-run.md) (go-version, btree,
 pkg/errors, logrus, websocket, goldmark, groupcache), with the tool
 installed as a user installs it, gave no spurious verdict on five of
 them. logrus's came from library calls not modelled yet (`sync.Pool` in a
-field, `fmt.Sprintln`, now modelled), groupcache's from `reflect.Value`
-(the boundary, #215).
+field, `fmt.Sprintln`), groupcache's from protobuf's text rendering
+(#215). With those modelled, none of the seven gives a spurious verdict.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover

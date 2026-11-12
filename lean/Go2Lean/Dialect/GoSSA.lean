@@ -443,6 +443,18 @@ inductive Op where
   looked up by its tag (`(tag, kind)` pairs the frontend lists); the nil
   interface gives Invalid (0). An unknown tag gets the model stuck. -/
   | reflectKind (kinds : List (Nat × Nat))
+  /-- A (reflect.Value) method on a value the program boxed (#215), the
+  Value being the boxed value itself: 0 Interface (the value), 1 IsValid
+  (not the zero Value), 2 Int and 3 Uint (of the signed and unsigned
+  integer kinds, widened to 64 bits), 4 Bool, 5 String (of a string),
+  6 Len (of a string, slice or array), 7 Elem (of a pointer: the value it
+  points to, boxed with the element type's tag from `elems`; the zero
+  Value for nil). `kinds` maps a tag to its reflect.Kind. Any other
+  method, kind or value gets the model stuck (the call is then
+  unmodelled), where Go would panic or format the value. -/
+  | reflectVal (m : Nat) (kinds elems : List (Nat × Nat))
+  /-- Can `reflectVal` answer for this value? -/
+  | reflectValOk (m : Nat) (kinds elems : List (Nat × Nat))
   /-- (reflect.Value).IsNil, with the same table: Go's answer for the kinds
   that can be nil, a panic for the others (and for Invalid). -/
   | reflectIsNil (kinds : List (Nat × Nat))
@@ -1171,6 +1183,30 @@ def fmtPad (zero minus : Bool) (width : Nat) (isInt : Bool) (x : List Nat) : Opt
         | 45 :: digits => some (45 :: List.replicate n 48 ++ digits)
         | _ => some (List.replicate n 48 ++ x)
     else some (List.replicate n 32 ++ x)
+
+/-- `reflectVal`'s answer (see `Op.reflectVal`), or none where the model
+does not know it. -/
+def reflectValF (heap : Heap Val) (m : Nat) (kinds elems : List (Nat × Nat)) (x : Val) : Option Val :=
+  match m, x with
+  | 1, .opaqueNil => some (.bool false)
+  | 1, .boxed .. => some (.bool true)
+  | 0, v@(.boxed ..) => some v
+  | _, .boxed t v =>
+    match kinds.lookup t, m, v with
+    | some k, 2, .int _ b => if 2 ≤ k ∧ k ≤ 6 then some (.int 64 (b.signExtend 64)) else none
+    | some k, 3, .int _ b => if 7 ≤ k ∧ k ≤ 12 then some (.int 64 (b.zeroExtend 64)) else none
+    | some 1, 4, .bool b => some (.bool b)
+    | some 24, 5, s@(.str ..) => some s
+    | some 24, 6, .str _ _ len => some (.int 64 len)
+    | some 23, 6, .slice _ _ len _ => some (.int 64 len)
+    | some 17, 6, .arr es => some (.int 64 (BitVec.ofNat 64 es.length))
+    | some 22, 7, p@(.ptr ref _) =>
+      if ref == 0 then some .opaqueNil else
+      match elems.lookup t, heapLoad heap p with
+      | some e, .ok v => some (.boxed e v)
+      | _, _ => none
+    | _, _, _ => none
+  | _, _ => none
 
 /-- The format `fmt.Sprintln` amounts to for `n` operands: `%v` each,
 spaces between, a newline at the end. -/
@@ -3797,6 +3833,11 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
       -- A nil map, or one the model knows nothing about: no entries.
       | none => .ok (.tuple [.bool false, zk, zv], heap)
     | _ => .panic .modelStuck
+  | .reflectVal m kinds elems, [x] =>
+    match reflectValF heap m kinds elems x with
+    | some v => .ok (v, heap)
+    | none => .panic .modelStuck
+  | .reflectValOk m kinds elems, [x] => .ok (.bool (reflectValF heap m kinds elems x).isSome, heap)
   | .loadPath, [p] =>
     match heapLoad heap p with
     | .ok v => .ok (v, heap)

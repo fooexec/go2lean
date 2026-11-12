@@ -207,7 +207,7 @@ func unsupportedOp(op ir.Op) string {
 		ir.JSONUnmarshal, ir.JSONMarshal, ir.JSONEncode, ir.JSONDecode,
 		ir.MapLookup, ir.MapNext, ir.Alloc, ir.FieldAddr, ir.Field,
 		ir.MakeSlice, ir.Append, ir.StrConst, ir.ReFind, ir.StrReplacer,
-		ir.ReFindIn, ir.ReIn, ir.ReflectKind, ir.ErrTagKnown:
+		ir.ReFindIn, ir.ReIn, ir.ReflectKind, ir.ReflectVal, ir.ErrTagKnown:
 	default:
 		return fmt.Sprintf("unsupported IR operation %T", op)
 	}

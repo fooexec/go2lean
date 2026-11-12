@@ -572,6 +572,9 @@ func SeqTestNilDefault() bool { return testNilDefault() }
 // go2lean:sequence testNilVal
 func SeqTestNilVal() bool { return testNilVal() }
 
+// go2lean:sequence testOnceLazyTable
+func SeqTestOnceLazyTable() bool { return testOnceLazyTable() }
+
 // go2lean:sequence testOnceRunsOnce
 func SeqTestOnceRunsOnce() bool { return testOnceRunsOnce() }
 
@@ -655,6 +658,18 @@ func SeqTestReflectTypeKey() bool { return testReflectTypeKey() }
 
 // go2lean:sequence testReflectTypeKind
 func SeqTestReflectTypeKind() bool { return testReflectTypeKind() }
+
+// go2lean:sequence testReflectValueElem
+func SeqTestReflectValueElem() bool { return testReflectValueElem() }
+
+// go2lean:sequence testReflectValueLenInterface
+func SeqTestReflectValueLenInterface() bool { return testReflectValueLenInterface() }
+
+// go2lean:sequence testReflectValueScalars
+func SeqTestReflectValueScalars() bool { return testReflectValueScalars() }
+
+// go2lean:sequence testReflectValueValid
+func SeqTestReflectValueValid() bool { return testReflectValueValid() }
 
 // go2lean:sequence testRegexpBytesIndex
 func SeqTestRegexpBytesIndex() bool { return testRegexpBytesIndex() }
