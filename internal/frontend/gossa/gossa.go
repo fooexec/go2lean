@@ -161,6 +161,14 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 	}
 	sprog, spkgs := build(pkgs, ssa.InstantiateGenerics)
 	sprog.Build()
+	if stdAll {
+		stdImports = map[string][]string{}
+		for _, p := range sprog.AllPackages() {
+			for _, imp := range p.Pkg.Imports() {
+				stdImports[p.Pkg.Path()] = append(stdImports[p.Pkg.Path()], imp.Path())
+			}
+		}
+	}
 	if opts.Deps {
 		// Loopback networking: net.Listen and net.Dial call the model's
 		// listener over net.Pipe pairs (#126).
@@ -1549,11 +1557,35 @@ var stdAll = os.Getenv("GO2LEAN_STD_ALL") == "1"
 // the packages the model has its own semantics for.
 var stdDenied = regexp.MustCompile(`^(runtime|internal/(abi|runtime|poll|syscall|godebug|race|cpu|reflectlite|goarch|goos|asan|msan|testlog|sync|filepathlite)|syscall|unsafe|reflect|sync|os|time|fmt|errors|regexp|encoding/json|context|testing|log|net|crypto/rand|crypto/internal/(boring|sysrand|entropy|randutil)|plugin|weak|unique|iter|vendor)(/|$)`)
 
+// stdImports: the direct imports of each standard-library package of the
+// program, for stdTranslated (set by TranslateAllOpts under stdAll).
+var stdImports map[string][]string
+
 // stdTranslated says whether a standard-library package's functions are
-// translated from source under -deps.
+// translated from source under -deps. Under stdAll, a package is when it
+// is not denied and imports nothing denied but the packages the model has
+// its own semantics for: one that reaches reflect or the OS itself
+// (text/template, encoding/gob) would only bring their unmodelled calls
+// deeper into the run.
 func stdTranslated(path string) bool {
-	return modelledStdlib[path] || stdAll && isStdlib(path) && !stdDenied.MatchString(path)
+	if modelledStdlib[path] {
+		return true
+	}
+	if !stdAll || !isStdlib(path) || stdDenied.MatchString(path) {
+		return false
+	}
+	for _, imp := range stdImports[path] {
+		if stdBoundary.MatchString(imp) {
+			return false
+		}
+	}
+	return true
 }
+
+// stdBoundary are the denied packages a translated package may not import
+// directly: the boundary below Go (fmt, errors, sync, ... have semantics
+// of their own and may be imported).
+var stdBoundary = regexp.MustCompile(`^(runtime|internal/(abi|runtime|poll|syscall|reflectlite)|syscall|unsafe|reflect|os|net)(/|$)`)
 
 // isStdlib says whether an import path belongs to the standard library
 // (no dot in its first element).
