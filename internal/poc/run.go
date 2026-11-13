@@ -693,7 +693,7 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 		v.Diagnosis = &contract.Diagnosis{Reason: "harness_failed", Notes: []string{
 			"go2lean's replay harness panicked (" + strings.TrimSpace(m[2]) + "); see stderr"}}
 		return v
-	} else if !ok && exit != 0 && m != nil && compileErr.FindString(stderr) == "" {
+	} else if !ok && exit != 0 && m != nil && compileErr.FindString(stderr) == "" && lastRun(stdout) == p.cx.ID {
 		// No result line, and Go's own report of an uncaught panic or a
 		// fatal error: a goroutine the call started panicked (the harness
 		// recovers only the call's own) and ended the process. This run had
@@ -719,6 +719,12 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 			// No compile error but no run either: the link failed (a full
 			// disk, a missing symbol). The test binary never ran (#140).
 			reason, note = "package_build_error", "the package's tests did not build: "+strings.TrimSpace(m[1])
+		} else if m := goCrash.FindStringSubmatch(stderr); m != nil && exit != 0 && lastRun(stdout) != p.cx.ID {
+			// The test binary panicked before the PoC's test started: in
+			// a package's init or TestMain (grpc-go's credentials tests
+			// load certificates from testdata in an init), not in the
+			// call. It says nothing about the target (#221).
+			reason, note = "package_init_failed", "the test binary panicked before the PoC's test ran (an init function or TestMain of the package's tests): "+strings.TrimSpace(m[2])
 		} else if exit != 0 {
 			reason, note = "target_exited", "the test binary ended without reporting (log.Fatal or os.Exit in the target?)"
 		}
@@ -762,7 +768,9 @@ func verdictOf(p *prepared, results map[string]result, cmd string, exit int, std
 			// library (whose unmodelled functions stay unmodelled).
 			note += ". Compiling with -deps models the functions of the dependency packages called, if it was off"
 		}
-		if slices.ContainsFunc(p.guessed, func(c string) bool { return !strings.HasPrefix(c, "(") || !strings.Contains(c, ").") || strings.HasPrefix(c, "(*") }) {
+		if slices.ContainsFunc(p.guessed, func(c string) bool {
+			return !strings.HasPrefix(c, "(") || !strings.Contains(c, ").") || strings.HasPrefix(c, "(*")
+		}) {
 			// A function or a concrete method: a user model can stand for it.
 			note += ". A user model in .go2lean/models can stand for a function or method (docs/usage.md#user-models)"
 		}

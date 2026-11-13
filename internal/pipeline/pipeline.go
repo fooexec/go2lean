@@ -34,6 +34,10 @@ import (
 // Env says where things are: Root is the default Go module directory,
 // Module overrides it. The trusted Lean runtime is embedded in the binary.
 type Env struct {
+	// slots, when set, are the CPU slots every search and replay of the
+	// run shares (#222): packages proceed side by side, and at most
+	// cap(slots) properties are searched at once among all of them.
+	slots  chan struct{}
 	Root   string
 	Module string
 	// Deps models the dependency functions the compiled packages call
@@ -373,7 +377,20 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		err error
 		log bytes.Buffer
 	}
+	if len(props) > 0 && !env.Resume {
+		// The search executable is linked against every model in the
+		// workspace once; built here, its time is not charged to the
+		// first search (#222). Packages in flight wait for the one build.
+		t0 := time.Now()
+		if err := constraint.BuildDriver(w, env.Root); err != nil {
+			return nil, err
+		}
+		if d := time.Since(t0); d > time.Second {
+			fmt.Fprintf(out, "  lean build of the search executable: %.1fs\n", d.Seconds())
+		}
+	}
 	results := make([]result, len(props))
+	took := make([]time.Duration, len(props))
 	skipped := make([]bool, len(props))
 	start := time.Now()
 	queue := make(chan int, len(props))
@@ -403,7 +420,15 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 					skipped[i] = true
 					continue
 				}
+				if env.slots != nil {
+					env.slots <- struct{}{}
+				}
+				t0 := time.Now()
 				results[i].cx, results[i].err = Hunt(w, env, props[i], opts, &results[i].log)
+				took[i] = time.Since(t0)
+				if env.slots != nil {
+					<-env.slots
+				}
 			}
 		}()
 	}
@@ -439,6 +464,23 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		}
 	}
 	var cxs []*contract.Counterexample
+	defer func() {
+		// Where the search's time went (#222): its wall time and the
+		// slowest properties, which decide it when there are few.
+		if len(props) < 2 {
+			return
+		}
+		idx := make([]int, len(props))
+		for i := range idx {
+			idx[i] = i
+		}
+		sort.SliceStable(idx, func(a, b int) bool { return took[idx[a]] > took[idx[b]] })
+		var slow []string
+		for _, i := range idx[:min(3, len(idx))] {
+			slow = append(slow, fmt.Sprintf("%s %.1fs", props[i].ID, took[i].Seconds()))
+		}
+		fmt.Fprintf(out, "  search: %.1fs for %d properties on %d workers; slowest: %s\n", time.Since(start).Seconds(), len(props), min(jobs, len(props)), strings.Join(slow, ", "))
+	}()
 	for i := range results {
 		io.Copy(out, &results[i].log)
 		if results[i].err != nil {
@@ -683,8 +725,7 @@ func RunAll(w contract.Workspace, env Env, opts constraint.SearchOptions, out io
 	if err != nil {
 		return nil, err
 	}
-	var results []*Result
-	var failed []string
+	var targets []*contract.ModelReport
 	for _, report := range reports {
 		if report.Dependency {
 			// Modelled for its callers (-deps); not a target of the run.
@@ -696,19 +737,56 @@ func RunAll(w contract.Workspace, env Env, opts constraint.SearchOptions, out io
 				modelled = true
 			}
 		}
-		if !modelled {
-			continue
+		if modelled {
+			targets = append(targets, report)
 		}
-		fmt.Fprintf(out, "######## %s\n", report.Package)
-		res, err := runReport(w, env, report, opts, out)
-		if err != nil {
+	}
+	// The packages proceed side by side (#222): one package's last long
+	// searches and its replay no longer leave the other CPUs idle. Every
+	// search takes one of the run's CPU slots, so at most -jobs properties
+	// run at once among all packages; a few packages are in flight, and
+	// each one's output is printed whole, in the packages' order.
+	jobs := opts.Jobs
+	if jobs <= 0 {
+		jobs = runtime.NumCPU()
+	}
+	if len(targets) > 1 && env.slots == nil {
+		env.slots = make(chan struct{}, jobs)
+	}
+	type pkgRun struct {
+		log  bytes.Buffer
+		res  *Result
+		err  error
+		done chan struct{}
+	}
+	runs := make([]*pkgRun, len(targets))
+	inFlight := make(chan struct{}, max(1, min(jobs, 4)))
+	for i := range targets {
+		runs[i] = &pkgRun{done: make(chan struct{})}
+	}
+	go func() {
+		for i, report := range targets {
+			inFlight <- struct{}{}
+			go func(r *pkgRun, report *contract.ModelReport) {
+				defer func() { <-inFlight; close(r.done) }()
+				fmt.Fprintf(&r.log, "######## %s\n", report.Package)
+				r.res, r.err = runReport(w, env, report, opts, &r.log)
+			}(runs[i], report)
+		}
+	}()
+	var results []*Result
+	var failed []string
+	for i, r := range runs {
+		<-r.done
+		io.Copy(out, &r.log)
+		if r.err != nil {
 			// One package's trouble (a Lean build failure, a harness that does
 			// not compile) must not end a sweep, but the sweep reports it.
-			fmt.Fprintf(out, "  error: %v\n", err)
-			failed = append(failed, report.Package)
+			fmt.Fprintf(out, "  error: %v\n", r.err)
+			failed = append(failed, targets[i].Package)
 			continue
 		}
-		results = append(results, res)
+		results = append(results, r.res)
 	}
 	if env.Deps && env.Refine > 0 && len(results) > 0 {
 		if err := refine(w, env, opts, out, results, patterns); err != nil {
@@ -874,7 +952,14 @@ func runReport(w contract.Workspace, env Env, report *contract.ModelReport, opts
 	for _, cx := range cxs {
 		ids = append(ids, cx.ID)
 	}
+	if env.slots != nil {
+		// The replay's go test build and runs take one of the CPU slots.
+		env.slots <- struct{}{}
+	}
 	vs, err := VerifyAll(w, env, ids, out)
+	if env.slots != nil {
+		<-env.slots
+	}
 	if err != nil {
 		return nil, err
 	}

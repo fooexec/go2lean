@@ -136,6 +136,7 @@ func modelTags(goflags string) []string {
 
 // TranslateAllOpts is TranslateAll with options.
 func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog, string, error) {
+	importAliases = map[string]map[string]string{}
 	// Tests: true also loads the package's internal test variant
 	// ("path [path.test]"), which includes *_test.go files of the same
 	// package: that is where agent-written spec-in-Go functions live.
@@ -7050,7 +7051,10 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 	// variable (go-runewidth's init calls fillJoinerBits, which paints
 	// joinerBits, #184): the call is in the slice, and the callee with it
 	// (withInitCallees). The variable is a cell: a function other than
-	// init writes it.
+	// init writes it. Arguments come into the slice with the call
+	// (grpclog's init runs SetLoggerV2(newLoggerV2()), which sets
+	// internal.LoggerV2Impl, a variable of another package: left out, the
+	// logger was nil in every trial, 16 spurious verdicts, #220).
 	for _, f := range initFuncs(initFn)[1:] {
 		for _, b := range f.Blocks {
 			for _, in := range b.Instrs {
@@ -7059,7 +7063,7 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 					continue
 				}
 				callee := c.Call.StaticCallee()
-				if callee == nil || callee.Pkg != spkg || callee.Parent() != nil || len(c.Call.Args) != 0 {
+				if callee == nil || callee.Pkg != spkg || callee.Parent() != nil {
 					continue
 				}
 				if writesUsed(callee, used) {
@@ -10311,6 +10315,9 @@ func spellAll(pkg *types.Package, t types.Type) (src string, paths []string) {
 // in use (two packages called `anthropic`).
 var recordImport func(path, name string) string
 
+// importAliases holds each package's qualifier table for recordImport.
+var importAliases = map[string]map[string]string{}
+
 // funcPkg is the package a function belongs to; an instance of a generic
 // function has none of its own and belongs to its origin's.
 func funcPkg(f *ssa.Function) *types.Package {
@@ -10325,7 +10332,16 @@ func funcPkg(f *ssa.Function) *types.Package {
 
 func abiOf(f *ssa.Function, json *jsonTable) (*contract.ABI, error) {
 	abi := &contract.ABI{GoFunc: f.String(), GoSig: f.Signature.String(), Frontend: Frontend, Package: funcPkg(f).Path(), Variadic: f.Signature.Variadic(), Imports: map[string]string{}}
-	used := map[string]string{} // qualifier -> path
+	// qualifier -> path, one table per package: a PoC chains several
+	// functions' ABIs (a constructor and a method), so every ABI of a
+	// package must spell an import the same way. Per ABI, grpc's
+	// internal/stats gave "stats" to experimental/stats in one and to
+	// grpc/stats in the other, and the merged imports collided (#220).
+	used := importAliases[abi.Package]
+	if used == nil {
+		used = map[string]string{}
+		importAliases[abi.Package] = used
+	}
 	recordImport = func(path, name string) string {
 		alias := name
 		for i := 2; ; i++ {

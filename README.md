@@ -28,7 +28,8 @@ Lean finds the inputs; `go test` is the judge.
 > ([runs](docs/eval/fifth-run.md)); it translates 72% of the standard
 > library's functions completely ([audit](docs/eval/std-audit.md)). See
 > [limitations](docs/limitations.md) and [validation](docs/validation.md)
-> for scope and evidence.
+> for scope and evidence, and the [blog post](docs/blog/2026-11-go2lean.md)
+> for an overview, with a run on grpc-go.
 
 ## Features
 
@@ -188,6 +189,7 @@ large arrays updated in place it also finds k016 at the default budget
 [what defects Go code has](docs/eval/go-defects.md) ·
 [go2lean's search against fuzzing](docs/eval/search-vs-fuzz.md) ·
 [recent concurrency bugs](docs/eval/conc-recent.md) ·
+[grpc-go](docs/eval/grpc.md) ·
 [runs on unseen projects](docs/eval/first-run.md) ([second](docs/eval/second-run.md), [third](docs/eval/third-run.md), [fourth](docs/eval/fourth-run.md), [fifth](docs/eval/fifth-run.md)) ·
 [how much of the standard library it translates](docs/eval/std-audit.md) ([translating more of it](docs/eval/std-translation.md))
 

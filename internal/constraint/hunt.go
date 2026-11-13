@@ -1094,6 +1094,21 @@ func buildDriver(coreDir, leanDir string) error {
 	return nil
 }
 
+// BuildDriver builds the workspace's search executable now, against
+// every model compiled into it, instead of in the first Hunt: run ./...
+// then times the build on its own, and no search is charged for it.
+func BuildDriver(ws contract.Workspace, root string) error {
+	leanDir := repo.WorkspaceLeanDir(ws.Root)
+	core, err := repo.CoreDir(root)
+	if err != nil {
+		return err
+	}
+	if err := ssaout.EnsureProject(leanDir, core); err != nil {
+		return err
+	}
+	return buildDriver(core, leanDir)
+}
+
 // locked runs f holding an exclusive lock on dir's lake build: hunts run
 // as parallel processes (round scripts use xargs -P), and a second lake
 // build in the same project fails on the first's half-written outputs.

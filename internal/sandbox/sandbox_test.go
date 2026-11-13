@@ -99,3 +99,28 @@ func TestRunHidesHostCredentials(t *testing.T) {
 		t.Fatalf("host environment exposed: %v exit=%d stdout=%s stderr=%s", err, exit, out, stderr)
 	}
 }
+
+// TestRunShowsModule: the package's module stays visible read-only, even
+// under the private /tmp, so a test that reads a file of the module
+// outside its package by its source path finds it (#221), and cannot
+// write it.
+func TestRunShowsModule(t *testing.T) {
+	if Mode() != ModeBwrap {
+		t.Skip("requires bwrap")
+	}
+	mod := t.TempDir()
+	pkg := filepath.Join(mod, "p")
+	data := filepath.Join(mod, "testdata", "cert.pem")
+	for _, d := range []string{pkg, filepath.Dir(data)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.WriteFile(filepath.Join(mod, "go.mod"), []byte("module m\n"), 0o644)
+	os.WriteFile(filepath.Join(pkg, "p.go"), []byte("package p\n"), 0o644)
+	os.WriteFile(data, []byte("cert"), 0o644)
+	out, stderr, exit, err := Run("/bin/sh", pkg, []string{"-c", `cat "$1" && ! touch "$1" 2>/dev/null && echo " read-only"`, "sh", data}, nil, Default)
+	if err != nil || exit != 0 || !strings.Contains(out, "cert read-only") {
+		t.Fatalf("module file: exit=%d err=%v stdout=%s stderr=%s", exit, err, out, stderr)
+	}
+}

@@ -73,6 +73,10 @@ The agent sits on top:
 3. runs the pipeline;
 4. writes a report from the verdicts.
 
+An answer with no Go code block where specs were asked for, or no
+Markdown heading where the report was, is asked for once more. A model
+sometimes answers with a tool call it cannot make.
+
 ### Proofs
 
 An `exhausted` certificate covers a finite domain. Where it can, the spec &

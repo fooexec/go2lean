@@ -139,3 +139,65 @@ func yoloBytes(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(
 		t.Errorf("not translated: %v", want)
 	}
 }
+
+// Two packages of the same name keep one qualifier each across all the
+// ABIs of a package: a PoC chains several functions' ABIs, and grpc's
+// internal/stats spelled experimental/stats and grpc/stats both as
+// "stats" in different ABIs, so the merged imports collided (#220).
+func TestImportAliasesPerPackage(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":   "module example.com/m\n\ngo 1.22\n",
+		"a/x/x.go": "package x\n\ntype T struct{ N int }\n",
+		"b/x/x.go": "package x\n\ntype U struct{ N int }\n",
+		"m.go": `package m
+
+import (
+	ax "example.com/m/a/x"
+	bx "example.com/m/b/x"
+)
+
+func F(p *ax.T) int { return p.N }
+
+func G(q *bx.U) int { return q.N }
+`,
+	}
+	for name, src := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, _, err := Translate(dir, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The qualifier of each path in each ABI that mentions its type:
+	// the alias recorded, else the package name.
+	spell := map[string]map[string]bool{}
+	for _, f := range p.Funcs {
+		if f.Name != "F" && f.Name != "G" {
+			continue
+		}
+		path := map[string]string{"F": "example.com/m/a/x", "G": "example.com/m/b/x"}[f.Name]
+		q := f.ABI.Imports[path]
+		if q == "" {
+			q = "x"
+		}
+		if spell[path] == nil {
+			spell[path] = map[string]bool{}
+		}
+		spell[path][q] = true
+	}
+	a, b := spell["example.com/m/a/x"], spell["example.com/m/b/x"]
+	if len(a) != 1 || len(b) != 1 {
+		t.Fatalf("qualifiers %v", spell)
+	}
+	for q := range a {
+		if b[q] {
+			t.Fatalf("both packages spelled %q: %v", q, spell)
+		}
+	}
+}

@@ -355,3 +355,13 @@ func repairPrompt(issues []string, previous string) string {
 }
 
 func fence(src string) string { return "```go\n" + src + "```\n" }
+
+// noCodeRetryPrompt opens the proposal again after an answer with no Go
+// code block.
+const noCodeRetryPrompt = "Your previous answer had no Go code block. You have no tools here: " +
+	"everything you need is below. Answer with the spec file as one ```go code block.\n\n"
+
+// noToolsReportPrompt opens the report prompt again after an answer that
+// was not a report.
+const noToolsReportPrompt = "Your previous answer was not the report. You have no tools here: " +
+	"the source and the verdicts are below. Answer with the Markdown report itself.\n\n"

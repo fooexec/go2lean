@@ -199,6 +199,13 @@ default 10 s search budget per property and a 10 s timeout per PoC.
 `-run-budget s` caps the whole search stage, and `-run regexp` searches
 only the functions it names.
 
+`run ./...` takes several packages side by side: at most `-jobs`
+searches and replays run at once (default: one per CPU), and each
+package's output is printed whole, in order. Before any search, the
+workspace's search executable is built against every package's model
+once, and the run prints how long that took. On a large module such as
+grpc-go, that build is most of the run.
+
 The PoC directory holds a ready-to-run Go test and a README with the
 reproduction command. Everything the modules exchange is a JSON record under
 `out/` (types in `internal/contract`).

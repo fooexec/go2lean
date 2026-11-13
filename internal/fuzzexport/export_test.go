@@ -120,3 +120,67 @@ func SpecJoinAllLen(sep string, parts []string, ret string) bool { return len(pa
 		t.Fatalf("targets %v skipped %v\n%s", targets, skipped, src)
 	}
 }
+
+// TestExportDropsImportsOfSkippedTargets: a target that cannot be built
+// leaves no import behind, and a decoder that reads nothing leaves r used
+// (both made the file fail to compile on grpc-go's encoding/proto, #220).
+func TestExportDropsImportsOfSkippedTargets(t *testing.T) {
+	root, err := repo.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "examples", "strs")
+	overlay := map[string][]byte{
+		filepath.Join(dir, "zz_skip_test.go"): []byte(`package strs
+
+import "strings"
+
+type go2leanEmpty struct{}
+
+// go2lean:sequence Before
+func SeqSkipped(b *strings.Builder, f func()) bool { return true }
+
+// go2lean:sequence Before
+func SeqEmpty(e go2leanEmpty) bool { return Before("a", "b") }
+`),
+	}
+	src, targets, skipped, err := Export(root, "github.com/fooexec/go2lean/examples/strs", overlay, []Spec{
+		{Property: "p_skip", Kind: contract.KindSequence, Spec: "SeqSkipped"},
+		{Property: "p_empty", Kind: contract.KindSequence, Spec: "SeqEmpty"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || len(skipped) != 1 || strings.Contains(src, `"strings"`) {
+		t.Fatalf("targets %v skipped %v\n%s", targets, skipped, src)
+	}
+	tmp := t.TempDir()
+	f := filepath.Join(tmp, "x_test.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ov := filepath.Join(tmp, "overlay.json")
+	files := map[string]string{filepath.Join(dir, "zz_skip_test.go"): filepath.Join(tmp, "skip_test.go"), filepath.Join(dir, "zz_fuzz_test.go"): f}
+	if err := os.WriteFile(filepath.Join(tmp, "skip_test.go"), overlay[filepath.Join(dir, "zz_skip_test.go")], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var js strings.Builder
+	js.WriteString(`{"Replace":{`)
+	first := true
+	for k, v := range files {
+		if !first {
+			js.WriteString(",")
+		}
+		first = false
+		js.WriteString(`"` + k + `":"` + v + `"`)
+	}
+	js.WriteString("}}")
+	if err := os.WriteFile(ov, []byte(js.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "vet", "-overlay", ov, ".")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated file does not build: %v\n%s\n%s", err, out, src)
+	}
+}

@@ -17,6 +17,7 @@ package fuzzexport
 import (
 	"fmt"
 	"go/types"
+	"maps"
 	"sort"
 	"strings"
 
@@ -73,8 +74,12 @@ func Export(root, pkgPath string, overlay map[string][]byte, specs []Spec) (stri
 	var skipped []Skipped
 	var bodies []string
 	for _, s := range specs {
+		// A target that cannot be built drops the imports it added, or
+		// the file would not compile ("imported and not used").
+		saved := maps.Clone(g.imports)
 		body, err := g.target(s)
 		if err != nil {
+			g.imports = saved
 			skipped = append(skipped, Skipped{Property: s.Property, Reason: err.Error()})
 			continue
 		}
@@ -326,7 +331,8 @@ func (g *gen) target(s Spec) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "// %s checks property %s.\nfunc %s(f *testing.F) {\n\tf.Fuzz(func(t *testing.T, %s) {\n", fuzzName(s.Spec), s.Property, fuzzName(s.Spec), strings.Join(fuzzParams, ", "))
 	if usesData {
-		b.WriteString("\t\tr := &go2leanFuzzReader{b: go2leanData}\n")
+		// _ = r: a decoder of a type with nothing to fill does not read it.
+		b.WriteString("\t\tr := &go2leanFuzzReader{b: go2leanData}\n\t\t_ = r\n")
 	}
 	for _, l := range setup {
 		fmt.Fprintf(&b, "\t\t%s\n", l)

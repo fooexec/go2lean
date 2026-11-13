@@ -1,6 +1,8 @@
 package poc
 
 import (
+	"encoding/json"
+	"github.com/fooexec/go2lean/internal/contract"
 	"os"
 	"path/filepath"
 	"testing"
@@ -236,6 +238,30 @@ func (p *Plain) Get() int { return p.n }
 	for fn, want := range map[string]string{"Context.URLParam": "NewRouteContext", "Collection.Less": "", "Plain.Get": "", "NewRouteContext": ""} {
 		if got := c.constructorOf("m", fn); got != want {
 			t.Errorf("constructorOf(%q) = %q, want %q", fn, got, want)
+		}
+	}
+}
+
+// TestUnexportedSet: a receiver whose unexported field the test set to a
+// non-zero value is not a caller's plain input (grpc's mem.Reader, #220);
+// one left at its zero value is.
+func TestUnexportedSet(t *testing.T) {
+	abi := &contract.ABI{Method: "Reader.ReadByte", Params: []contract.ABIParam{{Go: "r", Pointee: &contract.ABIParam{Fields: []contract.ABIParam{{Go: "data"}, {Go: "len"}, {Go: "Exported"}}}}}}
+	for _, c := range []struct{ obj, want string }{
+		{`[[], "106", "0"]`, "len"},
+		{`[[], "0", "5"]`, ""},
+		{`[null, "0", "0"]`, ""},
+	} {
+		// The same receiver through the type table, as a struct that
+		// refers to itself is spelled.
+		ref := &contract.ABI{Method: "Reader.ReadByte", Types: []contract.ABIType{{GoType: "Reader", Fields: abi.Params[0].Pointee.Fields}},
+			Params: []contract.ABIParam{{Go: "r", Pointee: &contract.ABIParam{TypeRef: "Reader"}}}}
+		if got := unexportedSet(ref, &contract.Counterexample{Objects: map[string]json.RawMessage{"r": json.RawMessage(c.obj)}}); got != c.want {
+			t.Errorf("type table, %s: got %q, want %q", c.obj, got, c.want)
+		}
+		cx := &contract.Counterexample{Objects: map[string]json.RawMessage{"r": json.RawMessage(c.obj)}}
+		if got := unexportedSet(abi, cx); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.obj, got, c.want)
 		}
 	}
 }

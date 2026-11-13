@@ -73,7 +73,11 @@ model gap, fixed since and reported separately) and
 [gobwas/glob](../docs/eval/glob.md) (6 new bugs and 1 known, all from the
 agent's specs or its reading of the source; the most serious one, a wrong
 match, was found by reading and reached by no search; templates again
-found none) and [concurrent code](../docs/eval/conc.md) (eapache/go-resiliency
+found none) and [grpc-go](../docs/eval/grpc.md) (templates over 209 packages
+confirmed 153 panics, none a bug; the agent's specs on six packages led
+to one: `MaxConnectionAge` below 10 ns crashes the server; the run found
+seven problems in the tool, fixed since)
+and [concurrent code](../docs/eval/conc.md) (eapache/go-resiliency
 and patrickmn/go-cache: every concurrency result confirmed was real, the
 one bug, a data race in a package's own test, new, and found as well by
 `go test -race`; the run found two frontend bugs, fixed since). `go2lean prove`
