@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/types"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -48,6 +49,12 @@ func rankOf(p *prepared, callers *callerIndex) *contract.Rank {
 	}
 	if p.test {
 		return &contract.Rank{Tier: 1, Reason: "the package's own test fails this way"}
+	}
+	// An interface input holding a value of an unexported type, built
+	// field by field: only the package's own code makes one (grpc's
+	// mem.BufferSlice of *buffer with forged reference counts).
+	if t := unexportedAlt(p.abi, p.cx); t != "" {
+		return &contract.Rank{Tier: 2, Reason: "an interface input holds a " + t + " built field by field, which only the package's own code makes: check that its values can get here"}
 	}
 	fn := baseFunc(p.target.Func)
 	if nils := nilArguments(p.cx); len(nils) > 0 {
@@ -254,4 +261,68 @@ func unexportedSet(abi *contract.ABI, cx *contract.Counterexample) string {
 		return f.Go
 	}
 	return ""
+}
+
+var tagRe = regexp.MustCompile(`"tag":\s*(\d+)`)
+
+// unexportedAlt names the unexported dynamic type of an interface input
+// the counterexample holds ("" when there is none).
+func unexportedAlt(abi *contract.ABI, cx *contract.Counterexample) string {
+	if abi == nil {
+		return ""
+	}
+	byTag := map[string]string{}
+	var walk func(p contract.ABIParam)
+	walk = func(p contract.ABIParam) {
+		for _, a := range p.Alts {
+			byTag[fmt.Sprint(a.Tag)] = a.GoType
+			walk(a)
+		}
+		for _, f := range p.Fields {
+			walk(f)
+		}
+		if p.ElemParam != nil {
+			walk(*p.ElemParam)
+		}
+		if p.Key != nil {
+			walk(*p.Key)
+		}
+		if p.Value != nil {
+			walk(*p.Value)
+		}
+	}
+	for _, p := range abi.Params {
+		walk(p)
+	}
+	for _, t := range abi.Types {
+		for _, f := range t.Fields {
+			walk(f)
+		}
+	}
+	if len(byTag) == 0 {
+		return ""
+	}
+	var found []string
+	for _, raw := range cx.Objects {
+		for _, m := range tagRe.FindAllStringSubmatch(string(raw), -1) {
+			if t, ok := byTag[m[1]]; ok && !exportedTypeName(t) && !slices.Contains(found, t) {
+				found = append(found, t)
+			}
+		}
+	}
+	sort.Strings(found)
+	if len(found) == 0 {
+		return ""
+	}
+	return found[0]
+}
+
+// exportedTypeName: the type a Go type expression names (`*pkg.T`, `T`)
+// is exported.
+func exportedTypeName(t string) bool {
+	t = strings.TrimLeft(t, "*[]")
+	if i := strings.LastIndex(t, "."); i >= 0 {
+		t = t[i+1:]
+	}
+	return t != "" && unicode.IsUpper([]rune(t)[0])
 }
