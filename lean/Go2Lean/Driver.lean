@@ -64,7 +64,7 @@ partial def genOfJson (t : GoSSA.JTable) (j : Json) : Except String Gen := do
   | "anyOf" =>
     let alts ← (← j.getObjValAs? (Array Json) "alts").toList.mapM fun a => do
       return ((← a.getObjValAs? Nat "tag"), (← genOfJson t (← a.getObjVal? "gen")))
-    return .anyOf name alts
+    return .anyOf name alts ((j.getObjValAs? Bool "nonNil").toOption != some true)
   | other => throw s!"unknown generator kind {other}"
 
 def propertyOfJson (j : Json) : Except String Property := do

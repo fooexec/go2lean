@@ -294,6 +294,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			xrefs[f.String()] = contract.XCall{Package: u.path, ID: id}
 		}
 	}
+	ifaceAltTypes = boxed
 	plan.dropUntranslatable(units, xrefs, zeros, sprog, boxed)
 	var progs []*ir.Prog
 	for _, u := range units {
@@ -10636,6 +10637,9 @@ func (ab *abiBuilder) param(name string, t types.Type, stack []*types.Named) (co
 			extra = append(extra, ip)
 		}
 	}
+	if p, ok := ab.ifaceAlts(name, src, ipath, extra, t, stack); ok {
+		return p, nil
+	}
 	switch {
 	case isStringsBuilder(t):
 		// An empty Builder (a copied non-empty one panics in Go): a string of
@@ -10799,7 +10803,19 @@ func assertedTypes(f *ssa.Function) []types.Type {
 				switch in := in.(type) {
 				case *ssa.TypeAssert:
 					it, ok := in.X.Type().Underlying().(*types.Interface)
-					if !ok || !it.Empty() || types.IsInterface(in.AssertedType) {
+					if !ok || !it.Empty() {
+						continue
+					}
+					if ai, isIface := in.AssertedType.Underlying().(*types.Interface); isIface {
+						// An assertion to an interface (encoding/proto's
+						// v.(protoadapt.MessageV2)): types that implement it.
+						if !ai.Empty() {
+							for _, c := range ifaceImpls(funcPkg(f), ai) {
+								if len(out) < 6 && !slices.ContainsFunc(out, func(t types.Type) bool { return types.Identical(t, c) }) {
+									out = append(out, c)
+								}
+							}
+						}
 						continue
 					}
 					switch u := in.AssertedType.Underlying().(type) {
@@ -10824,6 +10840,98 @@ func assertedTypes(f *ssa.Function) []types.Type {
 	}
 	walk(f, 0)
 	return out
+}
+
+// ifaceAltTypes are the types the program boxes into interfaces (the
+// dispatch's implementers), for ifaceAlts; set per translation.
+var ifaceAltTypes []types.Type
+
+// maxIfaceAlts bounds the dynamic types a non-empty interface input takes.
+const maxIfaceAlts = 3
+
+// ifaceAlts describes an input of a non-empty interface type (not error,
+// not context.Context) as nil or a value of one of the types the program
+// boxes that implement it and a test can build: grpc's encoding/proto
+// takes `any` and a proto message, credentials take an AuthInfo. Without
+// them such an input was nil, and every call on it a nil dereference.
+func (ab *abiBuilder) ifaceAlts(name, src, ipath string, extra []string, t types.Type, stack []*types.Named) (contract.ABIParam, bool) {
+	it, ok := t.Underlying().(*types.Interface)
+	if !ok || it.Empty() || ab.anyDepth > 0 || isForeignUnexported(ab.pkg, t) {
+		return contract.ABIParam{}, false
+	}
+	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil {
+		switch n.Obj().Pkg().Path() + "." + n.Obj().Name() {
+		case "context.Context":
+			return contract.ABIParam{}, false
+		}
+	}
+	if types.Identical(t, types.Universe.Lookup("error").Type()) {
+		return contract.ABIParam{}, false
+	}
+	cands := ifaceImpls(ab.pkg, it)
+	ab.anyDepth++
+	defer func() { ab.anyDepth-- }()
+	p := contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIAny, Zero: "nil", NonNil: true}
+	for _, c := range cands {
+		if len(p.Alts) == maxIfaceAlts {
+			break
+		}
+		a, err := ab.param("v", c, stack)
+		if err != nil || a.Kind == contract.ABIOpaque {
+			continue
+		}
+		a.Tag = typeTag(c)
+		p.Alts = append(p.Alts, a)
+	}
+	if len(p.Alts) == 0 {
+		return contract.ABIParam{}, false
+	}
+	return p, true
+}
+
+// ifaceImpls are the types the program boxes that implement it and a test
+// in pkg can build (a struct or a pointer to one, of pkg or exported),
+// pkg's own first, then by name.
+func ifaceImpls(pkg *types.Package, it *types.Interface) []types.Type {
+	var cands []types.Type
+	for _, c := range ifaceAltTypes {
+		if !types.Implements(c, it) {
+			continue
+		}
+		base := c
+		if p, ok := base.(*types.Pointer); ok {
+			base = p.Elem()
+		}
+		n, ok := base.(*types.Named)
+		if !ok || n.Obj().Pkg() == nil || n.TypeArgs().Len() > 0 {
+			continue
+		}
+		if _, isStruct := n.Underlying().(*types.Struct); !isStruct {
+			continue
+		}
+		if n.Obj().Pkg() != pkg && (!n.Obj().Exported() || isForeignUnexported(pkg, c)) {
+			continue
+		}
+		cands = append(cands, c)
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		pi, pj := typePkgOf(cands[i]) == pkg, typePkgOf(cands[j]) == pkg
+		if pi != pj {
+			return pi
+		}
+		return types.TypeString(cands[i], nil) < types.TypeString(cands[j], nil)
+	})
+	return cands
+}
+
+func typePkgOf(t types.Type) *types.Package {
+	if p, ok := t.(*types.Pointer); ok {
+		t = p.Elem()
+	}
+	if n, ok := t.(*types.Named); ok {
+		return n.Obj().Pkg()
+	}
+	return nil
 }
 
 // anyParam describes an empty interface input: nil, or a string, bool or
