@@ -88,7 +88,7 @@ These are the problems the run showed, and what was done about each.
 | A stuck callee's results, an unknown function value, an assumed `globalServerOptions` | about 25 spurious | [#218](https://github.com/fooexec/go2lean/issues/218) and its kin |
 | Concurrency: the replay left the model's schedule, or Go's scheduler did not take it | 10 inconclusive | #116 |
 | `xdsclient`'s model is too large for the Lean build (killed, exit 137) | 1 package not searched | [#223](https://github.com/fooexec/go2lean/issues/223) |
-| Time: one package at a time, with a barrier between search and replay | idle CPUs | [#222](https://github.com/fooexec/go2lean/issues/222), in progress |
+| Time: one package at a time, with a barrier between search and replay; but most of a run is the Lean build of the search executable | idle CPUs | packages side by side and the build timed on its own ([#222](https://github.com/fooexec/go2lean/issues/222)); the build itself is open |
 
 ## Arm B: the agent
 
@@ -186,7 +186,11 @@ invariant the type does not keep, not as a bug.
   `context.Context`, a non-message `any`. The mutants exposed each one
   (0 of N killed), and the agent's report rewrote them. The specs that
   stayed are exhausted over their domain and fail most mutants.
-- **Time.** The template arm took 11,659 CPU-bound seconds over 209
-  packages; the agent arm 8,812 s for six, most of it `internal/transport`
-  (304 properties). #222 overlaps packages and
-  search with replay.
+- **Time.** The template arm took 11,659 s over 209 packages; the agent
+  arm 8,812 s for six, most of it `internal/transport` (304
+  properties). Most of the template arm's time is not search. On
+  `./balancer/...` (24 packages) in one workspace, the Lean build of the
+  search executable takes 651 of about 800 s. Running packages side by
+  side, which `run ./...` now does (#222), changed the total by less
+  than the noise (770 and 844 s before, 808 s after). The build is
+  where time can be won.
