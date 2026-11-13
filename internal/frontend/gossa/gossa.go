@@ -294,7 +294,7 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			xrefs[f.String()] = contract.XCall{Package: u.path, ID: id}
 		}
 	}
-	ifaceAltTypes = boxed
+	ifaceAltTypes, ifaceAltModule = boxed, modPath
 	plan.dropUntranslatable(units, xrefs, zeros, sprog, boxed)
 	var progs []*ir.Prog
 	for _, u := range units {
@@ -10843,8 +10843,12 @@ func assertedTypes(f *ssa.Function) []types.Type {
 }
 
 // ifaceAltTypes are the types the program boxes into interfaces (the
-// dispatch's implementers), for ifaceAlts; set per translation.
-var ifaceAltTypes []types.Type
+// dispatch's implementers), for ifaceAlts; set per translation, with the
+// module they must belong to.
+var (
+	ifaceAltTypes  []types.Type
+	ifaceAltModule string
+)
 
 // maxIfaceAlts bounds the dynamic types a non-empty interface input takes.
 const maxIfaceAlts = 3
@@ -10890,8 +10894,8 @@ func (ab *abiBuilder) ifaceAlts(name, src, ipath string, extra []string, t types
 }
 
 // ifaceImpls are the types the program boxes that implement it and a test
-// in pkg can build (a struct or a pointer to one, of pkg or exported),
-// pkg's own first, then by name.
+// in pkg can build (a struct or a pointer to one, of pkg or exported, in
+// the module), pkg's own first, then by name.
 func ifaceImpls(pkg *types.Package, it *types.Interface) []types.Type {
 	var cands []types.Type
 	for _, c := range ifaceAltTypes {
@@ -10910,6 +10914,12 @@ func ifaceImpls(pkg *types.Package, it *types.Interface) []types.Type {
 			continue
 		}
 		if n.Obj().Pkg() != pkg && (!n.Obj().Exported() || isForeignUnexported(pkg, c)) {
+			continue
+		}
+		// The module's own types: a standard-library type that happens to
+		// be boxed (a *bytes.Buffer is a Resetter) says nothing about the
+		// code's callers, and would stand in for the nil they may pass.
+		if path := n.Obj().Pkg().Path(); ifaceAltModule == "" || (path != ifaceAltModule && !strings.HasPrefix(path, ifaceAltModule+"/")) {
 			continue
 		}
 		cands = append(cands, c)
