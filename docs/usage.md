@@ -279,7 +279,11 @@ only: exported functions, and exported methods of exported types. An
 unexported function's finding depends on what its callers pass, and the
 exported functions that call it are searched, so its own templates are
 skipped, and the hunt stage says how many. `-unexported` searches them
-too, and `-run` searches the functions it names, exported or not. Specs,
+too, and `-run` searches the functions it names, exported or not. On
+grpc-go, `-unexported` over the whole module took 58% longer and tripled
+the findings below tier 1 for one more tier-1 finding
+([evaluation](eval/grpc.md)); run it on the packages that hold the logic.
+Specs,
 fuzz targets and test functions are always searched (#172).
 
 `-run` selects targets as `go test -run` selects tests, and a suite's
