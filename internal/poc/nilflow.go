@@ -50,6 +50,8 @@ type callerIndex struct {
 	// an interface: a method called through the interface gets a nil
 	// receiver when the pointer was nil (a typed nil in an interface).
 	boxes map[string][]*ssa.MakeInterface
+	// reach indexes stores, field addresses and closures for reachAPI.
+	reach *reachIndex
 }
 
 func newCallerIndex(root string) *callerIndex { return &callerIndex{root: root} }
@@ -69,7 +71,13 @@ func (c *callerIndex) load() {
 	}
 	prog, _ := ssautil.Packages(pkgs, ssa.InstantiateGenerics)
 	prog.Build()
-	for f := range ssautil.AllFunctions(prog) {
+	all := ssautil.AllFunctions(prog)
+	fns := make([]*ssa.Function, 0, len(all))
+	for f := range all {
+		fns = append(fns, f)
+	}
+	c.indexReach(fns)
+	for f := range all {
 		if obj, ok := f.Object().(*types.Func); ok && f.Pkg != nil && f.Synthetic == "" {
 			c.funcs[funcKey(obj)] = f
 		}

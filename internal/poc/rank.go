@@ -106,7 +106,28 @@ func rankOf(p *prepared, callers *callerIndex) *contract.Rank {
 		}
 		return &contract.Rank{Tier: 3, Reason: "every caller passes constants, not these: " + strings.Join(desc, "; ")}
 	}
+	// Traced back to the public API (#224): a caller's value reaches the
+	// input, through no check that may stop it.
+	if reached, checks, ok := callers.reachAPI(p.target.Package, fn, scalarInputs(p.cx)); ok {
+		path := strings.Join(reached, "; ")
+		if len(checks) == 0 {
+			return &contract.Rank{Tier: 1, Reason: "a caller's value reaches it: " + path}
+		}
+		return &contract.Rank{Tier: 2, Reason: "a caller's value reaches it (" + path + "), through checks that may stop it: " + strings.Join(checks, "; ")}
+	}
 	return &contract.Rank{Tier: 2, Reason: "plain inputs to an unexported function: check its callers"}
+}
+
+// scalarInputs are the counterexample's plain inputs (no slices, structs
+// or nils), by parameter name.
+func scalarInputs(cx *contract.Counterexample) map[string]string {
+	out := map[string]string{}
+	for name, v := range cx.Inputs {
+		if !strings.Contains(name, "_") && v != "nil" {
+			out[name] = v
+		}
+	}
+	return out
 }
 
 // baseFunc strips what the target id adds to a function's name: the

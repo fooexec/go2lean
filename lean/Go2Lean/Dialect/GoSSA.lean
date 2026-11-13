@@ -265,8 +265,14 @@ inductive ConcOp where
   `ctxDone` `[ctx]` is its done channel (nil, which blocks forever, for a
   context the model did not make); `ctxErr` `[ctx]` its error;
   `ctxCancel code` `[ctx]` ends it and its children (1 canceled, 2
-  deadline exceeded). -/
+  deadline exceeded). `ctxWithValue` `[parent, key, val]` is
+  `context.WithValue`: an object `structv [tuple [parent, key, val]]`,
+  done and cancelled with its parent; `ctxValue` `[ctx, key]` is
+  `ctx.Value(key)` along the chain; `ctxNew` under a value context
+  returns `structv [tuple [own, parent]]`, cancelled through `own` and
+  looking values up in `parent` (grpc's metadata). -/
   | ctxBackground | ctxNew | ctxDone | ctxErr | ctxCancel (code : Nat)
+  | ctxWithValue | ctxValue
   /-- `sync.Cond`: `condEnter` `[cond]` takes a ticket for a `Wait`;
   `condSignal all` `[cond]` releases the oldest ticket, or all. -/
   | condEnter | condSignal (all : Bool)
@@ -721,14 +727,23 @@ def chanObj (cap : BitVec 64) (buf : List Val) (closed : Bool) (zero : Val) : Va
 def ctxObj (done : Val) (err : Nat) (children : List Val) : Val :=
   .structv [done, .int 64 (BitVec.ofNat 64 err), .tuple children]
 
-def ctxGet (heap : Heap Val) (c : Val) : Option (Nat × Val × Nat × List Val) :=
-  match c with
-  | .ptr ref [] =>
-    if ref = 0 then none else
-    match heap[ref]? with
-    | some (.structv [done, .int 64 e, .tuple cs]) => some (ref, done, e.toNat, cs)
+/-- The cancellable context under `c`: its own object, or for a value
+context (`ctxWithValue`) its parent's, `fuel` levels down. -/
+def ctxGetF : Nat → Heap Val → Val → Option (Nat × Val × Nat × List Val)
+  | 0, _, _ => none
+  | n + 1, heap, c =>
+    match c with
+    | .ptr ref [] =>
+      if ref = 0 then none else
+      match heap[ref]? with
+      | some (.structv [done, .int 64 e, .tuple cs]) => some (ref, done, e.toNat, cs)
+      | some (.structv [.tuple [p, _, _]]) => ctxGetF n heap p
+      | some (.structv [.tuple [own, _]]) => ctxGetF n heap own
+      | _ => none
     | _ => none
-  | _ => none
+
+def ctxGet (heap : Heap Val) (c : Val) : Option (Nat × Val × Nat × List Val) :=
+  ctxGetF 64 heap c
 
 /-- The channel `ch` points to: its heap ref, capacity, buffer, closed flag
 and zero value; `none` for anything else (a nil channel included). -/
@@ -3602,6 +3617,28 @@ def setCondState (heap : Heap Val) (c : Val) (n : Nat) (ws : List Nat) : Res (He
       (.tuple [.int 64 (BitVec.ofNat 64 n), .tuple (ws.map fun t => .int 64 (BitVec.ofNat 64 t))])
   | _ => .panic .nilDereference
 
+/-- `ctx.Value(key)`: the value of the nearest `WithValue` whose key is
+`key`; the nil interface past the chain (a context the model made, or
+the `context.Background()` M3 passes for an input); unknown (`unit`)
+for a context the model did not make or a key it cannot compare. -/
+def ctxValueF (heap : Heap Val) : Nat → Val → Val → Val
+  | 0, _, _ => .unit
+  | n + 1, c, key =>
+    match c with
+    | .boxed 0 .unit => .opaqueNil
+    | .ptr ref [] =>
+      if ref = 0 then .unit else
+      match heap[ref]? with
+      | some (.structv [.tuple [p, k, v]]) =>
+        match ifaceEqVal heap k key with
+        | some true => v
+        | some false => ctxValueF heap n p key
+        | none => .unit
+      | some (.structv [.tuple [_, p]]) => ctxValueF heap n p key
+      | some (.structv [_, .int 64 _, .tuple _]) => .opaqueNil
+      | _ => .unit
+    | _ => .unit
+
 /-- The `ConcOp`s, on the heap. -/
 def denoteConc (heap : Heap Val) : ConcOp → List Val → Res (Val × Heap Val)
   | .atomicLoad, [p] =>
@@ -3618,14 +3655,29 @@ def denoteConc (heap : Heap Val) : ConcOp → List Val → Res (Val × Heap Val)
   | .ctxNew, [parent] =>
     let (ch, heap) := heapAlloc heap (chanObj 0 [] false (.structv []))
     let (c, heap) := heapAlloc heap (ctxObj ch 0 [])
+    -- Under a value context, the child keeps its parent for `Value`:
+    -- `structv [tuple [own, parent]]`, cancelled through `own`.
+    let (r, heap) := match parent with
+      | .ptr ref [] =>
+        match heap[ref]? with
+        | some (.structv [.tuple [_, _, _]]) | some (.structv [.tuple [_, _]]) =>
+          heapAlloc heap (.structv [.tuple [c, parent]])
+        | _ => (c, heap)
+      | _ => (c, heap)
     match ctxGet heap parent with
     | some (pref, pdone, pe, pcs) =>
       let heap := heap.set! pref (ctxObj pdone pe (pcs ++ [c]))
-      .ok (c, if pe = 0 then heap else ctxCancelRec pe 16 heap c)
-    | none => .ok (c, heap)
+      .ok (r, if pe = 0 then heap else ctxCancelRec pe 16 heap c)
+    | none => .ok (r, heap)
   | .ctxDone, [c] => .ok ((ctxGet heap c).elim (.ptr 0 []) (·.2.1), heap)
   | .ctxErr, [c] => .ok (.err (match ctxGet heap c with | some (_, _, e, _) => e != 0 | none => false), heap)
   | .ctxCancel code, [c] => .ok (.unit, ctxCancelRec code 16 heap c)
+  | .ctxWithValue, [parent, key, val] =>
+    .ok (heapAlloc heap (.structv [.tuple [parent, key, val]]))
+  | .ctxValue, [c, key] =>
+    match c with
+    | .opaqueNil => .panic .nilDereference
+    | _ => .ok (ctxValueF heap 64 c key, heap)
   | .condEnter, [c] =>
     let (n, ws) := condState heap c
     match setCondState heap c (n + 1) (ws ++ [n]) with

@@ -224,6 +224,21 @@ func SeqTestComplexArith() bool { return testComplexArith() }
 // go2lean:sequence testComplexDivEdges
 func SeqTestComplexDivEdges() bool { return testComplexDivEdges() }
 
+// go2lean:sequence testContextCancelUnderValue
+func SeqTestContextCancelUnderValue() bool { return testContextCancelUnderValue() }
+
+// go2lean:sequence testContextValueFound
+func SeqTestContextValueFound() bool { return testContextValueFound() }
+
+// go2lean:sequence testContextValueMissing
+func SeqTestContextValueMissing() bool { return testContextValueMissing() }
+
+// go2lean:sequence testContextValueNearest
+func SeqTestContextValueNearest() bool { return testContextValueNearest() }
+
+// go2lean:sequence testContextValueThroughCancel
+func SeqTestContextValueThroughCancel() bool { return testContextValueThroughCancel() }
+
 // go2lean:sequence testCopyShorterDst
 func SeqTestCopyShorterDst() bool { return testCopyShorterDst() }
 

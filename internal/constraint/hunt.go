@@ -308,7 +308,11 @@ func genIn(abi *contract.ABI, p contract.ABIParam, maxLen int, open []string) (m
 			}
 			alts = append(alts, map[string]any{"tag": a.Tag, "gen": g})
 		}
-		return map[string]any{"k": "anyOf", "name": p.Go, "alts": alts}, nil
+		g := map[string]any{"k": "anyOf", "name": p.Go, "alts": alts}
+		if p.NonNil {
+			g["nonNil"] = true
+		}
+		return g, nil
 	case contract.ABIArray:
 		e, err := genIn(abi, p.ElemAsParam(), maxLen, open)
 		if err != nil {

@@ -482,7 +482,11 @@ type ABIParam struct {
 	// Alts are the dynamic types an empty interface is generated with, and
 	// Tag the model's type tag of an Alts entry (a hash of the type's name).
 	Alts []ABIParam `json:"alts,omitempty"`
-	Tag  uint32     `json:"tag,omitempty"`
+	// NonNil: an input of a non-empty interface type, whose Alts are the
+	// types that implement it; nil only where nil inputs are allowed, as
+	// for a pointer.
+	NonNil bool   `json:"non_nil,omitempty"`
+	Tag    uint32 `json:"tag,omitempty"`
 	// JSONText marks the raw JSON an SDK response type keeps of itself
 	// (the unexported JSON.raw behind RawJSON()): generated as a JSON
 	// object of extra fields, which the harness merges into the typed
