@@ -87,13 +87,106 @@ These are the problems the run showed, and what was done about each.
 | `crypto/tls`, `crypto/x509`, `os.ReadFile`, protobuf reflection: the boundary | about 15 spurious | M2 (#53) |
 | A stuck callee's results, an unknown function value, an assumed `globalServerOptions` | about 25 spurious | [#218](https://github.com/fooexec/go2lean/issues/218) and its kin |
 | Concurrency: the replay left the model's schedule, or Go's scheduler did not take it | 10 inconclusive | #116 |
-| `xdsclient`'s model is too large for the Lean build (killed, exit 137) | 1 package not searched | to file |
+| `xdsclient`'s model is too large for the Lean build (killed, exit 137) | 1 package not searched | [#223](https://github.com/fooexec/go2lean/issues/223) |
 | Time: one package at a time, with a barrier between search and replay | idle CPUs | [#222](https://github.com/fooexec/go2lean/issues/222), in progress |
 
 ## Arm B: the agent
 
-ARM_B
+Six packages, one `go2lean agent -llm claude-code` run each, with the
+default two rounds (propose and repair, then a report that may revise the
+specs). The agent saw the package source, its documentation and
+go2lean's model report; it wrote 96 specs in the first round. On these packages `agent`
+also searches `no_panic` and `no_hang` for unexported functions.
+
+| package | time | what the agent's run found |
+|---|---|---|
+| `internal/transport` | 5,280 s | **one bug**, below; a flow-control invariant that fails on the internal type; `ceil(n, 0)` divides by zero, with no caller that passes 0 |
+| `metadata` | 937 s | no bug. `Pairs` and `AppendToOutgoingContext` panic on an odd count, as documented. From the source: `MD.Set` keeps the caller's slice, and `FromIncomingContext` and `FromOutgoingContext` treat two keys that differ only in case differently |
+| `internal/grpcutil` | 779 s | no bug. `div(d, 0)` divides by zero; every caller passes a non-zero constant |
+| `codes` | 803 s | no bug. The specs tie `Code.String` and the canonical names together, and fail 23 or 24 of 24 mutants |
+| `status` | 666 s | no bug. 8 spurious verdicts, from `errors.As`, `fmt.Sprintf` and `reflect.Zero`, which the model does not follow |
+| `encoding/proto` | 347 s | no bug. Every input the engine can build for `v any` is a non-message, so the marshalling paths were never reached; the mutants showed it, and the agent restated the specs as total ones |
+
+### The bug: `MaxConnectionAge` below 10 ns crashes the server
+
+```go
+// internal/transport/http2_server.go
+func getJitter(v time.Duration) time.Duration {
+	if v == infinity {
+		return 0
+	}
+	// Generate a jitter between +/- 10% of the value.
+	r := int64(v / 10)
+	j := rand.Int64N(2*r) - r // panics when r <= 0
+	return time.Duration(j)
+}
+```
+
+`NewServerTransport` calls it on `MaxConnectionAge` from
+`grpc.KeepaliveParams`, after replacing only a zero value. `KeepaliveParams`
+checks `Time`, not `MaxConnectionAge`. So a server built with
+
+```go
+grpc.NewServer(grpc.KeepaliveParams(keepalive.ServerParameters{MaxConnectionAge: 5 * time.Nanosecond}))
+```
+
+or with any negative `MaxConnectionAge` dies with `panic: invalid argument
+to Int64N` on the first connection it accepts. That is the whole process,
+not one connection, because the panic is on the accept goroutine. We
+reproduced it with a real server and client. It is not reported upstream
+yet.
+
+Who found what:
+- **The template found the panic.** go2lean's `no_panic` on `getJitter`
+  gave `v = -2743846568614014354` at the first random trial, and the replay
+  confirmed it.
+- **The agent found the path.** It read `NewServerTransport` and
+  `KeepaliveParams` and said which configuration reaches the panic.
+- **`go2lean run -unexported` ranks it at tier 2**, one of 41 findings
+  that "depend on the callers", among nil receivers. Following the call
+  site to an exported parameter, as the agent did, is mechanical:
+  [#224](https://github.com/fooexec/go2lean/issues/224).
+
+### The invariant: `inFlow.maybeAdjust`
+
+The agent wrote a sequence spec from the comment on `inFlow.delta` ("the
+extra window update given by receiver"): the window granted to the peer
+never exceeds what `onData` will accept. go2lean found a 7-event
+counterexample and Go confirmed it: two calls of `maybeAdjust(69999)` with
+no read between them each return 69,999, so 139,998 bytes of window go to
+the peer while `onData` accepts `limit + 69,999`. The transport calls
+`maybeAdjust` once for the 5-byte header and once for the body, and
+`onRead` resets `delta` between messages, so neither the agent nor we found
+a path through the API that makes two such calls. It is recorded as an
+invariant the type does not keep, not as a bug.
+
+### What the agent's runs showed about the tool
+
+| problem | status |
+|---|---|
+| On `status` and `encoding/proto`, the model answered the proposal with a tool call it cannot make, and the run stopped | fixed: asked once more |
+| On `encoding/proto`, the report round did the same | fixed: asked once more |
+| The fuzz targets exported for `encoding/proto` did not build: a skipped target's import stayed, and the input reader went unused | fixed |
+| `context.Context` parameters, and a `*Status` from another package's unexported field, cannot be built by the engine or by Go's fuzzer; the agent restated those specs as sequences that build the value | known (the agent's way round is the right one) |
+| `errors.As`, `fmt.Sprintf`, `fmt.Fprintf` and `reflect.Zero` gave the spurious verdicts | M2 (#53) |
 
 ## What this run says
 
-ARM_SAYS
+- **On the templates alone, grpc-go has no bug go2lean can reach.** 153
+  confirmed panics, and every one is documented, a misuse or a forged
+  input. A mature library with its own fuzzing should look like this. The
+  run's value was in the tool: four fixes and three issues.
+- **With an agent's specs, it found a real one.** The bug is a panic
+  that a template finds. But it sits in an unexported helper, and the
+  agent's reading of the call site made it a finding a maintainer can
+  act on. Ranking can learn that step (#224).
+- **Mutation testing keeps the agent honest.** Of the 96 specs, only the
+  `inFlow` invariant failed in Go. Several held because their guards
+  skipped every input the engine could build: a nil registry, an opaque
+  `context.Context`, a non-message `any`. The mutants exposed each one
+  (0 of N killed), and the agent's report rewrote them. The specs that
+  stayed are exhausted over their domain and fail most mutants.
+- **Time.** The template arm took 11,659 CPU-bound seconds over 209
+  packages; the agent arm 8,812 s for six, most of it `internal/transport`
+  (304 properties). #222 overlaps packages and
+  search with replay.
