@@ -216,6 +216,9 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			continue
 		}
 		fns := candidates(spkg, opts.Tests)
+		if !opts.Tests {
+			fns = withoutTestHelpers(fns, pkgs[i])
+		}
 		units = append(units, unit{pkgs[i].PkgPath, fns})
 		mainPaths[pkgs[i].PkgPath] = true
 		roots = append(roots, fns...)
@@ -10915,4 +10918,68 @@ func GoName(s string) string {
 		return s[i+1:]
 	}
 	return s
+}
+
+// withoutTestHelpers drops the functions of the package's _test.go files
+// that no spec needs. The package is loaded as its test variant for the
+// specs there, but its tests' helpers are not targets, and the
+// dependencies they call were translated for nothing: grpc-go's balancer
+// tests pulled in go-cmp and internal/testutils, which made most of the
+// Lean build (#222). Kept: the functions of a file holding a go2lean:
+// directive, and what they call in the package's test files.
+func withoutTestHelpers(fns []*ssa.Function, pkg *packages.Package) []*ssa.Function {
+	if len(fns) == 0 {
+		return fns
+	}
+	fset := fns[0].Prog.Fset
+	testFile := func(f *ssa.Function) bool {
+		return strings.HasSuffix(fset.Position(f.Pos()).Filename, "_test.go")
+	}
+	specFiles := map[string]bool{}
+	for _, file := range pkg.Syntax {
+		name := fset.Position(file.Pos()).Filename
+		if !strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		for _, cg := range file.Comments {
+			if strings.Contains(cg.Text(), "go2lean:") {
+				specFiles[name] = true
+				break
+			}
+		}
+	}
+	keep := map[*ssa.Function]bool{}
+	var visit func(f *ssa.Function)
+	visit = func(f *ssa.Function) {
+		if keep[f] {
+			return
+		}
+		keep[f] = true
+		for _, anon := range f.AnonFuncs {
+			visit(anon)
+		}
+		for _, b := range f.Blocks {
+			for _, in := range b.Instrs {
+				for _, op := range in.Operands(nil) {
+					if g, ok := (*op).(*ssa.Function); ok && g.Pkg == f.Pkg && testFile(g) {
+						visit(g)
+					}
+				}
+				if mi, ok := in.(*ssa.MakeInterface); ok {
+					ms := f.Prog.MethodSets.MethodSet(mi.X.Type())
+					for i := 0; i < ms.Len(); i++ {
+						if g := f.Prog.MethodValue(ms.At(i)); g != nil && g.Pkg == f.Pkg && testFile(g) {
+							visit(g)
+						}
+					}
+				}
+			}
+		}
+	}
+	for _, f := range fns {
+		if !testFile(f) || specFiles[fset.Position(f.Pos()).Filename] {
+			visit(f)
+		}
+	}
+	return slices.DeleteFunc(fns, func(f *ssa.Function) bool { return testFile(f) && !keep[f] })
 }

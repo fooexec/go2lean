@@ -210,8 +210,10 @@ func Print(p *ir.Prog, module string) string {
 	var b strings.Builder
 	header(&b, p, module, "import Go2Lean.Dialect.GoSSA")
 	printTable(&b, p)
+	tb := collectTables(p)
+	tb.print(&b)
 	for i := range p.Funcs {
-		printFunc(&b, p, i)
+		printFunc(&b, p, i, tb)
 	}
 	printProg(&b, p, module)
 	return b.String()
@@ -256,12 +258,14 @@ func PrintParts(p *ir.Prog, module string) (string, []string) {
 	}
 	start()
 	printTable(&b, p)
+	tb := collectTables(p)
+	tb.print(&b)
 	for i := range p.Funcs {
 		if b.Len() > partBytes {
 			finish()
 			start()
 		}
-		printFunc(&b, p, i)
+		printFunc(&b, p, i, tb)
 	}
 	finish()
 	imps := make([]string, len(parts))
@@ -294,7 +298,7 @@ func printTable(b *strings.Builder, p *ir.Prog) {
 	fmt.Fprintf(b, "/-- The JSON descriptions of the types this package encodes or decodes. -/\ndef jsonTable : GoSSA.JTable :=\n  %s\n\n", table)
 }
 
-func printFunc(b *strings.Builder, p *ir.Prog, i int) {
+func printFunc(b *strings.Builder, p *ir.Prog, i int, tb *tables) {
 	f := p.Funcs[i]
 	fmt.Fprintf(b, "/-- %s (status: %s) -/\n", f.GoSig, f.Status)
 	fmt.Fprintf(b, "def f%d : GoSSA.Func := {\n  name := %q, pkg := %q, params := %s, nvals := %d, entry := %d,\n  blocks := #[\n",
@@ -312,7 +316,7 @@ func printFunc(b *strings.Builder, p *ir.Prog, i int) {
 			} else if in.Op == nil {
 				fmt.Fprintf(b, ".havoc %d %d", in.Dst, in.HavocSite)
 			} else {
-				fmt.Fprintf(b, ".op %d %s %s", in.Dst, in.Op.Lean(), vars(in.Args))
+				fmt.Fprintf(b, ".op %d %s %s", in.Dst, tb.opLean(in.Op), vars(in.Args))
 			}
 		}
 		fmt.Fprintf(b, "],\n      term := %s }", term(p.Frontend, blk.Term))
@@ -453,4 +457,61 @@ func Emit(p *ir.Prog, leanDir string, ws contract.Workspace, modulePath string) 
 		report.Funcs = append(report.Funcs, mf)
 	}
 	return report, ws.WriteModelReport(report)
+}
+
+// tables names the reflect ops' type tables once per module. The table of
+// every type the program boxes is the same at each reflect.Type.Kind call,
+// and protobuf's internal/impl has hundreds of them: repeated inline, one
+// of its closures was 1.9 MB of Lean, and the package most of a grpc-go
+// run's Lean build (#222).
+type tables struct {
+	names map[string]string
+	defs  []string
+}
+
+// tableMin is the size from which a table gets a name.
+const tableMin = 8
+
+func collectTables(p *ir.Prog) *tables {
+	tb := &tables{names: map[string]string{}}
+	for _, f := range p.Funcs {
+		for _, blk := range f.Blocks {
+			for _, in := range blk.Instrs {
+				if in.Op != nil {
+					tb.opLean(in.Op)
+				}
+			}
+		}
+	}
+	return tb
+}
+
+func (tb *tables) ref(t [][2]uint32) string {
+	lit := ir.Pairs(t)
+	if len(t) < tableMin {
+		return lit
+	}
+	name, ok := tb.names[lit]
+	if !ok {
+		name = fmt.Sprintf("reflTable%d", len(tb.defs))
+		tb.names[lit] = name
+		tb.defs = append(tb.defs, lit)
+	}
+	return name
+}
+
+func (tb *tables) opLean(op ir.Op) string {
+	switch o := op.(type) {
+	case ir.ReflectType:
+		return o.LeanWith(tb.ref)
+	case ir.ReflectVal:
+		return o.LeanWith(tb.ref)
+	}
+	return op.Lean()
+}
+
+func (tb *tables) print(b *strings.Builder) {
+	for i, lit := range tb.defs {
+		fmt.Fprintf(b, "/-- A type table the reflect ops read. -/\ndef reflTable%d : List (Nat × Nat) :=\n  %s\n\n", i, lit)
+	}
 }

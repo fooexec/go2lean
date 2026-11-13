@@ -650,7 +650,7 @@ func Hunt(ws contract.Workspace, root string, prop *contract.Property, opts Sear
 	if err := ssaout.EnsureProject(leanDir, core); err != nil {
 		return nil, "", err
 	}
-	if err := buildDriver(core, leanDir); err != nil {
+	if _, err := buildDriver(core, leanDir); err != nil {
 		return nil, "", err
 	}
 	first := opts.Fuel
@@ -1064,11 +1064,11 @@ func InvalidateDriver() {
 // generated models once per compile: first go2lean's core library (shared
 // by every workspace, so built under the core's lock), then the workspace's
 // project (under its own lock: a round's parallel hunts share it).
-func buildDriver(coreDir, leanDir string) error {
+func buildDriver(coreDir, leanDir string) (bool, error) {
 	driverMu.Lock()
 	defer driverMu.Unlock()
 	if driverBuilt == leanDir {
-		return nil
+		return false, nil
 	}
 	if err := locked(coreDir, func() error {
 		if _, err := os.Stat(filepath.Join(coreDir, ".lake", "build", "lib")); err != nil {
@@ -1080,7 +1080,7 @@ func buildDriver(coreDir, leanDir string) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return false, err
 	}
 	if err := locked(leanDir, func() error {
 		if out, err := lake(leanDir, "build", "go2lean-search"); err != nil {
@@ -1088,23 +1088,25 @@ func buildDriver(coreDir, leanDir string) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return false, err
 	}
 	driverBuilt = leanDir
-	return nil
+	return true, nil
 }
 
 // BuildDriver builds the workspace's search executable now, against
 // every model compiled into it, instead of in the first Hunt: run ./...
 // then times the build on its own, and no search is charged for it.
-func BuildDriver(ws contract.Workspace, root string) error {
+// It says whether this call built it; another caller waits for that
+// build and gets false.
+func BuildDriver(ws contract.Workspace, root string) (bool, error) {
 	leanDir := repo.WorkspaceLeanDir(ws.Root)
 	core, err := repo.CoreDir(root)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := ssaout.EnsureProject(leanDir, core); err != nil {
-		return err
+		return false, err
 	}
 	return buildDriver(core, leanDir)
 }
