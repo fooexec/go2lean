@@ -131,13 +131,9 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 		}
 	}
 
-	resp, err := ask(systemPrompt, proposePrompt(pkgPath, pkgName, source, report)+guidanceSection(opts.Guidance))
+	spec, err := propose(ask, proposePrompt(pkgPath, pkgName, source, report)+guidanceSection(opts.Guidance))
 	if err != nil {
 		return err
-	}
-	spec := extractGo(resp)
-	if spec == "" {
-		return fmt.Errorf("agent response contained no Go code block")
 	}
 	spec, report, err = install(spec)
 	if err != nil {
@@ -163,7 +159,7 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 
 	// Report round: source and verdicts back to the agent; a revised spec
 	// file triggers one more pass.
-	resp, err = ask(reportPrompt, reportUserPrompt(pkgPath, pkgName, source, spec, verdictSummary(ws, res)+fuzzNote))
+	resp, err := ask(reportPrompt, reportUserPrompt(pkgPath, pkgName, source, spec, verdictSummary(ws, res)+fuzzNote))
 	if err != nil {
 		return err
 	}
@@ -372,4 +368,24 @@ func specFuncs(spec string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// propose asks for the spec file. A model sometimes answers with a tool
+// call it cannot make instead of code (seen on grpc-go's status package,
+// #220), so an answer with no Go code block is asked for once more.
+func propose(ask func(system, user string) (string, error), prompt string) (string, error) {
+	for try := 0; try < 2; try++ {
+		p := prompt
+		if try > 0 {
+			p = noCodeRetryPrompt + prompt
+		}
+		resp, err := ask(systemPrompt, p)
+		if err != nil {
+			return "", err
+		}
+		if spec := extractGo(resp); spec != "" {
+			return spec, nil
+		}
+	}
+	return "", fmt.Errorf("agent response contained no Go code block")
 }
