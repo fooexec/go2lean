@@ -10417,6 +10417,11 @@ type abiBuilder struct {
 	// asserted are the concrete types the function's call tree asserts
 	// empty interfaces to: more values an interface input may hold.
 	asserted []types.Type
+	// building are the named structs whose fields are being described: an
+	// interface field is not given one of them (grpc's oauth.TokenSource
+	// embeds the oauth2.TokenSource it implements, and generating it
+	// recursed without end).
+	building map[*types.Named]bool
 }
 
 // register adds a recursive named struct type to the table.
@@ -10619,7 +10624,12 @@ func (ab *abiBuilder) param(name string, t types.Type, stack []*types.Named) (co
 				return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, Model: []string{name}, Kind: contract.ABIStruct, TypeRef: ab.abi.Types[idx].GoType}, nil
 			}
 			idx := ab.register(n, src, ipath)
+			if ab.building == nil {
+				ab.building = map[*types.Named]bool{}
+			}
+			ab.building[n] = true
 			fields, err := ab.fields(st, ipath != "", stack)
+			delete(ab.building, n)
 			if err != nil {
 				return contract.ABIParam{}, err
 			}
@@ -10872,7 +10882,13 @@ func (ab *abiBuilder) ifaceAlts(name, src, ipath string, extra []string, t types
 	if types.Identical(t, types.Universe.Lookup("error").Type()) {
 		return contract.ABIParam{}, false
 	}
-	cands := ifaceImpls(ab.pkg, it)
+	cands := slices.DeleteFunc(ifaceImpls(ab.pkg, it), func(c types.Type) bool {
+		if p, ok := c.(*types.Pointer); ok {
+			c = p.Elem()
+		}
+		n, ok := c.(*types.Named)
+		return ok && ab.building[n]
+	})
 	ab.anyDepth++
 	defer func() { ab.anyDepth-- }()
 	p := contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIAny, Zero: "nil", NonNil: true}

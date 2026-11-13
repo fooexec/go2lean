@@ -244,3 +244,48 @@ func TestTestHelpersLeftOut(t *testing.T) {
 		}
 	}
 }
+
+// TestIfaceAltsSkipEnclosing: a struct embedding the interface it
+// implements does not get itself as that field's value (grpc's
+// oauth.TokenSource, whose generation recursed without end).
+func TestIfaceAltsSkipEnclosing(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/m\n\ngo 1.22\n",
+		"m.go": `package m
+
+type Source interface{ Token() int }
+
+type Wrap struct{ Source }
+
+func NewWrap(s Source) Source { return Wrap{s} }
+
+func (w Wrap) Get() int { return w.Token() }
+`,
+	}
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, _, err := Translate(dir, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range p.Funcs {
+		if f.Name != "Wrap.Get" {
+			continue
+		}
+		for _, ty := range f.ABI.Types {
+			for _, fd := range ty.Fields {
+				for _, a := range fd.Alts {
+					if a.TypeRef == ty.GoType || a.GoType == ty.GoType {
+						t.Errorf("field %s of %s takes %s itself", fd.Go, ty.GoType, a.GoType)
+					}
+				}
+			}
+		}
+		return
+	}
+	t.Fatal("Wrap.Get not translated")
+}
