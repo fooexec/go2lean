@@ -211,6 +211,27 @@ grpc.KeepaliveParams(kp.MaxConnectionAge) → serverOptions.keepaliveParams
 
 No agent and no spec was needed.
 
+**The whole module with `-unexported`.** Frozen at `5418a14`, all 212
+packages again:
+
+| | rerun | `-unexported` |
+|---|---|---|
+| properties | 2,858 | 5,053 |
+| confirmed | 155 | 515 |
+| tier 1 | 11 | 12 |
+| tier 2 | 52 | 262 |
+| spurious | 52 | 157 |
+| inconclusive | 37 | 391 |
+| time, summed | 7,230 s | 11,431 s |
+
+The one new tier-1 finding is `getJitter` above; the other eleven are the
+rerun's. The extra 360 confirmed findings are panics in unexported
+helpers that no exported path reaches without passing a check, so they
+rank at tier 2 or below. The flag costs 58% more time and triples what
+there is to triage below tier 1, for one finding. It stays opt-in: run it
+on the packages that hold the logic (`internal/transport` here), not on
+the whole module.
+
 **The agent's `metadata` specs.** Rerun with the context model, their
 spurious verdicts go from 8 to 1, a `fmt.Fprintf` the model does not
 follow.
