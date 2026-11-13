@@ -201,3 +201,46 @@ func G(q *bx.U) int { return q.N }
 		}
 	}
 }
+
+// TestTestHelpersLeftOut: a test file's helper is not translated, nor the
+// package only it imports (#222); a spec, the helper it calls, and
+// go2lean's own files are.
+func TestTestHelpersLeftOut(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":                      "module example.com/m\n\ngo 1.22\n",
+		"util/u.go":                   "package util\n\nfunc Help(n int) int { return n + 1 }\n",
+		"m.go":                        "package m\n\nfunc F(n int) int { return n * 2 }\n",
+		"m_test.go":                   "package m\n\nimport \"example.com/m/util\"\n\nfunc helper(n int) int { return util.Help(n) }\n",
+		"spec_test.go":                "package m\n\nfunc twice(n int) int { return n + n }\n\n// go2lean:spec F\nfunc SpecF(n, ret int) bool { return ret == twice(n) }\n",
+		"zz_go2lean_generics_test.go": "package m\n\nfunc Go2LeanGen_X() int { return F(1) }\n",
+	}
+	for name, src := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	progs, _, err := TranslateAllOpts(dir, Options{Deps: true}, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]bool{}
+	for _, p := range progs {
+		for _, f := range p.Funcs {
+			have[p.Package+"."+f.Name] = true
+		}
+	}
+	for _, want := range []string{"example.com/m.F", "example.com/m.SpecF", "example.com/m.twice", "example.com/m.Go2LeanGen_X"} {
+		if !have[want] {
+			t.Errorf("%s not translated; have %v", want, have)
+		}
+	}
+	for _, not := range []string{"example.com/m.helper", "example.com/m/util.Help"} {
+		if have[not] {
+			t.Errorf("%s translated, though only a test helper uses it", not)
+		}
+	}
+}

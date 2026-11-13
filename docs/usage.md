@@ -204,7 +204,8 @@ searches and replays run at once (default: one per CPU), and each
 package's output is printed whole, in order. Before any search, the
 workspace's search executable is built against every package's model
 once, and the run prints how long that took. On a large module such as
-grpc-go, that build is most of the run.
+grpc-go, that build is the largest part of the run: 198 s of 317 s on
+its 24 balancer packages.
 
 The PoC directory holds a ready-to-run Go test and a README with the
 reproduction command. Everything the modules exchange is a JSON record under

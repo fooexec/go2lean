@@ -382,10 +382,11 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		// workspace once; built here, its time is not charged to the
 		// first search (#222). Packages in flight wait for the one build.
 		t0 := time.Now()
-		if err := constraint.BuildDriver(w, env.Root); err != nil {
+		built, err := constraint.BuildDriver(w, env.Root)
+		if err != nil {
 			return nil, err
 		}
-		if d := time.Since(t0); d > time.Second {
+		if d := time.Since(t0); built && d > time.Second {
 			fmt.Fprintf(out, "  lean build of the search executable: %.1fs\n", d.Seconds())
 		}
 	}

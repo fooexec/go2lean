@@ -190,14 +190,12 @@ type ReflectVal struct {
 	Ok bool
 }
 
-func (o ReflectVal) Lean() string {
-	pairs := func(t [][2]uint32) string {
-		parts := make([]string, len(t))
-		for i, e := range t {
-			parts[i] = fmt.Sprintf("(%d, %d)", e[0], e[1])
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	}
+func (o ReflectVal) Lean() string { return o.LeanWith(Pairs) }
+
+// LeanWith is Lean with each table written by table: the printer names a
+// large table once per module instead of repeating it at every op (#222).
+func (o ReflectVal) LeanWith(table func([][2]uint32) string) string {
+	pairs := table
 	name := "reflectVal"
 	if o.Ok {
 		name = "reflectValOk"
@@ -216,7 +214,8 @@ type ReflectType struct {
 	Yes, No [][2]uint32
 }
 
-func pairs(t [][2]uint32) string {
+// Pairs is the Lean list literal of a table of pairs.
+func Pairs(t [][2]uint32) string {
 	parts := make([]string, len(t))
 	for i, e := range t {
 		parts[i] = fmt.Sprintf("(%d, %d)", e[0], e[1])
@@ -224,7 +223,10 @@ func pairs(t [][2]uint32) string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-func (o ReflectType) Lean() string {
+func (o ReflectType) Lean() string { return o.LeanWith(Pairs) }
+
+// LeanWith is Lean with each table written by table (see ReflectVal).
+func (o ReflectType) LeanWith(pairs func([][2]uint32) string) string {
 	switch o.Kind {
 	case "reflectTypeOf":
 		return fmt.Sprintf("(.reflectTypeOf %d)", o.RT)
