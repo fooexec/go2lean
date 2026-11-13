@@ -10941,6 +10941,12 @@ func withoutTestHelpers(fns []*ssa.Function, pkg *packages.Package) []*ssa.Funct
 		if !strings.HasSuffix(name, "_test.go") {
 			continue
 		}
+		// go2lean's own files: the agent's specs, the generic functions'
+		// wrappers (geninst) and the other overlays it writes.
+		if base := filepath.Base(name); strings.HasPrefix(base, "go2lean_") || strings.HasPrefix(base, "zz_go2lean_") {
+			specFiles[name] = true
+			continue
+		}
 		for _, cg := range file.Comments {
 			if strings.Contains(cg.Text(), "go2lean:") {
 				specFiles[name] = true
