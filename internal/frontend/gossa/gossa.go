@@ -7050,7 +7050,10 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 	// variable (go-runewidth's init calls fillJoinerBits, which paints
 	// joinerBits, #184): the call is in the slice, and the callee with it
 	// (withInitCallees). The variable is a cell: a function other than
-	// init writes it.
+	// init writes it. Arguments come into the slice with the call
+	// (grpclog's init runs SetLoggerV2(newLoggerV2()), which sets
+	// internal.LoggerV2Impl, a variable of another package: left out, the
+	// logger was nil in every trial, 16 spurious verdicts, #220).
 	for _, f := range initFuncs(initFn)[1:] {
 		for _, b := range f.Blocks {
 			for _, in := range b.Instrs {
@@ -7059,7 +7062,7 @@ func initCells(pkgPath string, fns []*ssa.Function, used map[*ssa.Global]bool) (
 					continue
 				}
 				callee := c.Call.StaticCallee()
-				if callee == nil || callee.Pkg != spkg || callee.Parent() != nil || len(c.Call.Args) != 0 {
+				if callee == nil || callee.Pkg != spkg || callee.Parent() != nil {
 					continue
 				}
 				if writesUsed(callee, used) {
