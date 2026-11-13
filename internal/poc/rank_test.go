@@ -265,3 +265,11 @@ func TestUnexportedSet(t *testing.T) {
 		}
 	}
 }
+
+func TestExportedTypeName(t *testing.T) {
+	for in, want := range map[string]bool{"*buffer": false, "*mem.Buffer": true, "SliceBuffer": true, "[]*pkg.inner": false, "componentData": false} {
+		if got := exportedTypeName(in); got != want {
+			t.Errorf("exportedTypeName(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

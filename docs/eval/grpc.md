@@ -170,6 +170,51 @@ invariant the type does not keep, not as a bug.
 | `context.Context` parameters, and a `*Status` from another package's unexported field, cannot be built by the engine or by Go's fuzzer; the agent restated those specs as sequences that build the value | known (the agent's way round is the right one) |
 | `errors.As`, `fmt.Sprintf`, `fmt.Fprintf` and `reflect.Zero` gave the spurious verdicts | M2 (#53) |
 
+## Rerun after the fixes (2026-11-13)
+
+Templates again, same protocol, tool frozen at `e90696f` (#226, #227).
+That build adds four things: a Lean build a third of the size,
+`context.WithValue`, interface inputs that take the module's own
+implementers, and tracing an unexported panic back to the API. The ranks
+below are recomputed with `5418a14`, which ranks an interface input
+holding an unexported type at tier 2.
+
+| | arm A | rerun |
+|---|---|---|
+| properties | 2,860 | 2,858 |
+| confirmed | 153 | 155 |
+| tier 1 | 15 | 11 |
+| spurious | 56 | 52 |
+| inconclusive | 40 | 37 |
+| time, summed | 11,659 s | 7,230 s |
+| `xdsclient` | out of memory after 1,039 s | searched, 107 s |
+
+The 11 tier-1 findings are arm A's documented panics and misuse. The
+four forged ones are now at tier 2, so the templates alone still find no
+bug.
+
+The rerun showed two problems, both fixed:
+- **An interface field took its own struct.** grpc's `oauth.TokenSource`
+  embeds the `oauth2.TokenSource` it implements, and generating it
+  recursed until the search overflowed its stack.
+- **Forged values reached tier 1.** Nine `mem.BufferSlice` findings held
+  `*buffer` values built field by field, which no caller can make.
+
+**With `-unexported`, the bug comes first.** `go2lean run -unexported
+./internal/transport` takes 556 s and confirms 58 findings. One is at
+tier 1, the `MaxConnectionAge` bug, with the path the agent had to find:
+
+```text
+grpc.KeepaliveParams(kp.MaxConnectionAge) → serverOptions.keepaliveParams
+  → ServerConfig.KeepaliveParams → transport.getJitter(v)
+```
+
+No agent and no spec was needed.
+
+**The agent's `metadata` specs.** Rerun with the context model, their
+spurious verdicts go from 8 to 1, a `fmt.Fprintf` the model does not
+follow.
+
 ## What this run says
 
 - **On the templates alone, grpc-go has no bug go2lean can reach.** 153
