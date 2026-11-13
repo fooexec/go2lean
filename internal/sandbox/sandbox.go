@@ -94,16 +94,21 @@ func requireIsolation(mode, consent string) error {
 }
 
 // bwrapArgs isolates a run: everything read-only, a private /tmp, the work
-// directory w writable, the binary's directory visible, no network.
-func bwrapArgs(w, bin string) []string {
+// directory w writable, the binary's directory visible, no network. mod,
+// when set, is the module root of the package, kept visible read-only
+// under the private home and /tmp: tests find files of the module outside
+// their package by their source path (grpc-go's testdata.Path, from
+// runtime.Caller), #221.
+func bwrapArgs(w, bin, mod string) []string {
 	args := []string{"--ro-bind", "/", "/"}
 	if home, err := os.UserHomeDir(); err == nil && home != "/" {
 		args = append(args, "--tmpfs", home)
 	}
+	args = append(args, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
+	if mod != "" {
+		args = append(args, "--ro-bind", mod, mod)
+	}
 	return append(args, []string{
-		"--dev", "/dev",
-		"--proc", "/proc",
-		"--tmpfs", "/tmp",
 		"--ro-bind", filepath.Dir(bin), filepath.Dir(bin),
 		"--bind", w, w,
 		"--chdir", filepath.Join(w, "pkg"),
@@ -148,6 +153,27 @@ func BuildTest(root, pkg, pkgDir string, files map[string][]byte, out string, fl
 		return eb.String(), ee.ExitCode(), nil
 	}
 	return eb.String(), 0, err
+}
+
+// moduleRoot is the directory holding the go.mod above dir, or "".
+func moduleRoot(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	d, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(d, "go.mod")); err == nil {
+			return d
+		}
+		up := filepath.Dir(d)
+		if up == d {
+			return ""
+		}
+		d = up
+	}
 }
 
 // Run runs bin with args in a fresh copy of dir (its regular files and its
@@ -195,7 +221,7 @@ func RunCollect(bin, dir string, args, env []string, lim Limits, collect string)
 	var cmd *exec.Cmd
 	switch Mode() {
 	case ModeBwrap:
-		cmd = exec.CommandContext(ctx, "bwrap", append(append(bwrapArgs(w, bin), "--"), limited...)...)
+		cmd = exec.CommandContext(ctx, "bwrap", append(append(bwrapArgs(w, bin, moduleRoot(dir)), "--"), limited...)...)
 	case ModeLimits:
 		cmd = exec.CommandContext(ctx, limited[0], limited[1:]...)
 		cmd.Dir = filepath.Join(w, "pkg")

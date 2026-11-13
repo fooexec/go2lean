@@ -266,6 +266,7 @@ func TestVerdictReasonsForBuildFailures(t *testing.T) {
 		{"", "./zz_go2lean_poc_12_test.go:3:2: undefined: x", "harness_compile_error"},
 		{"", "# example.com/p\n./p_test.go:114:11: Errorf call has arguments but no formatting directives", "package_build_error"},
 		{"=== RUN   TestGo2LeanPoC_cx1\n", "exit status 3", "target_exited"},
+		{"", "panic: tls.LoadX509KeyPair failed: open testdata/x509/server1_cert.pem: no such file or directory\n\ngoroutine 1 [running]:\nexample.com/p.init.0()\n", "package_init_failed"},
 		{"", "# example.com/p.test\n/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device", "package_build_error"},
 	} {
 		v := verdictOf(p, nil, "go test", 1, c.stdout, c.stderr, "")
