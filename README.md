@@ -28,8 +28,7 @@ Lean finds the inputs; `go test` is the judge.
 > ([runs](docs/eval/fifth-run.md)); it translates 72% of the standard
 > library's functions completely ([audit](docs/eval/std-audit.md)). See
 > [limitations](docs/limitations.md) and [validation](docs/validation.md)
-> for scope and evidence, and the [blog post](docs/blog/2026-11-go2lean.md)
-> for an overview, with a run on grpc-go.
+> for scope and evidence.
 
 ## Features
 
