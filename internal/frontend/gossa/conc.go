@@ -186,6 +186,12 @@ func (t *fnState) concCall(x *ssa.Call) (bool, error) {
 	switch callee.String() {
 	case "context.Background", "context.TODO":
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("ctxBackground")})
+	case "context.WithValue":
+		as, err := args()
+		if err != nil {
+			return true, err
+		}
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("ctxWithValue"), Args: as})
 	case "context.WithCancel", "context.WithTimeout", "context.WithDeadline":
 		as, err := args()
 		if err != nil {
@@ -304,7 +310,7 @@ func (t *fnState) concCall(x *ssa.Call) (bool, error) {
 	return true, nil
 }
 
-// concInvoke lowers ctx.Done(), ctx.Err() on a context.Context and
+// concInvoke lowers ctx.Done(), ctx.Err(), ctx.Value(key) on a context.Context and
 // Lock/Unlock on a sync.Locker.
 func (t *fnState) concInvoke(x *ssa.Call) (bool, error) {
 	op, ok := lockerOrCtx(x.Call.Value.Type(), x.Call.Method.Name())
@@ -318,6 +324,12 @@ func (t *fnState) concInvoke(x *ssa.Call) (bool, error) {
 	switch op {
 	case "ctxDone", "ctxErr":
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc(op), Args: []ir.Var{recv}})
+	case "ctxValue":
+		key, err := t.val(x.Call.Args[0])
+		if err != nil {
+			return true, err
+		}
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc(op), Args: []ir.Var{recv, key}})
 	default:
 		t.syncOp(t.prog.lockerOp(op), t.def(x), recv)
 	}
@@ -336,6 +348,8 @@ func lockerOrCtx(typ types.Type, m string) (string, bool) {
 		return "ctxDone", true
 	case "context.Context.Err":
 		return "ctxErr", true
+	case "context.Context.Value":
+		return "ctxValue", true
 	case "sync.Locker.Lock":
 		return "lockL", true
 	case "sync.Locker.Unlock":
