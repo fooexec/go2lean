@@ -208,7 +208,10 @@ func SpecSum(xs []int, ret int) bool {
 The annotation associates the spec with `Sum`. Its arguments are the target's
 inputs followed by its result; `true` means the rule holds for that execution.
 Place the spec in the target package; the agent writes its specs to
-`go2lean_specs_test.go`. The compile stage translates the spec alongside the
+`go2lean_specs_test.go`. The package is loaded with its test files for the
+specs, but only the functions of a test file holding a `go2lean:`
+directive, and what they call in the test files, enter the model. The
+tests' own helpers do not, nor do the packages only they use. The compile stage translates the spec alongside the
 target; the spec & search stage looks for inputs that make it return `false`;
 the replay stage checks the same oracle in Go.
 

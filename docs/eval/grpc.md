@@ -88,7 +88,7 @@ These are the problems the run showed, and what was done about each.
 | A stuck callee's results, an unknown function value, an assumed `globalServerOptions` | about 25 spurious | [#218](https://github.com/fooexec/go2lean/issues/218) and its kin |
 | Concurrency: the replay left the model's schedule, or Go's scheduler did not take it | 10 inconclusive | #116 |
 | `xdsclient`'s model is too large for the Lean build (killed, exit 137) | 1 package not searched | [#223](https://github.com/fooexec/go2lean/issues/223) |
-| Time: one package at a time, with a barrier between search and replay; but most of a run is the Lean build of the search executable | idle CPUs | packages side by side and the build timed on its own ([#222](https://github.com/fooexec/go2lean/issues/222)); the build itself is open |
+| Time: one package at a time, with a barrier between search and replay; but most of a run is the Lean build of the search executable | idle CPUs | fixed ([#222](https://github.com/fooexec/go2lean/issues/222)): packages run side by side, and the build is timed on its own and is a third of its size |
 
 ## Arm B: the agent
 
@@ -188,9 +188,15 @@ invariant the type does not keep, not as a bug.
   stayed are exhausted over their domain and fail most mutants.
 - **Time.** The template arm took 11,659 s over 209 packages; the agent
   arm 8,812 s for six, most of it `internal/transport` (304
-  properties). Most of the template arm's time is not search. On
+  properties). Most of the template arm's time was not search. On
   `./balancer/...` (24 packages) in one workspace, the Lean build of the
-  search executable takes 651 of about 800 s. Running packages side by
-  side, which `run ./...` now does (#222), changed the total by less
-  than the noise (770 and 844 s before, 808 s after). The build is
-  where time can be won.
+  search executable took 651 of about 800 s. Running packages side by
+  side changed the total by less than the noise: 770 and 844 s before,
+  808 s after. The build itself was bloated, in two ways:
+  - every reflect op repeated the program's whole type table, 15 KB at a
+    time, so one protobuf closure was 1.9 MB of Lean;
+  - helpers in the packages' test files pulled `go-cmp` and the test
+    utilities into the model.
+
+  With both fixed (#222), the generated Lean drops from 25 MB to 9.8 MB,
+  the build from 604 s to 198 s, and the run from 808 s to 317 s.
