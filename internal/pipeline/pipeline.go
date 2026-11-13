@@ -378,6 +378,7 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		log bytes.Buffer
 	}
 	results := make([]result, len(props))
+	took := make([]time.Duration, len(props))
 	skipped := make([]bool, len(props))
 	start := time.Now()
 	queue := make(chan int, len(props))
@@ -410,7 +411,9 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 				if env.slots != nil {
 					env.slots <- struct{}{}
 				}
+				t0 := time.Now()
 				results[i].cx, results[i].err = Hunt(w, env, props[i], opts, &results[i].log)
+				took[i] = time.Since(t0)
 				if env.slots != nil {
 					<-env.slots
 				}
@@ -449,6 +452,23 @@ func HuntAll(w contract.Workspace, env Env, props []*contract.Property, opts con
 		}
 	}
 	var cxs []*contract.Counterexample
+	defer func() {
+		// Where the search's time went (#222): its wall time and the
+		// slowest properties, which decide it when there are few.
+		if len(props) < 2 {
+			return
+		}
+		idx := make([]int, len(props))
+		for i := range idx {
+			idx[i] = i
+		}
+		sort.SliceStable(idx, func(a, b int) bool { return took[idx[a]] > took[idx[b]] })
+		var slow []string
+		for _, i := range idx[:min(3, len(idx))] {
+			slow = append(slow, fmt.Sprintf("%s %.1fs", props[i].ID, took[i].Seconds()))
+		}
+		fmt.Fprintf(out, "  search: %.1fs for %d properties on %d workers; slowest: %s\n", time.Since(start).Seconds(), len(props), min(jobs, len(props)), strings.Join(slow, ", "))
+	}()
 	for i := range results {
 		io.Copy(out, &results[i].log)
 		if results[i].err != nil {
