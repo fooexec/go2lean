@@ -1,6 +1,7 @@
 package poc
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/types"
 	"path/filepath"
@@ -74,6 +75,12 @@ func rankOf(p *prepared, callers *callerIndex) *contract.Rank {
 		if !strings.Contains(p.target.Func, "~") {
 			if ctor := callers.constructorOf(p.target.Package, fn); ctor != "" {
 				return &contract.Rank{Tier: 2, Reason: "a receiver built field by field, where the package builds one with " + ctor + ": check that the package's own values can get here"}
+			}
+			// The test set an unexported field of the receiver, which no
+			// caller outside the package can (grpc's mem.Reader, built by
+			// BufferSlice.Reader, with its length set and no data, #220).
+			if f := unexportedSet(p.abi, p.cx); f != "" {
+				return &contract.Rank{Tier: 2, Reason: "the receiver's unexported field " + f + " set by the test, which only the package's own code can do: check that its values can get here"}
 			}
 		}
 		return &contract.Rank{Tier: 1, Reason: "plain inputs to the package's API"}
@@ -182,4 +189,48 @@ func RankAll(ws contract.Workspace, root string) ([]*contract.Verdict, error) {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Rank.Tier < out[j].Rank.Tier })
 	return out, nil
+}
+
+// unexportedSet names an unexported field of a method's receiver that the
+// counterexample set to a value other than its zero value, or "".
+func unexportedSet(abi *contract.ABI, cx *contract.Counterexample) string {
+	if abi == nil || abi.Method == "" || len(abi.Params) == 0 || cx == nil {
+		return ""
+	}
+	recv := abi.Params[0]
+	st := &recv
+	if recv.Pointee != nil {
+		st = recv.Pointee
+	}
+	fields := st.Fields
+	if st.TypeRef != "" {
+		// A struct that refers to itself is in the ABI's type table.
+		for _, t := range abi.Types {
+			if t.GoType == st.TypeRef {
+				fields = t.Fields
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return ""
+	}
+	raw, ok := cx.Objects[recv.Go]
+	if !ok {
+		return ""
+	}
+	var vals []json.RawMessage
+	if json.Unmarshal(raw, &vals) != nil || len(vals) != len(fields) {
+		return ""
+	}
+	for i, f := range fields {
+		if f.Go == "" || !unicode.IsLower(rune(f.Go[0])) && f.Go[0] != '_' {
+			continue
+		}
+		switch strings.Join(strings.Fields(string(vals[i])), "") {
+		case "null", "[]", "{}", `"0"`, `""`, `"false"`, "0", "false", `{"map":[]}`:
+			continue
+		}
+		return f.Go
+	}
+	return ""
 }
