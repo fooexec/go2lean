@@ -110,3 +110,21 @@ func TestProposeRetriesWithoutCode(t *testing.T) {
 		t.Fatal("two answers without code: want an error")
 	}
 }
+
+func TestAskReportRetriesNonReport(t *testing.T) {
+	answers := []string{"I'll ground the report first.\n```bash\ncat proto.go\n```", "# report\n\nnone"}
+	n := 0
+	ask := func(_, user string) (string, error) {
+		n++
+		a := answers[0]
+		answers = answers[1:]
+		if n == 2 && !strings.HasPrefix(user, noToolsReportPrompt) {
+			t.Errorf("second prompt lacks the note: %q", user)
+		}
+		return a, nil
+	}
+	got, err := askReport(ask, "P")
+	if err != nil || !strings.HasPrefix(got, "# report") || n != 2 {
+		t.Fatalf("askReport = %q, %v after %d calls", got, err, n)
+	}
+}

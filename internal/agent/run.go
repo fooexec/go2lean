@@ -159,7 +159,7 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 
 	// Report round: source and verdicts back to the agent; a revised spec
 	// file triggers one more pass.
-	resp, err := ask(reportPrompt, reportUserPrompt(pkgPath, pkgName, source, spec, verdictSummary(ws, res)+fuzzNote))
+	resp, err := askReport(ask, reportUserPrompt(pkgPath, pkgName, source, spec, verdictSummary(ws, res)+fuzzNote))
 	if err != nil {
 		return err
 	}
@@ -388,4 +388,24 @@ func propose(ask func(system, user string) (string, error), prompt string) (stri
 		}
 	}
 	return "", fmt.Errorf("agent response contained no Go code block")
+}
+
+// askReport asks for the report. An answer with no Markdown heading is a
+// model that set out to call tools it does not have (grpc-go's
+// encoding/proto, #220); it is asked once more.
+func askReport(ask func(system, user string) (string, error), prompt string) (string, error) {
+	resp, err := ask(reportPrompt, prompt)
+	if err != nil || isReport(resp) {
+		return resp, err
+	}
+	return ask(reportPrompt, noToolsReportPrompt+prompt)
+}
+
+func isReport(resp string) bool {
+	for _, l := range strings.Split(resp, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "#") && !strings.HasPrefix(strings.TrimSpace(l), "#!") {
+			return true
+		}
+	}
+	return false
 }
