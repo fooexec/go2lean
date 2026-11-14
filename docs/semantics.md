@@ -193,7 +193,7 @@ memory).
 | storing a value in an interface | `box tag` | exact |
 | `x.(T)` for a concrete `T`, comma-ok and panicking | `unbox` | exact on boxed values; havoc on unknown ones |
 | `x.(I)` for an interface `I` | `assertIface` (the boxed types implementing `I`) | exact on boxed values |
-| method call on an interface value | `dispatch` over the implementing boxed types (at most 64; for `*T`, a method declared on `T` through a helper that loads the receiver, #61), then `callv` | exact; a nil interface panics, also on a method the model does not follow (no implementing type in the program, a result or not; `examples/iface`'s `Restart`, #174); an unknown value takes the call's fallback (havoc) |
+| method call on an interface value | `dispatch` over the implementing boxed types (at most 64; for `*T`, a method declared on `T` through a helper that loads the receiver, #61; a method promoted from an embedded field through a helper that walks the fields, a nil embedded pointer panicking as in Go, #234), then `callv` | exact; a nil interface panics, also on a method the model does not follow (no implementing type in the program, a result or not; `examples/iface`'s `Restart`, #174); an unknown value takes the call's fallback (havoc) |
 | `==`, `!=` on interface values | `ifaceEqKnown`, then `ifaceEq` on the dynamic types' tags and values (a type alias has the tag of the type it stands for) | exact when both are values the model built, or nil; havoc when either is not (#60) |
 | `reflect.ValueOf(x)`, `.IsZero()`, `.Interface()` | `reflectOf reflectIsZero` | exact on boxed values (a `reflect.Value` is the boxed value; `Interface` gives it back); other `reflect` calls havoc, except `Kind`, `IsNil`, `Call(nil)` and the `reflect.Type` calls below |
 

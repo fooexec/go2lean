@@ -6059,7 +6059,14 @@ func (t *fnState) dispatchOn(recv ir.Var, iface *types.Interface, m *types.Func)
 			if xr, ok := t.prog.xrefs[fn.String()]; !ok || xr.Package == t.prog.prog.Package {
 				// *T's method declared on T: go/ssa's wrapper is not
 				// translated, but T's method may be.
-				if id, ok := t.prog.derefMethod(ty, m); ok {
+				id, ok := t.prog.derefMethod(ty, m)
+				if !ok {
+					// A method promoted from an embedded field (gomarkdown's
+					// nodes embed ast.Container): go/ssa's wrapper is not
+					// translated either, the embedded type's method may be.
+					id, ok = t.prog.promotedMethod(ty, m)
+				}
+				if ok {
 					tags = append(tags, typeTag(ty))
 					fns = append(fns, nil)
 					derefs = append(derefs, id)
@@ -6133,6 +6140,96 @@ func (s *progState) derefMethod(ty types.Type, m *types.Func) (int, bool) {
 	}
 	id := s.helper(name, false, false, n+3, params, []ir.Block{
 		{Name: "deref", Instrs: []ir.Instr{{Dst: load, Op: ir.Simple("loadPath"), Args: []ir.Var{0}}}, Term: call},
+		{Name: "ret", Term: ir.Term{Kind: ir.TermRet, V: dst}},
+	})
+	s.prog.Funcs[id].Calls, s.prog.Funcs[id].XCalls = calls, xcalls
+	return id, true
+}
+
+// promotedMethod is a helper for method m of type ty when m is promoted
+// from an embedded field (type Doc struct{ Container } with
+// (*Container).GetChildren): it walks the embedded fields from the
+// receiver, as go/ssa's wrapper does (a nil pointer on the way panics),
+// and calls the declared method. Not ok when m is not promoted, comes from
+// an embedded interface, or the declared method is not modelled.
+func (s *progState) promotedMethod(ty types.Type, m *types.Func) (int, bool) {
+	sel := s.sprog.MethodSets.MethodSet(ty).Lookup(m.Pkg(), m.Name())
+	if sel == nil || len(sel.Index()) < 2 {
+		return 0, false
+	}
+	obj, ok := sel.Obj().(*types.Func)
+	if !ok {
+		return 0, false
+	}
+	vm := s.sprog.FuncValue(obj)
+	if vm == nil || len(vm.Params) == 0 {
+		return 0, false // a method of an embedded interface
+	}
+	name := "$promoted:" + ty.String() + "." + m.Name()
+	if id, ok := s.helpers[name]; ok {
+		return id, true
+	}
+	n := vm.Signature.Params().Len()
+	params := make([]ir.Var, n+1) // the receiver, then m's parameters
+	for i := range params {
+		params[i] = ir.Var(i)
+	}
+	next := ir.Var(n + 1)
+	fresh := func() ir.Var { v := next; next++; return v }
+	var instrs []ir.Instr
+	cur, curT := ir.Var(0), ty
+	for _, fi := range sel.Index()[:len(sel.Index())-1] {
+		if p, ok := curT.Underlying().(*types.Pointer); ok {
+			st, ok := p.Elem().Underlying().(*types.Struct)
+			if !ok {
+				return 0, false
+			}
+			fa := fresh()
+			instrs = append(instrs, ir.Instr{Dst: fa, Op: ir.FieldAddr{I: fi}, Args: []ir.Var{cur}})
+			cur, curT = fa, types.NewPointer(st.Field(fi).Type())
+		} else {
+			st, ok := curT.Underlying().(*types.Struct)
+			if !ok {
+				return 0, false
+			}
+			f := fresh()
+			instrs = append(instrs, ir.Instr{Dst: f, Op: ir.Field{I: fi}, Args: []ir.Var{cur}})
+			cur, curT = f, st.Field(fi).Type()
+		}
+		if p, ok := curT.(*types.Pointer); ok {
+			if _, ok := p.Elem().Underlying().(*types.Pointer); ok {
+				// The address of an embedded pointer field: the pointer.
+				l := fresh()
+				instrs = append(instrs, ir.Instr{Dst: l, Op: ir.Simple("loadPath"), Args: []ir.Var{cur}})
+				cur, curT = l, p.Elem()
+			}
+		}
+	}
+	_, wantPtr := vm.Params[0].Type().Underlying().(*types.Pointer)
+	_, havePtr := curT.Underlying().(*types.Pointer)
+	switch {
+	case havePtr && !wantPtr:
+		l := fresh()
+		instrs = append(instrs, ir.Instr{Dst: l, Op: ir.Simple("loadPath"), Args: []ir.Var{cur}})
+		cur = l
+	case !havePtr && wantPtr:
+		return 0, false
+	}
+	dst := fresh()
+	call := ir.Term{CArgs: append([]ir.Var{cur}, params[1:]...), Dst: dst, Next: 1}
+	var calls []int
+	var xcalls []contract.XCall
+	if id, ok := s.ids[vm]; ok {
+		call.Kind, call.Callee = ir.TermCall, id
+		calls = []int{id}
+	} else if xr, ok := s.xrefs[vm.String()]; ok && xr.Package != s.prog.Package {
+		call.Kind, call.Callee, call.CalleePkg = ir.TermXCall, xr.ID, xr.Package
+		xcalls = []contract.XCall{xr}
+	} else {
+		return 0, false
+	}
+	id := s.helper(name, false, false, int(next), params, []ir.Block{
+		{Name: "promoted", Instrs: instrs, Term: call},
 		{Name: "ret", Term: ir.Term{Kind: ir.TermRet, V: dst}},
 	})
 	s.prog.Funcs[id].Calls, s.prog.Funcs[id].XCalls = calls, xcalls
