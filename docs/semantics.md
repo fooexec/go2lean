@@ -203,7 +203,7 @@ memory).
 |---|---|---|
 | static call in the package | `call` | exact |
 | call into another package compiled together (`-deps`) | `xcall` (the driver links the models) | exact; a dependency's functions are translated up to 4 calls deep from the package under test, except its small helpers (a few blocks: `xxhash`'s `round`, `rol1`), which come with their caller at any depth (#71); deeper ones on request of the refinement loop (#85) |
-| closures, function values, method values, method expressions (`(*T).M`, `T.M`: the method itself, the receiver its first argument) | `funcRef`/`xfuncRef` + `callv` (captured values first) | exact; nil func call panics; an unknown func takes the fallback |
+| closures, function values, method values, method expressions (`(*T).M`, `T.M`: the method itself, the receiver its first argument; `(*T).M` of a value method, which dereferences first, is an unknown func) | `funcRef`/`xfuncRef` + `callv` (captured values first) | exact; nil func call panics; an unknown func takes the fallback |
 | generic functions | modelled per instance (`Must[int]`, concrete types); the generic function itself is not in the model; instances of package `slices` under `-deps`. `run` instantiates each exported generic function at simple type arguments through a test-file wrapper (`-generics`, `internal/geninst`), which is a target | partial: one instance per function |
 | call into a logging package (logrus, log, slog, zap) | results opaque, calls without results ignored | exact for the code under test |
 | `apijson.UnmarshalRoot` (the SDKs' `UnmarshalJSON`, unions' `As*` methods) | `jsonDecode` with the target type's description | as JSON decoding above |
