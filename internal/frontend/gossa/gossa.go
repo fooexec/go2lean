@@ -1779,7 +1779,12 @@ func candidates(spkg *ssa.Package, tests bool) []*ssa.Function {
 			for _, typ := range []types.Type{m.Type(), types.NewPointer(m.Type())} {
 				ms := spkg.Prog.MethodSets.MethodSet(typ)
 				for i := 0; i < ms.Len(); i++ {
-					add(spkg.Prog.MethodValue(ms.At(i)))
+					// An alias of another package's type (xstrings's
+					// stringBuilder = strings.Builder) brings that package's
+					// methods: they are not this package's to test.
+					if f := spkg.Prog.MethodValue(ms.At(i)); f != nil && f.Pkg == spkg {
+						add(f)
+					}
 				}
 			}
 		}

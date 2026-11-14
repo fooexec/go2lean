@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -285,7 +286,10 @@ func copyPackage(dir, dst string) error {
 			if err := copyFile(src, filepath.Join(dst, e.Name())); err != nil {
 				return err
 			}
-		case e.IsDir() && e.Name() == "testdata":
+		case e.IsDir() && (e.Name() == "testdata" || dataDir(src)):
+			// testdata, and a directory of data files the package's tests
+			// read by a relative path (cascadia's test_resources: its init
+			// log.Fatal'd without it, and every replay ended there).
 			err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 				if err != nil {
 					return err
@@ -305,6 +309,38 @@ func copyPackage(dir, dst string) error {
 		}
 	}
 	return nil
+}
+
+// maxDataDir bounds the size of a data directory copied for a replay.
+const maxDataDir = 64 << 20
+
+// dataDir says whether dir holds data only: no Go file, no go.mod, not a
+// hidden directory (.git), and under maxDataDir in all.
+func dataDir(dir string) bool {
+	if strings.HasPrefix(filepath.Base(dir), ".") {
+		return false
+	}
+	var size int64
+	data := true
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			data = false
+			return filepath.SkipAll
+		}
+		name := d.Name()
+		if strings.HasSuffix(name, ".go") || name == "go.mod" {
+			data = false
+			return filepath.SkipAll
+		}
+		if info, err := d.Info(); err == nil && !d.IsDir() {
+			if size += info.Size(); size > maxDataDir {
+				data = false
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return data
 }
 
 func copyFile(src, dst string) error {
