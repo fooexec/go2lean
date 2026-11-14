@@ -90,6 +90,9 @@ func rankOf(p *prepared, callers *callerIndex) *contract.Rank {
 				return &contract.Rank{Tier: 2, Reason: "the receiver's unexported field " + f + " set by the test, which only the package's own code can do: check that its values can get here"}
 			}
 		}
+		if f := unexportedArg(p.abi, p.cx); f != "" {
+			return &contract.Rank{Tier: 2, Reason: "the argument's unexported field " + f + " set by the test, which only the package's own code can do: check that its values can get here"}
+		}
 		return &contract.Rank{Tier: 1, Reason: "plain inputs to the package's API"}
 	}
 	// An unexported function whose callers all pass constants for the
@@ -225,7 +228,35 @@ func unexportedSet(abi *contract.ABI, cx *contract.Counterexample) string {
 	if abi == nil || abi.Method == "" || len(abi.Params) == 0 || cx == nil {
 		return ""
 	}
-	recv := abi.Params[0]
+	return unexportedSetIn(abi, cx, abi.Params[0])
+}
+
+// unexportedArg names a parameter other than the receiver, and its
+// unexported field, that the counterexample set to a non-zero value: a
+// struct of the package's own that callers outside it get only from the
+// package (regexp2's *Match, which FindNextMatch takes back, built with a
+// negative position, #237). "" when there is none.
+func unexportedArg(abi *contract.ABI, cx *contract.Counterexample) string {
+	if abi == nil || cx == nil {
+		return ""
+	}
+	for i, p := range abi.Params {
+		if i == 0 && abi.Method != "" && abi.Ctor == nil {
+			continue // the receiver: unexportedSet
+		}
+		if abi.Ctor != nil && i < abi.Ctor.N {
+			continue // the constructor's arguments
+		}
+		if f := unexportedSetIn(abi, cx, p); f != "" {
+			return p.Go + "." + f
+		}
+	}
+	return ""
+}
+
+// unexportedSetIn names an unexported field of the struct (or pointer to
+// struct) parameter p that the counterexample set to a non-zero value.
+func unexportedSetIn(abi *contract.ABI, cx *contract.Counterexample, recv contract.ABIParam) string {
 	st := &recv
 	if recv.Pointee != nil {
 		st = recv.Pointee

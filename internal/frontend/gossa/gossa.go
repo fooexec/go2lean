@@ -1228,6 +1228,38 @@ func addCtorWrappers(p *ir.Prog, fns []*ssa.Function) {
 			}
 		}
 	}
+	// A type with no NewT may still have one exported function its callers
+	// get it from, named after what it does (regexp2.Compile returns
+	// (*Regexp, error), #237): that one, when it is the only one (Must
+	// forms aside, which panic by design); among several, the only one
+	// that reports an error.
+	byType := map[*types.TypeName][]*ssa.Function{}
+	for _, f := range fns {
+		if f.Signature.Recv() != nil || f.Parent() != nil || !ast.IsExported(f.Name()) || strings.HasPrefix(f.Name(), "Must") ||
+			p.Funcs[ids[f]].Status == contract.ModelRejected {
+			continue
+		}
+		if tn, ok := ctorShape(f); ok && tn.Exported() {
+			if _, named := ctors[tn]; !named {
+				byType[tn] = append(byType[tn], f)
+			}
+		}
+	}
+	for tn, fs := range byType {
+		if len(fs) == 1 {
+			ctors[tn] = fs[0]
+			continue
+		}
+		var withErr []*ssa.Function
+		for _, f := range fs {
+			if f.Signature.Results().Len() == 2 {
+				withErr = append(withErr, f)
+			}
+		}
+		if len(withErr) == 1 {
+			ctors[tn] = withErr[0]
+		}
+	}
 	for _, m := range fns {
 		recv := m.Signature.Recv()
 		if recv == nil || m.Parent() != nil || p.Funcs[ids[m]].Status == contract.ModelRejected || p.Funcs[ids[m]].SpecFor != "" {
@@ -1271,6 +1303,28 @@ func addCtorWrappers(p *ir.Prog, fns []*ssa.Function) {
 		p.Funcs[ids[m]].WrappedBy = w.Name
 		p.Funcs = append(p.Funcs, w)
 	}
+}
+
+// ctorShape reports the type f returns as a constructor would: its first
+// result is T or *T for a named T of its own package, and its other
+// result, if any, is an error.
+func ctorShape(f *ssa.Function) (*types.TypeName, bool) {
+	res := f.Signature.Results()
+	if res.Len() == 0 || res.Len() > 2 || (res.Len() == 2 && !isError(res.At(1).Type())) {
+		return nil, false
+	}
+	t := res.At(0).Type()
+	if pt, ok := t.(*types.Pointer); ok {
+		t = pt.Elem()
+	}
+	named, ok := t.(*types.Named)
+	if !ok || f.Pkg == nil || named.Obj().Pkg() != f.Pkg.Pkg {
+		return nil, false
+	}
+	if _, isStruct := named.Underlying().(*types.Struct); !isStruct {
+		return nil, false // a named string or int: a conversion, not a constructor
+	}
+	return named.Obj(), true
 }
 
 // ctorOf reports the type f constructs: a package-level function named

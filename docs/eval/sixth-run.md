@@ -59,9 +59,15 @@ picked as parsers and evaluators with less fuzzing than grpc-go.
   32 at tier 1, 1 spurious, 3 inconclusive. The tier-1 findings are
   `MustCompile`'s documented panic and the exported internals the code
   generator calls (`helpers`, `syntax`) given out-of-contract indices.
-  The `Regexp` methods were searched only on receivers built field by
-  field (tier 2): `Compile` is not used as a constructor yet. Go's fuzzer
-  on `Compile` + `MatchString` (3.6M executions) found no panic.
+  Go's fuzzer on `Compile` + `MatchString` (3.6M executions) found no
+  panic.
+
+  The `Regexp` methods were first searched only on receivers built field
+  by field: `Compile` was not taken for a constructor. It is now (#237):
+  `Regexp.MatchString~Compile` and 46 more run on a compiled pattern. On
+  them regexp2 gives 0 spurious and 0 inconclusive verdicts, nil readers
+  at tier 3, and `FindNextMatch` on a `*Match` the test forged, now
+  ranked tier 2.
 
 ## What this run says
 

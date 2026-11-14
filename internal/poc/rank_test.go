@@ -273,3 +273,23 @@ func TestExportedTypeName(t *testing.T) {
 		}
 	}
 }
+
+// An argument (not the receiver) whose unexported field the test set:
+// regexp2's FindNextMatch(m *Match) on a Match with a forged position
+// (#237). The constructor's arguments are not checked.
+func TestUnexportedArg(t *testing.T) {
+	match := contract.ABIParam{Go: "m", GoType: "*Match", Kind: contract.ABIPtr, Pointee: &contract.ABIParam{
+		Go: "m", GoType: "Match", Kind: contract.ABIStruct, Fields: []contract.ABIParam{
+			{Go: "Index", Kind: contract.ABIInt}, {Go: "textpos", Kind: contract.ABIInt}}}}
+	abi := &contract.ABI{Ctor: &contract.ABICtor{Func: "Compile", N: 1}, Params: []contract.ABIParam{
+		{Go: "expr", Kind: contract.ABIString}, match}}
+	for obj, want := range map[string]string{
+		`[ "3", "-8" ]`: "m.textpos",
+		`[ "3", "0" ]`:  "",
+	} {
+		cx := &contract.Counterexample{Objects: map[string]json.RawMessage{"m": json.RawMessage(obj)}}
+		if got := unexportedArg(abi, cx); got != want {
+			t.Errorf("%s: unexportedArg = %q, want %q", obj, got, want)
+		}
+	}
+}

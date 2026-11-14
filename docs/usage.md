@@ -137,7 +137,7 @@ A confirmed finding's **rank** says how plausible its input is for real callers:
 | tier | the input | listed in the run's summary |
 |---|---|---|
 | 1 | any caller of the package's API can pass it, or a caller in the module passes the same nil, or (in an unexported function) it comes from a parameter of the public API through no check that may stop it, the path named (`grpc.KeepaliveParams(kp.MaxConnectionAge) → ... → transport.getJitter(v)`) | yes |
-| 2 | depends on the callers (an unexported function's arguments, a nil a caller may pass, a receiver built field by field where the package has a constructor for its type) | counted |
+| 2 | depends on the callers (an unexported function's arguments, a nil a caller may pass, a receiver built field by field where the package has a constructor for its type, an argument of the package's own struct type whose unexported fields the test set, as regexp2's `FindNextMatch(m *Match)` on a forged match) | counted |
 | 3 | no caller in the module passes it | counted |
 | 4 | the test forged it (an opaque value left nil, package state set up first) | counted |
 
