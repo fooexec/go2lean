@@ -289,6 +289,16 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 			}
 		}
 	}
+	// errors.New and a plain fmt.Errorf box an *errors.errorString
+	// (newErrorString), wherever they are called.
+	if ep := sprog.ImportedPackage("errors"); ep != nil {
+		if tn, ok := ep.Pkg.Scope().Lookup("errorString").(*types.TypeName); ok {
+			if et := types.NewPointer(tn.Type()); !seenBoxed[types.TypeString(et, nil)] {
+				seenBoxed[types.TypeString(et, nil)] = true
+				boxed = append(boxed, et)
+			}
+		}
+	}
 	for _, u := range units {
 		for id, f := range u.fns {
 			xrefs[f.String()] = contract.XCall{Package: u.path, ID: id}
@@ -4696,6 +4706,9 @@ func (t *fnState) call(x *ssa.Call) error {
 	if callee != nil && callee.String() == "fmt.Sprintf" && len(x.Call.Args) == 2 {
 		return t.sprintf(x)
 	}
+	if callee != nil && isPlainErrorf(callee, x) {
+		return t.newErrorString(x)
+	}
 	if callee != nil && callee.String() == "fmt.Sprintln" && len(x.Call.Args) == 1 {
 		return t.sprintln(x)
 	}
@@ -6088,9 +6101,27 @@ func (t *fnState) ifaceAssert(x *ssa.TypeAssert, impls []types.Type) error {
 		t.emit(ir.Instr{Dst: dst, Op: ir.AssertIface{Tags: tags, CommaOk: x.CommaOk}, Args: []ir.Var{v}})
 		return nil
 	}, func() error {
+		if x.CommaOk && isRuntimeError(x.AssertedType) {
+			// Only the runtime's own errors are runtime.Errors, and the
+			// model builds the ones its panics raise: a value from an
+			// unmodelled call (fmt.Errorf) is not one. raymond's
+			// errRecover re-panicked on a runtime.Error, and every parse
+			// error became a panic Go never raises.
+			nilV, no := t.fresh(), t.fresh()
+			t.emit(ir.Instr{Dst: nilV, Op: ir.Const{V: ir.OpaqueNil{}}})
+			t.emit(ir.Instr{Dst: no, Op: ir.Const{V: ir.BoolVal(false)}})
+			t.emit(ir.Instr{Dst: dst, Op: ir.Simple("mkTuple"), Args: []ir.Var{nilV, no}})
+			return nil
+		}
 		t.issue("type assertion %s on an interface value the model did not build is havoc", x.Name())
 		return t.havocResult(dst, x, "type assertion", "opaque-assert")
 	})
+}
+
+// isRuntimeError says whether t is runtime.Error.
+func isRuntimeError(t types.Type) bool {
+	n, ok := types.Unalias(t).(*types.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "runtime" && n.Obj().Name() == "Error"
 }
 
 // invoke lowers a method call on an interface value: the method of the
@@ -6705,7 +6736,10 @@ func (t *fnState) regexpNumSubexp(x *ssa.Call) error {
 }
 
 // maxRegexps bounds the programs a call on an unknown regexp embeds.
-const maxRegexps = 12
+// raymond's lexer compiles 23 small patterns and matches them through one
+// helper (findRegexp(r *regexp.Regexp)): with a bound of 12 every match
+// there was havoc, and the lexer took paths Go never takes.
+const maxRegexps = 32
 
 // packageRegexps lists the constant patterns the package compiles with
 // regexp.MustCompile (in its functions and its initializer).
@@ -8177,6 +8211,41 @@ func constArrayField(zero ir.Val, f int, v ssa.Value) bool {
 	return true
 }
 
+// isPlainErrorf says whether x is errors.New(s), or fmt.Errorf of a
+// constant format that wraps nothing (no %w): Go's fmt.Errorf is then
+// errors.New(fmt.Sprintf(format, args...)), an *errors.errorString.
+func isPlainErrorf(callee *ssa.Function, x *ssa.Call) bool {
+	switch callee.String() {
+	case "errors.New":
+		return len(x.Call.Args) == 1
+	case "fmt.Errorf":
+		if len(x.Call.Args) != 2 {
+			return false
+		}
+		f, ok := x.Call.Args[0].(*ssa.Const)
+		return ok && f.Value != nil && f.Value.Kind() == constant.String && !strings.Contains(constant.StringVal(f.Value), "%w")
+	}
+	return false
+}
+
+// newErrorString lowers errors.New and a plain fmt.Errorf (isPlainErrorf)
+// to a fresh *errors.errorString: a new object, boxed with that type's
+// tag, so two errors are distinct as Go's pointers are, a type switch
+// takes its `case error` and not `case runtime.Error` (raymond's
+// errRecover, which re-panicked on every parse error), and errors.Is
+// compares identities. Its message is not kept: Error() on it is havoc.
+func (t *fnState) newErrorString(x *ssa.Call) error {
+	for _, a := range x.Call.Args {
+		if _, err := t.val(a); err != nil {
+			return err
+		}
+	}
+	obj, dst := t.fresh(), t.def(x)
+	t.emit(ir.Instr{Dst: obj, Op: ir.Alloc{Zero: ir.Opaque{}}})
+	t.emit(ir.Instr{Dst: dst, Op: ir.Box{Tag: sentinelTag}, Args: []ir.Var{obj}})
+	return nil
+}
+
 // sentinelTag tags sentinel errors: errors.New returns an *errors.errorString.
 var sentinelTag = func() uint32 {
 	h := fnv.New32a()
@@ -8258,6 +8327,17 @@ func constString(v ssa.Value, depth int) (string, bool) {
 		b, ok := constString(x.Y, depth)
 		return a + b, ok
 	case *ssa.Call:
+		// A pure function of the standard library on a constant string,
+		// evaluated as Go would (raymond's lexer builds its patterns with
+		// regexp.QuoteMeta("=~}/)|")).
+		if f := x.Call.StaticCallee(); f != nil && len(x.Call.Args) == 1 {
+			if fn, ok := pureStringFuncs[f.String()]; ok {
+				if a, ok := constString(x.Call.Args[0], depth); ok {
+					return fn(a), true
+				}
+				return "", false
+			}
+		}
 		return constSprintf(x)
 	case *ssa.UnOp:
 		if depth == 0 {
@@ -8268,6 +8348,15 @@ func constString(v ssa.Value, depth int) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// pureStringFuncs are the standard library's string functions of one
+// string constString evaluates at compile time.
+var pureStringFuncs = map[string]func(string) string{
+	"regexp.QuoteMeta":  regexp.QuoteMeta,
+	"strings.ToLower":   strings.ToLower,
+	"strings.ToUpper":   strings.ToUpper,
+	"strings.TrimSpace": strings.TrimSpace,
 }
 
 // constSprintf evaluates fmt.Sprintf of a constant format and constant

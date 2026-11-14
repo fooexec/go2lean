@@ -44,6 +44,10 @@ type harnessData struct {
 	Conc     bool
 	ConcRuns int
 	PkgPath  string
+	// ModPath is the target's module: a goroutine of another package of
+	// it counts too (raymond's Parse leaks its lexer's goroutine, in
+	// raymond/lexer).
+	ModPath string
 	// Violated: for a panic or a false result the model found under a
 	// concurrent schedule, a Go expression true when a run violated the
 	// property; the runs stop there. Such a harness does not stop on a
@@ -112,7 +116,7 @@ var harnessTmpl = template.Must(template.New("poc").Parse(`func TestGo2LeanPoC_{
 			go2leanFound = ""
 			go2leanSettling := false
 			for _, go2leanG := range go2leanStacks() {
-				if !strings.Contains(go2leanG, {{printf "%q" .PkgPath}}+".") || strings.Contains(go2leanG, "TestGo2LeanPoC_") {
+				if !(strings.Contains(go2leanG, {{printf "%q" .PkgPath}}+".") || strings.Contains(go2leanG, {{printf "%q" .ModPath}}+"/") || strings.Contains(go2leanG, {{printf "%q" .ModPath}}+".")) || strings.Contains(go2leanG, "TestGo2LeanPoC_") {
 					continue
 				}
 				if go2leanID, _, _ := strings.Cut(go2leanG, " ["); go2leanOld[go2leanID] {
@@ -422,10 +426,10 @@ func harnessFunc(t *contract.Target, p *contract.Property, cx *contract.Countere
 	if p.Kind == contract.KindNoHang {
 		// A loop the model never leaves: one run under the watchdog, which
 		// reports a call that has not returned after 2s (#86).
-		d.Conc, d.ConcRuns, d.PkgPath, d.NoLeak = true, 1, t.Package, true
+		d.Conc, d.ConcRuns, d.PkgPath, d.ModPath, d.NoLeak = true, 1, t.Package, modulePathOf(t), true
 		d.Imports = append(d.Imports, `"runtime"`, `"strings"`, `"time"`)
 	} else if m := modelPanic(cx); m == contract.PanicDeadlock || m == contract.PanicGoroutineLeak || m == contract.PanicDataRace || scheduleDependent(cx) {
-		d.Conc, d.ConcRuns, d.PkgPath = true, concRuns, t.Package
+		d.Conc, d.ConcRuns, d.PkgPath, d.ModPath = true, concRuns, t.Package, modulePathOf(t)
 		if m != contract.PanicDeadlock && m != contract.PanicGoroutineLeak && m != contract.PanicDataRace {
 			// A panic or a false result under a concurrent schedule: Go's
 			// scheduler takes the interleaving only now and then, so the
@@ -1156,4 +1160,13 @@ func floatLiteral(p contract.ABIParam, v any) (string, error) {
 		return fmt.Sprintf("%s(math.Float32frombits(0x%08x))", p.GoType, bits), nil
 	}
 	return fmt.Sprintf("%s(math.Float64frombits(0x%016x))", p.GoType, bits), nil
+}
+
+// modulePathOf is the target's module path, or its package when the
+// target names none.
+func modulePathOf(t *contract.Target) string {
+	if t.Module != "" {
+		return t.Module
+	}
+	return t.Package
 }

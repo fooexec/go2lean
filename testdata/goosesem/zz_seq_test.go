@@ -659,8 +659,14 @@ func SeqTestRandReadDiffers() bool { return testRandReadDiffers() }
 // go2lean:sequence testRandReaderReadFull
 func SeqTestRandReaderReadFull() bool { return testRandReaderReadFull() }
 
+// go2lean:sequence testRecoverErrorsNew
+func SeqTestRecoverErrorsNew() bool { return testRecoverErrorsNew() }
+
 // go2lean:sequence testRecoverExplicitPanic
 func SeqTestRecoverExplicitPanic() bool { return testRecoverExplicitPanic() }
+
+// go2lean:sequence testRecoverFmtErrorf
+func SeqTestRecoverFmtErrorf() bool { return testRecoverFmtErrorf() }
 
 // go2lean:sequence testRecoverNilAndCallee
 func SeqTestRecoverNilAndCallee() bool { return testRecoverNilAndCallee() }
@@ -709,6 +715,9 @@ func SeqTestReflectValueScalars() bool { return testReflectValueScalars() }
 
 // go2lean:sequence testReflectValueValid
 func SeqTestReflectValueValid() bool { return testReflectValueValid() }
+
+// go2lean:sequence testRegexpBuiltWithQuoteMeta
+func SeqTestRegexpBuiltWithQuoteMeta() bool { return testRegexpBuiltWithQuoteMeta() }
 
 // go2lean:sequence testRegexpBytesIndex
 func SeqTestRegexpBytesIndex() bool { return testRegexpBytesIndex() }

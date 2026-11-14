@@ -114,7 +114,9 @@ neither shows nor refutes the panic the model found. A run that uses up
 the sandbox's memory is `inconclusive` too (`real_run_out_of_memory`).
 
 For a deadlock or goroutine leak the call runs up to 200 times under a
-watchdog; when Go's scheduler never takes the model's interleaving, the
+watchdog. After each run, a goroutine of any package of the target's
+module still blocked on a channel or a lock is a leak (raymond's `Parse`
+leaks its lexer's goroutine, in `raymond/lexer`). When Go's scheduler never takes the model's interleaving, the
 replay stage replays the model's schedule: the package is rewritten
 through an overlay so that each channel, lock and `select` operation waits
 for its turn, and the real runtime then shows the deadlock or leak. The

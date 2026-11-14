@@ -368,7 +368,7 @@ func unexportedAlt(abi *contract.ABI, cx *contract.Counterexample) string {
 	var found []string
 	for _, raw := range cx.Objects {
 		for _, m := range tagRe.FindAllStringSubmatch(string(raw), -1) {
-			if t, ok := byTag[m[1]]; ok && !exportedTypeName(t) && !slices.Contains(found, t) {
+			if t, ok := byTag[m[1]]; ok && namedType(t) && !exportedTypeName(t) && !slices.Contains(found, t) {
 				found = append(found, t)
 			}
 		}
@@ -382,6 +382,24 @@ func unexportedAlt(abi *contract.ABI, cx *contract.Counterexample) string {
 
 // exportedTypeName: the type a Go type expression names (`*pkg.T`, `T`)
 // is exported.
+// namedType says whether the spelling t names a defined type (*buffer,
+// pkg.T), not a type literal or a predeclared type ([]interface{},
+// map[string]interface{}, string), which no package owns: an interface
+// holding one was not forged (raymond's MustRender with a []interface{}
+// context was ranked so).
+func namedType(t string) bool {
+	t = strings.TrimLeft(t, "*")
+	if t == "" || strings.ContainsAny(t, "[]{}() ") || strings.HasPrefix(t, "map") || strings.HasPrefix(t, "chan") || strings.HasPrefix(t, "func") {
+		return false
+	}
+	switch t {
+	case "string", "bool", "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
+		"float32", "float64", "complex64", "complex128", "byte", "rune", "error", "any":
+		return false
+	}
+	return true
+}
+
 func exportedTypeName(t string) bool {
 	t = strings.TrimLeft(t, "*[]")
 	if i := strings.LastIndex(t, "."); i >= 0 {

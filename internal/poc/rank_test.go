@@ -306,3 +306,11 @@ func TestUnexportedArgInAlt(t *testing.T) {
 		t.Errorf("unexportedArg = %q, want renderer.tocMarker", got)
 	}
 }
+
+func TestNamedType(t *testing.T) {
+	for typ, want := range map[string]bool{"*buffer": true, "mem.BufferSlice": true, "[]interface{}": false, "map[string]interface{}": false, "string": false, "*int": false} {
+		if got := namedType(typ); got != want {
+			t.Errorf("namedType(%q) = %v, want %v", typ, got, want)
+		}
+	}
+}
