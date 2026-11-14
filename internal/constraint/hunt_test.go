@@ -64,3 +64,21 @@ func TestHotEnumsAndVariants(t *testing.T) {
 		t.Errorf("variants: %v", fields)
 	}
 }
+
+// A slice whose elements can only be nil (functional options) stays empty:
+// dateparse's `opts ...ParserOption` otherwise ended every search at a nil
+// option call.
+func TestNilOnlySliceEmpty(t *testing.T) {
+	abi := &contract.ABI{Variadic: true, Params: []contract.ABIParam{
+		{Go: "s", GoType: "string", Model: []string{"s"}, Kind: contract.ABIString},
+		{Go: "opts", GoType: "[]ParserOption", Model: []string{"opts_ref", "opts_off", "opts_len", "opts_cap"}, Kind: contract.ABISlice,
+			ElemParam: &contract.ABIParam{Go: "opts", GoType: "ParserOption", Model: []string{"opts"}, Kind: contract.ABIOpaque, Zero: "nil"}},
+	}}
+	g, err := gens(abi, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := g[1]["maxLen"]; n != 0 {
+		t.Errorf("opts: maxLen %v, want 0", n)
+	}
+}

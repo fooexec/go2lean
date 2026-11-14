@@ -4797,6 +4797,9 @@ func (t *fnState) call(x *ssa.Call) error {
 			return nil
 		}
 	}
+	if method := thunkMethod(callee); method != nil {
+		callee = method // f := T.M; f(x): a call of M
+	}
 	if id, ok := t.prog.ids[callee]; ok && callee != nil {
 		if !slices.Contains(t.out.Calls, id) {
 			t.out.Calls = append(t.out.Calls, id)
@@ -9622,6 +9625,11 @@ func (t *fnState) funcValue(dst ir.Var, fn *ssa.Function, bindings []ssa.Value) 
 			fn = method
 		}
 	}
+	if len(bindings) == 0 {
+		if method := thunkMethod(fn); method != nil {
+			fn = method
+		}
+	}
 	var args []ir.Var
 	for _, b := range bindings {
 		v, err := t.val(b)
@@ -11136,4 +11144,26 @@ func derefType(t types.Type) types.Type {
 		return p.Elem()
 	}
 	return t
+}
+
+// thunkMethod is the method a method expression's thunk calls ((*T).M,
+// T.M), when the thunk passes its arguments on unchanged: its receiver has
+// the method's receiver type. go/ssa's thunk takes the receiver first,
+// which is how the model calls the method itself (gomarkdown's block rules
+// are a table of (*Parser).M). Nil otherwise: (*T).M of a value method
+// dereferences the pointer first.
+func thunkMethod(fn *ssa.Function) *ssa.Function {
+	if fn == nil || !strings.HasSuffix(fn.Name(), "$thunk") {
+		return nil
+	}
+	m, ok := fn.Object().(*types.Func)
+	if !ok {
+		return nil
+	}
+	method := fn.Prog.FuncValue(m)
+	if method == nil || len(fn.Params) == 0 || len(method.Params) != len(fn.Params) ||
+		!types.Identical(fn.Params[0].Type(), method.Params[0].Type()) {
+		return nil
+	}
+	return method
 }

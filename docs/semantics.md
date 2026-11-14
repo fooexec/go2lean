@@ -203,7 +203,7 @@ memory).
 |---|---|---|
 | static call in the package | `call` | exact |
 | call into another package compiled together (`-deps`) | `xcall` (the driver links the models) | exact; a dependency's functions are translated up to 4 calls deep from the package under test, except its small helpers (a few blocks: `xxhash`'s `round`, `rol1`), which come with their caller at any depth (#71); deeper ones on request of the refinement loop (#85) |
-| closures, function values, method values | `funcRef`/`xfuncRef` + `callv` (captured values first) | exact; nil func call panics; an unknown func takes the fallback |
+| closures, function values, method values, method expressions (`(*T).M`, `T.M`: the method itself, the receiver its first argument; `(*T).M` of a value method, which dereferences first, is an unknown func) | `funcRef`/`xfuncRef` + `callv` (captured values first) | exact; nil func call panics; an unknown func takes the fallback |
 | generic functions | modelled per instance (`Must[int]`, concrete types); the generic function itself is not in the model; instances of package `slices` under `-deps`. `run` instantiates each exported generic function at simple type arguments through a test-file wrapper (`-generics`, `internal/geninst`), which is a target | partial: one instance per function |
 | call into a logging package (logrus, log, slog, zap) | results opaque, calls without results ignored | exact for the code under test |
 | `apijson.UnmarshalRoot` (the SDKs' `UnmarshalJSON`, unions' `As*` methods) | `jsonDecode` with the target type's description | as JSON decoding above |
@@ -496,7 +496,7 @@ writes the same value as a Go literal.
 | `interface{}` | nil, string, bool, int, `map[string]interface{}`, `[]interface{}`, and (at the top level) up to six concrete types the function's call tree asserts empty interfaces to (`x.(int64)`, a type switch's cases), so that every case can be taken; for an assertion to an interface with methods (`v.(protoadapt.MessageV2)`), types that implement it; the PoC writes them typed (`uint8(0)`) |
 | float64, float32 | their IEEE bits (#148): four draws in ten a special value (±0, ±1, 0.5, 2, 0.1, 100, -3.5, the largest finite, the smallest subnormal, ±Inf, NaN), two the program's float literals and integers, two a number from -50 to 50 in halves, two any bits; the exhaustive engine takes the special values and a few literals. The PoC writes `math.Float64frombits(0x…)`, the exact bits |
 | interfaces with methods (not `error` or `context.Context`) | a value of one of up to three types of the module that the program boxes, that implement the interface and a test can build (the package's own first), generated as that type; nil only with `-nil-inputs`, as for a pointer. With no such type, nil |
-| funcs, channels | their zero value (nil) |
+| funcs, channels | their zero value (nil); a slice of them (functional options, `opts ...Option`) is empty, since every element would be a nil no caller passes |
 | two parameters of one kind (integers of one width and sign, strings) | one trial in four, one takes the other's value: equal arguments are an edge case independent draws almost never reach for strings (two appends of one label set, #87) |
 | `context.Context` | `context.Background()` |
 | unexported fields of another package's struct | their zero value (a test cannot set them) |
