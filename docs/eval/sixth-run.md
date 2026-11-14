@@ -51,6 +51,18 @@ picked as parsers and evaluators with less fuzzing than grpc-go.
   Lean's compiler stopped on it after 516 s and 10 GB, and since the search
   executable is one build, all four packages failed with it (#232).
 
+  Fixed (#232): an initializer's oversized part is left out (those
+  variables are read from their constants or as havoc), block names no
+  longer grow with every split (they had made the model 22 MB, now
+  3.4 MB), and a model Lean cannot build is set aside instead of failing
+  the run. Rerun, regexp2 takes 352 s for 266 properties: 80 confirmed,
+  32 at tier 1, 1 spurious, 3 inconclusive. The tier-1 findings are
+  `MustCompile`'s documented panic and the exported internals the code
+  generator calls (`helpers`, `syntax`) given out-of-contract indices.
+  The `Regexp` methods were searched only on receivers built field by
+  field (tier 2): `Compile` is not used as a constructor yet. Go's fuzzer
+  on `Compile` + `MatchString` (3.6M executions) found no panic.
+
 ## What this run says
 
 - On a library with an open crash bug, a plain `go2lean run` finds it and
@@ -59,8 +71,8 @@ picked as parsers and evaluators with less fuzzing than grpc-go.
 - The other three runs were held back by the tool, not by the code: a
   generator choice (#233), three model gaps on gomarkdown's main path
   (#234), and a build that cannot fail one package at a time (#232). The
-  first two are fixed; with them, dateparse and gomarkdown have no false
-  alarm and, as Go's fuzzer, no bug.
+  three are fixed; with them, dateparse and gomarkdown have no false
+  alarm and, as Go's fuzzer, no bug, and regexp2 runs.
 - The test-variant gap of #234 was not gomarkdown's alone: every package
   with in-package tests saw none of the types other packages box into its
   interfaces.

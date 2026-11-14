@@ -60,7 +60,9 @@ Both engines run in `go2lean-search`, a native executable built by lake
 from the Lean engines and every generated model, driven by a JSON
 description of the search. Properties are searched in parallel, and each
 engine stops at a wall-clock budget (10 s by default, 120 s under `agent`),
-so one function with expensive inputs cannot stall a sweep. go2lean keeps
+so one function with expensive inputs cannot stall a sweep. A package whose model Lean cannot build
+(a compiler timeout on a huge function) is set aside: the run says so,
+with Lean's error, and searches the other packages (#232). go2lean keeps
 its own memory under a third of physical memory (a soft limit; `GOMEMLIMIT`
 overrides it); `GO2LEAN_MEMPROFILE=<file>` writes a heap profile near a
 run's peak.
