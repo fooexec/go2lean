@@ -923,6 +923,12 @@ func runReport(w contract.Workspace, env Env, report *contract.ModelReport, opts
 		if skipped > 0 {
 			fmt.Fprintf(out, "  %s of unexported functions not searched (-unexported searches them)\n", plural(skipped, "template property"))
 		}
+	} else {
+		var skipped int
+		props, skipped = handleTemplates(w, props)
+		if skipped > 0 {
+			fmt.Fprintf(out, "  %s of unexported functions not searched: an input holds a pointer to another package's struct (not the standard library's) that the test cannot fill in (#230)\n", plural(skipped, "template property"))
+		}
 	}
 	if env.Subtest != "" {
 		// The model runs only the selected subtests (#48); replay must too.
@@ -1017,6 +1023,88 @@ func apiTemplates(w contract.Workspace, props []*contract.Property) ([]*contract
 		out = append(out, p)
 	}
 	return out, skipped
+}
+
+// handleTemplates drops the template properties of unexported functions
+// (searched under -unexported) whose inputs hold a pointer to an opaque
+// struct of another package, at any depth. The test passes a pointer to
+// its zero value, which no caller does: on grpc-go such a property was
+// inconclusive or spurious in 353 of 433 cases, and the confirmed rest
+// ranked tier 2 or below (#230). The API's templates are kept.
+func handleTemplates(w contract.Workspace, props []*contract.Property) ([]*contract.Property, int) {
+	var out []*contract.Property
+	skipped := 0
+	for _, p := range props {
+		if p.Source == "template" && (p.Kind == contract.KindNoPanic || p.Kind == contract.KindNoHang) {
+			if t, err := w.Target(p.Target); err == nil && !poc.APIFunc(t.Func) {
+				if abi, err := w.ABI(t, "gossa"); err == nil && opaqueHandle(abi) {
+					skipped++
+					continue
+				}
+			}
+		}
+		out = append(out, p)
+	}
+	return out, skipped
+}
+
+// opaqueHandle reports whether an input of abi holds, at any depth, a
+// pointer to an opaque non-nil-zero value of a package outside the
+// standard library (another package's struct the test can only pass as
+// new(T)).
+func opaqueHandle(abi *contract.ABI) bool {
+	types := map[string]*contract.ABIType{}
+	for i := range abi.Types {
+		types[abi.Types[i].GoType] = &abi.Types[i]
+	}
+	seen := map[string]bool{}
+	var walk func(p *contract.ABIParam) bool
+	walk = func(p *contract.ABIParam) bool {
+		if p == nil {
+			return false
+		}
+		if p.Kind == contract.ABIPtr && p.Pointee != nil && p.Pointee.Kind == contract.ABIOpaque && p.Pointee.Zero != "nil" {
+			pkg := p.Pointee.TypePkg
+			if pkg == "" {
+				pkg = p.TypePkg
+			}
+			// The standard library's zero values are often ready to use
+			// (bytes.Buffer, sync.Mutex), and a *regexp.Regexp the test
+			// cannot build is a nil the replay judges on its own.
+			if !stdPackage(pkg) {
+				return true
+			}
+		}
+		if p.TypeRef != "" && !seen[p.TypeRef] {
+			seen[p.TypeRef] = true
+			if t := types[p.TypeRef]; t != nil {
+				for i := range t.Fields {
+					if walk(&t.Fields[i]) {
+						return true
+					}
+				}
+			}
+		}
+		for i := range p.Fields {
+			if walk(&p.Fields[i]) {
+				return true
+			}
+		}
+		return walk(p.Pointee) || walk(p.ElemParam)
+	}
+	for i := range abi.Params {
+		if walk(&abi.Params[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+// stdPackage says whether an import path is the standard library's (its
+// first element has no dot).
+func stdPackage(path string) bool {
+	first, _, _ := strings.Cut(path, "/")
+	return path != "" && !strings.Contains(first, ".")
 }
 
 // notInstantiated is generic, without the names geninst wrapped.

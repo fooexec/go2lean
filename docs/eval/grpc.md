@@ -232,6 +232,40 @@ there is to triage below tier 1, for one finding. It stays opt-in: run it
 on the packages that hold the logic (`internal/transport` here), not on
 the whole module.
 
+**Where the noise came from (#230).** All 459 extra spurious and
+inconclusive verdicts are on unexported functions. 289 of them are
+`zero_handle_input`: a method of an unexported type whose receiver holds
+a pointer to another package's struct (`*grpc.ClientConn`, an `http2`
+framer). The test can only pass `new(T)` there, and the search's panic
+is a nil dereference inside it. A static rule finds these: an input that
+holds, at any depth, a pointer to an opaque struct of a package outside
+the standard library. Over the run it matches 433 unexported properties.
+353 of them were spurious or inconclusive, and the 80 confirmed ranked
+tier 2 or below. `-unexported`
+now skips them and says how many:
+
+| package | before | after |
+|---|---|---|
+| `internal/transport` | 623 s; 58 confirmed, 3 spurious, 35 inconclusive | 237 s; 12 confirmed, 0 spurious, 8 inconclusive; 155 skipped |
+| `internal/xds/server` | 60 s; 6 confirmed, 22 inconclusive | 41 s; 6 confirmed, 2 inconclusive; 48 skipped |
+| `balancer/rls` | 419 s; 3 confirmed, 7 spurious, 18 inconclusive | 216 s; 3 confirmed, 7 spurious, 1 inconclusive; 46 skipped |
+| `balancer/autosharding` | 89 s; 6 confirmed, 7 inconclusive | 52 s; 5 confirmed, 2 inconclusive; 17 skipped |
+
+`getJitter` stays at tier 1 with its path.
+
+The 19 `harness_compile_error` verdicts were two PoC bugs, both fixed:
+- a map whose values are another package's unexported type
+  (`keys.BuilderMap`) was written entry by entry, naming a type the test
+  cannot; such a map is now opaque;
+- an error inside an interface input's implementer was written as
+  `errors.New` without importing `errors`.
+
+The `rls` and `autosharding` rows above include both fixes; 16 of
+`rls`'s 18 inconclusive verdicts were these compile errors.
+
+The rest (96 spurious from unmodelled calls, 27 schedules Go did not
+take) are the known model gaps of #84 and #218.
+
 **The agent's `metadata` specs.** Rerun with the context model, their
 spurious verdicts go from 8 to 1, a `fmt.Fprintf` the model does not
 follow.
