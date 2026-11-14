@@ -234,7 +234,15 @@ func genIn(abi *contract.ABI, p contract.ABIParam, maxLen int, open []string) (m
 			if err != nil {
 				return nil, err
 			}
-			return map[string]any{"k": "sliceOf", "name": p.Go, "elem": e, "maxLen": maxLen}, nil
+			n := maxLen
+			if p.ElemParam.Kind == contract.ABIOpaque && p.ElemParam.Zero == "nil" {
+				// Every element would be nil: a test cannot build a func or
+				// an opaque interface. dateparse's `opts ...ParserOption`
+				// then made each search stop at calling a nil option, and
+				// no caller passes one: the slice stays empty.
+				n = 0
+			}
+			return map[string]any{"k": "sliceOf", "name": p.Go, "elem": e, "maxLen": n}, nil
 		}
 		w, signed, ok := p.ElemInfo()
 		if !ok {
