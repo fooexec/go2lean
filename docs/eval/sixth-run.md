@@ -33,9 +33,19 @@ picked as parsers and evaluators with less fuzzing than grpc-go.
   list (a tree the parser does not build), and `textutil.SkipDigits` at
   index -1. `Parser.Parse` and `ToHTML`, the entry points, were spurious:
   - the block rules are a table of method expressions (`(*Parser).M`),
-    which the model did not know; fixed, `Parse` now gets through `Block`;
-  - `ast.Walk` then calls `(ast.Node).GetChildren`, promoted from an
-    embedded `ast.Container`, which is not followed yet (#234).
+    which the model did not know;
+  - every node type gets `GetChildren` by embedding `ast.Container`, and
+    the model did not follow a method promoted from an embedded field;
+  - package `ast` has in-package tests, so it is compiled from its test
+    variant, a second copy of its types: its interface calls matched no
+    node type the parser boxes, and every call of `ast.Walk` was havoc.
+
+  All three are fixed (#234). Rerun, gomarkdown gives 0 spurious
+  verdicts (2 before) and 1 inconclusive (`ToHTML` with a zero
+  `*parser.Parser`); `Parser.Parse` holds on 2,000 random documents. Two
+  minutes of Go fuzzing over `ToHTML` (7.1M executions) found no panic
+  either: on its main path gomarkdown is sound, and go2lean now says so
+  without false alarms.
 - **regexp2: the run failed.** The `syntax` package's initializer is one
   function of 147,911 SSA values, from 12,000 lines of Unicode tables.
   Lean's compiler stopped on it after 516 s and 10 GB, and since the search
@@ -47,5 +57,10 @@ picked as parsers and evaluators with less fuzzing than grpc-go.
   ranks it first. That had not happened on grpc-go, whose one bug sits in
   an unexported helper.
 - The other three runs were held back by the tool, not by the code: a
-  generator choice (#233), two model gaps on gomarkdown's main path (one
-  fixed, #234), and a build that cannot fail one package at a time (#232).
+  generator choice (#233), three model gaps on gomarkdown's main path
+  (#234), and a build that cannot fail one package at a time (#232). The
+  first two are fixed; with them, dateparse and gomarkdown have no false
+  alarm and, as Go's fuzzer, no bug.
+- The test-variant gap of #234 was not gomarkdown's alone: every package
+  with in-package tests saw none of the types other packages box into its
+  interfaces.
