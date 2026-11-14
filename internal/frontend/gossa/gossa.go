@@ -7040,6 +7040,10 @@ func (plan *cellPlan) dropUntranslatable(units []unit, xrefs map[string]contract
 			if initFn == nil {
 				break
 			}
+			if len(keep) > maxInitSlice && plan.dropLarge(u, keep) {
+				changed = true
+				continue
+			}
 			bad, ok := trialInit(u.path, u.fns, initFn, keep, xrefs, zeros, sprog, boxed, plan)
 			if ok {
 				break
@@ -7104,6 +7108,40 @@ func trialInit(pkgPath string, fns []*ssa.Function, initFn *ssa.Function, keep m
 		}
 	}
 	return nil, true
+}
+
+// maxInitSlice bounds the instructions of a package initializer's slice
+// the model runs; above it, the variables whose own slice exceeds
+// maxCellSlice leave the init cells. regexp2's syntax package builds
+// 12,000 lines of Unicode tables in its initializer: 147,911 values in
+// one Lean function, which Lean's compiler could not build (#232). A
+// variable left out is read like any package variable the initializer
+// does not set: a table of constants from its constants (zeros), else
+// havoc with an assumption.
+const (
+	maxInitSlice = 20000
+	maxCellSlice = 2000
+)
+
+// dropLarge moves out of the init cells the variables of u whose own
+// slice of the initializer is larger than maxCellSlice. It says whether
+// it dropped one.
+func (plan *cellPlan) dropLarge(u unit, keep map[ssa.Instruction]bool) bool {
+	var cells []*ssa.Global
+	for in := range keep {
+		if st, ok := in.(*ssa.Store); ok {
+			if g, ok := st.Addr.(*ssa.Global); ok && plan.init[g] && !plan.noInit[g] && !slices.Contains(cells, g) {
+				cells = append(cells, g)
+			}
+		}
+	}
+	dropped := false
+	for _, g := range cells {
+		if _, own := initCells(u.path, u.fns, map[*ssa.Global]bool{g: true}); len(own) > maxCellSlice {
+			plan.noInit[g], dropped = true, true
+		}
+	}
+	return dropped
 }
 
 // isGuard says whether u loads the package initializer's init$guard.

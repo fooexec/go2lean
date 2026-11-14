@@ -304,7 +304,7 @@ func printFunc(b *strings.Builder, p *ir.Prog, i int, tb *tables) {
 	fmt.Fprintf(b, "def f%d : GoSSA.Func := {\n  name := %q, pkg := %q, params := %s, nvals := %d, entry := %d,\n  blocks := #[\n",
 		i, f.Name, p.Package, vars(f.Params), f.NVals, f.Entry)
 	for bi, blk := range f.Blocks {
-		fmt.Fprintf(b, "    -- %d: %s\n    { params := %s,\n      instrs := #[", bi, blk.Name, vars(blk.Params))
+		fmt.Fprintf(b, "    -- %d: %s\n    { params := %s,\n      instrs := #[", bi, shortBlockName(blk.Name), vars(blk.Params))
 		for ii, in := range blk.Instrs {
 			if ii > 0 {
 				b.WriteString(",\n                 ")
@@ -514,4 +514,20 @@ func (tb *tables) print(b *strings.Builder) {
 	for i, lit := range tb.defs {
 		fmt.Fprintf(b, "/-- A type table the reflect ops read. -/\ndef reflTable%d : List (Nat × Nat) :=\n  %s\n\n", i, lit)
 	}
+}
+
+// shortBlockName keeps a block's comment short: the compile stage names a
+// block after the one it splits ("start.after-call.after-call..."), and in
+// a long function the names grew with every split, to thousands of
+// characters per line (regexp2's initializer, #232). The first and the
+// last two parts say where it is.
+func shortBlockName(name string) string {
+	if len(name) <= 64 {
+		return name
+	}
+	parts := strings.Split(name, ".")
+	if len(parts) <= 3 {
+		return name[:64]
+	}
+	return parts[0] + ".…." + strings.Join(parts[len(parts)-2:], ".")
 }

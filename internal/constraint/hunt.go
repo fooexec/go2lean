@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -1095,15 +1096,85 @@ func buildDriver(coreDir, leanDir string) (bool, error) {
 		return false, err
 	}
 	if err := locked(leanDir, func() error {
-		if out, err := lake(leanDir, "build", "go2lean-search"); err != nil {
-			return fmt.Errorf("lake build go2lean-search: %w\n%s", err, out)
+		for {
+			out, err := lake(leanDir, "build", "go2lean-search")
+			if err == nil {
+				return nil
+			}
+			// A package's model Lean cannot build (regexp2's tables, #232)
+			// must not take every other package with it: set it aside,
+			// say so, and build the rest.
+			failed := failedModels(out)
+			if len(failed) == 0 {
+				return fmt.Errorf("lake build go2lean-search: %w\n%s", err, out)
+			}
+			for _, m := range failed {
+				if mvErr := excludeModel(leanDir, m); mvErr != nil {
+					return fmt.Errorf("lake build go2lean-search: %w\n%s", err, out)
+				}
+				fmt.Fprintf(os.Stderr, "go2lean: Lean could not build the model of %s; its package is not searched (%s)\n", m, firstLeanError(out))
+			}
+			if err := ssaout.WriteRegistry(leanDir); err != nil {
+				return err
+			}
 		}
-		return nil
 	}); err != nil {
 		return false, err
 	}
 	driverBuilt = leanDir
 	return true, nil
+}
+
+var failedModelRe = regexp.MustCompile(`✖ \[\d+/\d+\] Building Go2Lean\.Generated\.gossa\.([A-Za-z0-9_]+)`)
+
+// failedModels lists the generated models whose Lean build failed in a
+// lake log, once each.
+func failedModels(out string) []string {
+	var ms []string
+	for _, m := range failedModelRe.FindAllStringSubmatch(out, -1) {
+		if !slices.Contains(ms, m[1]) {
+			ms = append(ms, m[1])
+		}
+	}
+	return ms
+}
+
+// firstLeanError is the first error line of a lake log, shortened.
+func firstLeanError(out string) string {
+	for _, l := range strings.Split(out, "\n") {
+		if i := strings.Index(l, "error: "); i >= 0 {
+			l = l[i:]
+			if len(l) > 160 {
+				l = l[:160] + "…"
+			}
+			return l
+		}
+	}
+	return "build failed"
+}
+
+// excludeModel moves model m (its file and its parts) out of the
+// registry's directory, into Generated/excluded.
+func excludeModel(leanDir, m string) error {
+	src := filepath.Join(leanDir, "Go2Lean", "Generated", "gossa")
+	dst := filepath.Join(leanDir, "Go2Lean", "Generated", "excluded")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	moved := false
+	for _, name := range []string{m + ".lean", m} {
+		if _, err := os.Stat(filepath.Join(src, name)); err == nil {
+			_ = os.RemoveAll(filepath.Join(dst, name))
+			if err := os.Rename(filepath.Join(src, name), filepath.Join(dst, name)); err != nil {
+				return err
+			}
+			moved = true
+		}
+	}
+	if !moved {
+		return fmt.Errorf("model %s not found", m)
+	}
+	return nil
 }
 
 // BuildDriver builds the workspace's search executable now, against

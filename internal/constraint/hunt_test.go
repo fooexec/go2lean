@@ -2,6 +2,8 @@ package constraint
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/fooexec/go2lean/internal/contract"
@@ -80,5 +82,42 @@ func TestNilOnlySliceEmpty(t *testing.T) {
 	}
 	if n := g[1]["maxLen"]; n != 0 {
 		t.Errorf("opts: maxLen %v, want 0", n)
+	}
+}
+
+// A model Lean cannot build is set aside, with its parts, and named
+// (regexp2's syntax tables, #232).
+func TestFailedModelsExcluded(t *testing.T) {
+	log := "✔ [76/85] Built Go2Lean.Generated.gossa.bytes\n" +
+		"✖ [77/85] Building Go2Lean.Generated.gossa.github_com_dlclark_regexp2_v2_syntax.Part1 (516s)\n" +
+		"error: Part1.lean:5144:4: (deterministic) timeout at `«LCNF compiler»`\n"
+	got := failedModels(log)
+	if len(got) != 1 || got[0] != "github_com_dlclark_regexp2_v2_syntax" {
+		t.Fatalf("failedModels: %v", got)
+	}
+	if e := firstLeanError(log); e != "error: Part1.lean:5144:4: (deterministic) timeout at `«LCNF compiler»`" {
+		t.Errorf("firstLeanError: %q", e)
+	}
+	lean := t.TempDir()
+	gen := filepath.Join(lean, "Go2Lean", "Generated", "gossa")
+	if err := os.MkdirAll(filepath.Join(gen, got[0]), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{got[0] + ".lean", filepath.Join(got[0], "Part1.lean"), "bytes.lean"} {
+		if err := os.WriteFile(filepath.Join(gen, f), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := excludeModel(lean, got[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(gen, got[0]+".lean")); err == nil {
+		t.Error("model still in the registry's directory")
+	}
+	if _, err := os.Stat(filepath.Join(lean, "Go2Lean", "Generated", "excluded", got[0], "Part1.lean")); err != nil {
+		t.Errorf("parts not moved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(gen, "bytes.lean")); err != nil {
+		t.Error("another model was moved")
 	}
 }
