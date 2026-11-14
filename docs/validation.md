@@ -65,6 +65,8 @@ spec, at tier 1; the others showed three problems in the tool (#232, #233,
 A [seventh run](../docs/eval/seventh-run.md) on five more parsers found
 a goroutine leak on every parse error in magiconair/properties, with no
 spec; it is not in the project's tracker.
+An [eighth run](../docs/eval/eighth-run.md) on five string and CSS
+libraries found no new bug, and two replay problems, fixed.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover

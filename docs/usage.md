@@ -15,7 +15,10 @@ Required for isolated replay on Linux: [bubblewrap](https://github.com/container
 during the replay stage. Missing isolation refuses replay by default. For
 **trusted code only**, `GO2LEAN_SANDBOX=rlimits` explicitly permits resource
 limits without isolation, and `GO2LEAN_SANDBOX=off` permits unconfined execution.
-Neither weak mode is safe for arbitrary code. Build steps still run outside
+Neither weak mode is safe for arbitrary code. A replay runs in a copy of
+the package's directory: its files, `testdata`, and the subdirectories of
+data its tests read by relative path (no Go file or `go.mod`, 64 MB at
+most). Build steps still run outside
 confinement (including cgo), so a scratch clone is not a complete security boundary.
 
 Run `go2lean doctor` to check local tools, Go 1.26 or newer (with automatic

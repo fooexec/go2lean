@@ -124,3 +124,34 @@ func TestRunShowsModule(t *testing.T) {
 		t.Fatalf("module file: exit=%d err=%v stdout=%s stderr=%s", exit, err, out, stderr)
 	}
 }
+
+// A data directory the package's tests read by a relative path is copied
+// with the package (cascadia's test_resources); a sub-package and .git are
+// not.
+func TestCopyPackageDataDirs(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	for name, body := range map[string]string{
+		"a.go":                    "package a",
+		"test_resources/sel.json": "[]",
+		"testdata/x.txt":          "x",
+		"sub/b.go":                "package sub",
+		".git/HEAD":               "ref",
+	} {
+		p := filepath.Join(src, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := copyPackage(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]bool{"a.go": true, "test_resources/sel.json": true, "testdata/x.txt": true, "sub/b.go": false, ".git/HEAD": false} {
+		_, err := os.Stat(filepath.Join(dst, name))
+		if got := err == nil; got != want {
+			t.Errorf("%s copied: %v, want %v", name, got, want)
+		}
+	}
+}
