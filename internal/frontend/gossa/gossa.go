@@ -10783,6 +10783,12 @@ func isGeneratedMap(t types.Type) bool {
 // mapParam describes a map input; false when its key or value cannot be
 // described (the map then stays opaque).
 func (ab *abiBuilder) mapParam(name string, m *types.Map, src, ipath string, extra []string, stack []*types.Named) (contract.ABIParam, bool) {
+	// A test cannot write an entry whose key or value is another package's
+	// unexported type (grpc's keys.BuilderMap holds keys.builder values):
+	// the map stays opaque, nil in the test (#230).
+	if isForeignUnexported(ab.pkg, derefType(m.Key())) || isForeignUnexported(ab.pkg, derefType(m.Elem())) {
+		return contract.ABIParam{}, false
+	}
 	key, err := ab.param("key", m.Key(), stack)
 	if err != nil {
 		return contract.ABIParam{}, false
@@ -11122,4 +11128,12 @@ func withoutTestHelpers(fns []*ssa.Function, pkg *packages.Package) []*ssa.Funct
 		}
 	}
 	return slices.DeleteFunc(fns, func(f *ssa.Function) bool { return testFile(f) && !keep[f] })
+}
+
+// derefType strips one pointer.
+func derefType(t types.Type) types.Type {
+	if p, ok := t.(*types.Pointer); ok {
+		return p.Elem()
+	}
+	return t
 }

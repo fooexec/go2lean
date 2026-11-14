@@ -349,15 +349,12 @@ func harnessFunc(t *contract.Target, p *contract.Property, cx *contract.Countere
 		d.Decls = append(d.Decls, decl)
 		names = append(names, name)
 		collectImports(prm, imports)
-		if prm.Kind == contract.ABIError && cx.Inputs[prm.Model[0]] != "nil" {
-			imports["errors"] = true
-		}
-		if needsErrors(abi, prm, cx.Objects[prm.Go]) {
-			imports["errors"] = true
-		}
 	}
-	// Floats are written as math.Float64frombits(bits) (kept only if used).
+	// Floats are written as math.Float64frombits(bits), and an error as
+	// errors.New (kept only if used): an error may sit anywhere, in an
+	// interface input's implementer too (#230).
 	imports["math"] = true
+	imports["errors"] = true
 	// Types in the table may be reached only through references; their
 	// imports join the candidates, which are kept only when the generated
 	// code names the package.
@@ -1116,58 +1113,6 @@ func collectImports(p contract.ABIParam, into map[string]bool) {
 	for _, a := range p.Alts {
 		collectImports(a, into)
 	}
-}
-
-// needsErrors reports whether rendering the object needs the errors package
-// (a non-nil error somewhere inside a struct or pointee).
-func needsErrors(abi *contract.ABI, p contract.ABIParam, raw json.RawMessage) bool {
-	if raw == nil {
-		return false
-	}
-	var v any
-	if json.Unmarshal(raw, &v) != nil {
-		return false
-	}
-	var walk func(p contract.ABIParam, v any) bool
-	walk = func(p contract.ABIParam, v any) bool {
-		if p.TypeRef != "" {
-			for _, t := range abi.Types {
-				if t.GoType == p.TypeRef {
-					p.Fields = t.Fields
-				}
-			}
-		}
-		switch p.Kind {
-		case contract.ABIError:
-			return v != nil && v != "nil"
-		case contract.ABIStruct:
-			fields, _ := v.([]any)
-			for i, f := range p.Fields {
-				if i < len(fields) && walk(f, fields[i]) {
-					return true
-				}
-			}
-		case contract.ABIPtr:
-			return v != nil && p.Pointee != nil && walk(*p.Pointee, v)
-		case contract.ABISlice, contract.ABIArray:
-			elems, _ := v.([]any)
-			for _, e := range elems {
-				if p.ElemParam != nil && walk(*p.ElemParam, e) {
-					return true
-				}
-			}
-		case contract.ABIMap:
-			obj, _ := v.(map[string]any)
-			entries, _ := obj["map"].([]any)
-			for _, e := range entries {
-				if kv, ok := e.([]any); ok && len(kv) == 2 && walk(*p.Value, kv[1]) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	return walk(p, v)
 }
 
 // emptyComposite says whether e is a composite literal with no elements:

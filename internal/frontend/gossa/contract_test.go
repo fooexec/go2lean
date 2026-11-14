@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fooexec/go2lean/internal/contract"
 	"github.com/fooexec/go2lean/internal/ir"
 )
 
@@ -288,4 +289,53 @@ func (w Wrap) Get() int { return w.Token() }
 		return
 	}
 	t.Fatal("Wrap.Get not translated")
+}
+
+// TestMapOfForeignUnexportedOpaque: a map whose values are another
+// package's unexported type cannot be written by a test (grpc's
+// keys.BuilderMap, #230), so it stays opaque.
+func TestMapOfForeignUnexportedOpaque(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/m\n\ngo 1.22\n",
+		"keys/k.go": `package keys
+
+type builder struct{ n int }
+
+type BuilderMap map[string]builder
+
+func (m BuilderMap) Len() int { return len(m) }
+`,
+		"m.go": `package m
+
+import "example.com/m/keys"
+
+func Count(m keys.BuilderMap, n map[string]int) int { return m.Len() + len(n) }
+`,
+	}
+	for name, src := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, _, err := Translate(dir, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range p.Funcs {
+		if f.Name != "Count" {
+			continue
+		}
+		if k := f.ABI.Params[0].Kind; k != contract.ABIOpaque {
+			t.Errorf("keys.BuilderMap: kind %s, want opaque", k)
+		}
+		if k := f.ABI.Params[1].Kind; k != contract.ABIMap {
+			t.Errorf("map[string]int: kind %s, want map", k)
+		}
+		return
+	}
+	t.Fatal("Count not translated")
 }
