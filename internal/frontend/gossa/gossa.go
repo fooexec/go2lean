@@ -10528,7 +10528,7 @@ func isUnitTuple(t types.Type) bool {
 // of a named type from another package.
 func spell(pkg *types.Package, t types.Type) (src, importPath string) {
 	src, paths := spellAll(pkg, t)
-	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil && n.Obj().Pkg() != pkg {
+	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil && !samePkg(n.Obj().Pkg(), pkg) {
 		importPath = n.Obj().Pkg().Path()
 	} else if len(paths) > 0 {
 		importPath = paths[0]
@@ -10541,7 +10541,7 @@ func spell(pkg *types.Package, t types.Type) (src, importPath string) {
 // types inside it (`func(http.RoundTripper) http.RoundTripper`).
 func spellAll(pkg *types.Package, t types.Type) (src string, paths []string) {
 	qual := func(p *types.Package) string {
-		if p == pkg {
+		if samePkg(p, pkg) {
 			return ""
 		}
 		if !slices.Contains(paths, p.Path()) {
@@ -10554,6 +10554,15 @@ func spellAll(pkg *types.Package, t types.Type) (src string, paths []string) {
 	}
 	src = types.TypeString(t, qual)
 	return src, paths
+}
+
+// samePkg says whether p and q are the same package, by path: a package
+// compiled with its in-package tests has a second copy of its types (its
+// test variant), and one of its own types must not be spelled with a
+// qualifier there (go-jmespath's jmespath.ASTNode imported the package
+// into its own test).
+func samePkg(p, q *types.Package) bool {
+	return p == q || p != nil && q != nil && p.Path() == q.Path()
 }
 
 // recordImport, while an ABI is being built, notes every package a
