@@ -9622,6 +9622,17 @@ func (t *fnState) funcValue(dst ir.Var, fn *ssa.Function, bindings []ssa.Value) 
 			fn = method
 		}
 	}
+	if m, ok := fn.Object().(*types.Func); ok && strings.HasSuffix(fn.Name(), "$thunk") && len(bindings) == 0 {
+		// A method expression (*T).M: go/ssa's thunk takes the receiver
+		// first and calls M, which is how the model calls M itself
+		// (gomarkdown's block rules are a table of them). Only when the
+		// thunk's receiver has M's receiver type: (*T).M of a value
+		// method dereferences first.
+		if method := fn.Prog.FuncValue(m); method != nil && len(fn.Params) > 0 && len(method.Params) == len(fn.Params) &&
+			types.Identical(fn.Params[0].Type(), method.Params[0].Type()) {
+			fn = method
+		}
+	}
 	var args []ir.Var
 	for _, b := range bindings {
 		v, err := t.val(b)

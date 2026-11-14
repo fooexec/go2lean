@@ -512,6 +512,15 @@ func SeqTestMathTrig() bool { return testMathTrig() }
 // go2lean:sequence testMaxUint64
 func SeqTestMaxUint64() bool { return testMaxUint64() }
 
+// go2lean:sequence testMethodExprPointer
+func SeqTestMethodExprPointer() bool { return testMethodExprPointer() }
+
+// go2lean:sequence testMethodExprValue
+func SeqTestMethodExprValue() bool { return testMethodExprValue() }
+
+// go2lean:sequence testMethodExprValueViaPointer
+func SeqTestMethodExprValueViaPointer() bool { return testMethodExprValueViaPointer() }
+
 // go2lean:sequence testMinUint64
 func SeqTestMinUint64() bool { return testMinUint64() }
 
