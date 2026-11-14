@@ -228,6 +228,7 @@ memory).
 | a variable initialised to a constant expression over constants and such variables (`var mb = kb * 1024`) | its value, folded at compile time | exact (an expression that would wrap or divide by zero is not folded: havoc) |
 | a zero-valued variable no function writes | the zero value | exact |
 | a variable its initializer sets to a struct or array literal of constants (`var float64info = floatInfo{52, 11, -1023}`), whose address the code takes (`flt = &float64info`), when no code stores directly to it or through a pointer to its type | loads give the literal; its address is a fresh object holding it | exact for every load; two addresses of the variable compare unequal |
+| a variable whose part of the package initializer is over 2,000 instructions, in an initializer over 20,000 (regexp2's 12,000 lines of Unicode tables, #232) | read as if the initializer did not set it: from its constants where the rows above apply, else havoc | as those rows |
 | any other load | havoc (a confirmed panic whose run read one carries the verdict note `reads_unknown_state`, naming it: the program may initialise it first) | havoc |
 | stores to globals | ignored | assumption |
 | a package variable its initializer sets to a call with constant arguments whose result is a plain value (numbers, strings, bools, and arrays and structs of them: `var V0_11_0_0 = newKafkaVersion(0, 11, 0, 0)`), or an alias of one (`var MinVersion = V0_8_2_0`), and nothing else writes | the call again at each load (a plain value has no identity to keep) | exact as the call is (#55) |
