@@ -2538,11 +2538,39 @@ const maxImplementers = 64
 func (s *progState) implementers(iface *types.Interface) ([]types.Type, bool) {
 	var out []types.Type
 	for _, t := range s.boxed {
-		if types.Implements(t, iface) {
+		if types.Implements(t, iface) || implementsByName(t, iface) {
 			out = append(out, t)
 		}
 	}
 	return out, len(out) <= maxImplementers
+}
+
+// implementsByName says whether t has every method of iface, matched by
+// name and by the spelling of its signature. A package compiled with its
+// in-package tests is a second type-checked copy of the package (its test
+// variant): its interfaces are other objects than the ones the packages
+// importing it box values for, and types.Implements says no (gomarkdown's
+// ast.Walk saw no ast.Node implementer at all, #234).
+func implementsByName(t types.Type, iface *types.Interface) bool {
+	if iface.NumMethods() == 0 {
+		return false
+	}
+	ms := types.NewMethodSet(t) // a value type has its value methods only, as in Go
+	qual := func(p *types.Package) string { return p.Path() }
+	for i := 0; i < iface.NumMethods(); i++ {
+		m := iface.Method(i)
+		if !m.Exported() {
+			return false // an unexported method's identity is its package object
+		}
+		sel := ms.Lookup(nil, m.Name())
+		if sel == nil {
+			return false
+		}
+		if types.TypeString(sel.Obj().Type(), qual) != types.TypeString(m.Type(), qual) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *progState) newHavoc(width int, site, reason, goHint string) int {
@@ -6056,10 +6084,17 @@ func (t *fnState) dispatchOn(recv ir.Var, iface *types.Interface, m *types.Func)
 			continue
 		}
 		if _, ok := t.prog.ids[fn]; !ok {
-			if xr, ok := t.prog.xrefs[fn.String()]; !ok || xr.Package == t.prog.prog.Package {
+			if _, ok := t.prog.xrefs[fn.String()]; !ok {
 				// *T's method declared on T: go/ssa's wrapper is not
 				// translated, but T's method may be.
-				if id, ok := t.prog.derefMethod(ty, m); ok {
+				id, ok := t.prog.derefMethod(ty, m)
+				if !ok {
+					// A method promoted from an embedded field (gomarkdown's
+					// nodes embed ast.Container): go/ssa's wrapper is not
+					// translated either, the embedded type's method may be.
+					id, ok = t.prog.promotedMethod(ty, m)
+				}
+				if ok {
 					tags = append(tags, typeTag(ty))
 					fns = append(fns, nil)
 					derefs = append(derefs, id)
@@ -6128,11 +6163,111 @@ func (s *progState) derefMethod(ty types.Type, m *types.Func) (int, bool) {
 	} else if xr, ok := s.xrefs[vm.String()]; ok && xr.Package != s.prog.Package {
 		call.Kind, call.Callee, call.CalleePkg = ir.TermXCall, xr.ID, xr.Package
 		xcalls = []contract.XCall{xr}
+	} else if ok {
+		// This package's own method, as its other copy names it (its test
+		// variant's, see implementsByName).
+		call.Kind, call.Callee = ir.TermCall, xr.ID
+		calls = []int{xr.ID}
 	} else {
 		return 0, false
 	}
 	id := s.helper(name, false, false, n+3, params, []ir.Block{
 		{Name: "deref", Instrs: []ir.Instr{{Dst: load, Op: ir.Simple("loadPath"), Args: []ir.Var{0}}}, Term: call},
+		{Name: "ret", Term: ir.Term{Kind: ir.TermRet, V: dst}},
+	})
+	s.prog.Funcs[id].Calls, s.prog.Funcs[id].XCalls = calls, xcalls
+	return id, true
+}
+
+// promotedMethod is a helper for method m of type ty when m is promoted
+// from an embedded field (type Doc struct{ Container } with
+// (*Container).GetChildren): it walks the embedded fields from the
+// receiver, as go/ssa's wrapper does (a nil pointer on the way panics),
+// and calls the declared method. Not ok when m is not promoted, comes from
+// an embedded interface, or the declared method is not modelled.
+func (s *progState) promotedMethod(ty types.Type, m *types.Func) (int, bool) {
+	sel := s.sprog.MethodSets.MethodSet(ty).Lookup(m.Pkg(), m.Name())
+	if sel == nil || len(sel.Index()) < 2 {
+		return 0, false
+	}
+	obj, ok := sel.Obj().(*types.Func)
+	if !ok {
+		return 0, false
+	}
+	vm := s.sprog.FuncValue(obj)
+	if vm == nil || len(vm.Params) == 0 {
+		return 0, false // a method of an embedded interface
+	}
+	name := "$promoted:" + ty.String() + "." + m.Name()
+	if id, ok := s.helpers[name]; ok {
+		return id, true
+	}
+	n := vm.Signature.Params().Len()
+	params := make([]ir.Var, n+1) // the receiver, then m's parameters
+	for i := range params {
+		params[i] = ir.Var(i)
+	}
+	next := ir.Var(n + 1)
+	fresh := func() ir.Var { v := next; next++; return v }
+	var instrs []ir.Instr
+	cur, curT := ir.Var(0), ty
+	for _, fi := range sel.Index()[:len(sel.Index())-1] {
+		if p, ok := curT.Underlying().(*types.Pointer); ok {
+			st, ok := p.Elem().Underlying().(*types.Struct)
+			if !ok {
+				return 0, false
+			}
+			fa := fresh()
+			instrs = append(instrs, ir.Instr{Dst: fa, Op: ir.FieldAddr{I: fi}, Args: []ir.Var{cur}})
+			cur, curT = fa, types.NewPointer(st.Field(fi).Type())
+		} else {
+			st, ok := curT.Underlying().(*types.Struct)
+			if !ok {
+				return 0, false
+			}
+			f := fresh()
+			instrs = append(instrs, ir.Instr{Dst: f, Op: ir.Field{I: fi}, Args: []ir.Var{cur}})
+			cur, curT = f, st.Field(fi).Type()
+		}
+		if p, ok := curT.(*types.Pointer); ok {
+			if _, ok := p.Elem().Underlying().(*types.Pointer); ok {
+				// The address of an embedded pointer field: the pointer.
+				l := fresh()
+				instrs = append(instrs, ir.Instr{Dst: l, Op: ir.Simple("loadPath"), Args: []ir.Var{cur}})
+				cur, curT = l, p.Elem()
+			}
+		}
+	}
+	_, wantPtr := vm.Params[0].Type().Underlying().(*types.Pointer)
+	_, havePtr := curT.Underlying().(*types.Pointer)
+	switch {
+	case havePtr && !wantPtr:
+		l := fresh()
+		instrs = append(instrs, ir.Instr{Dst: l, Op: ir.Simple("loadPath"), Args: []ir.Var{cur}})
+		cur = l
+	case !havePtr && wantPtr:
+		return 0, false
+	}
+	dst := fresh()
+	call := ir.Term{CArgs: append([]ir.Var{cur}, params[1:]...), Dst: dst, Next: 1}
+	var calls []int
+	var xcalls []contract.XCall
+	if id, ok := s.ids[vm]; ok {
+		call.Kind, call.Callee = ir.TermCall, id
+		calls = []int{id}
+	} else if xr, ok := s.xrefs[vm.String()]; ok && xr.Package != s.prog.Package {
+		call.Kind, call.Callee, call.CalleePkg = ir.TermXCall, xr.ID, xr.Package
+		xcalls = []contract.XCall{xr}
+	} else if ok {
+		// This package's own method, as its other copy names it (its test
+		// variant's, see implementsByName).
+		call.Kind, call.Callee = ir.TermCall, xr.ID
+		calls = []int{xr.ID}
+	} else {
+		return 0, false
+	}
+	id := s.helper(name, false, false, int(next), params, []ir.Block{
+		{Name: "promoted", Instrs: instrs, Term: call},
 		{Name: "ret", Term: ir.Term{Kind: ir.TermRet, V: dst}},
 	})
 	s.prog.Funcs[id].Calls, s.prog.Funcs[id].XCalls = calls, xcalls
@@ -9650,6 +9785,14 @@ func (t *fnState) funcValue(dst ir.Var, fn *ssa.Function, bindings []ssa.Value) 
 			t.out.XCalls = append(t.out.XCalls, xr)
 		}
 		t.emit(ir.Instr{Dst: dst, Op: ir.XFuncRef{Key: ssaout.RegistryKey(Frontend, xr.Package), ID: xr.ID}, Args: args})
+		return nil
+	} else if ok {
+		// This package's own function, as the other copy of the package
+		// names it (its test variant's, see implementsByName).
+		if !slices.Contains(t.out.Calls, xr.ID) {
+			t.out.Calls = append(t.out.Calls, xr.ID)
+		}
+		t.emit(ir.Instr{Dst: dst, Op: ir.FuncRef{ID: xr.ID}, Args: args})
 		return nil
 	}
 	t.issue("func value %s is opaque (not modelled)", fn.Name())

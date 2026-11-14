@@ -339,3 +339,71 @@ func Count(m keys.BuilderMap, n map[string]int) int { return m.Len() + len(n) }
 	}
 	t.Fatal("Count not translated")
 }
+
+// TestDispatchIntoTestVariant: a package with in-package tests is compiled
+// from its test variant, a second copy of its types; its interface calls
+// must still see the types another package boxes (gomarkdown's ast.Walk
+// and the parser's nodes, #234), including methods promoted from an
+// embedded field.
+func TestDispatchIntoTestVariant(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/m\n\ngo 1.22\n",
+		"ast/a.go": `package ast
+
+type Node interface{ Kids() []Node }
+
+type Container struct{ Children []Node }
+
+func (c *Container) Kids() []Node { return c.Children }
+
+type Doc struct{ Container }
+
+func Walk(n Node) int {
+	c := 1
+	for _, k := range n.Kids() {
+		c += Walk(k)
+	}
+	return c
+}
+`,
+		"ast/a_test.go": `package ast
+
+import "testing"
+
+func TestNothing(t *testing.T) {}
+`,
+		"p/p.go": `package p
+
+import "example.com/m/ast"
+
+func Count() int { return ast.Walk(&ast.Doc{}) }
+`,
+	}
+	for name, src := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	progs, _, err := TranslateAllOpts(dir, Options{Deps: true, Tests: true}, "./...")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range progs {
+		if p.Package != "example.com/m/ast" {
+			continue
+		}
+		for _, f := range p.Funcs {
+			if f.Name == "Walk" {
+				if f.Status != contract.ModelComplete {
+					t.Errorf("Walk: %s %v, want complete", f.Status, f.Issues)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("ast.Walk not translated")
+}

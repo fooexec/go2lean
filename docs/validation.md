@@ -61,7 +61,7 @@ field, `fmt.Sprintln`), groupcache's from protobuf's text rendering
 A [sixth run](../docs/eval/sixth-run.md) (dateparse, govaluate, regexp2,
 gomarkdown) found govaluate's open crash on a trailing backslash with no
 spec, at tier 1; the others showed three problems in the tool (#232, #233,
-#234).
+#234), two of them fixed since.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover

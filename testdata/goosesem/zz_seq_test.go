@@ -638,6 +638,21 @@ func SeqTestPrimitiveTypesEqual() bool { return testPrimitiveTypesEqual() }
 // go2lean:sequence testPrintIgnored
 func SeqTestPrintIgnored() bool { return testPrintIgnored() }
 
+// go2lean:sequence testPromotedEmbeddedPointer
+func SeqTestPromotedEmbeddedPointer() bool { return testPromotedEmbeddedPointer() }
+
+// go2lean:sequence testPromotedNilEmbeddedPanics
+func SeqTestPromotedNilEmbeddedPanics() bool { return testPromotedNilEmbeddedPanics() }
+
+// go2lean:sequence testPromotedPointerMethod
+func SeqTestPromotedPointerMethod() bool { return testPromotedPointerMethod() }
+
+// go2lean:sequence testPromotedTwoLevels
+func SeqTestPromotedTwoLevels() bool { return testPromotedTwoLevels() }
+
+// go2lean:sequence testPromotedValueMethod
+func SeqTestPromotedValueMethod() bool { return testPromotedValueMethod() }
+
 // go2lean:sequence testRandReadDiffers
 func SeqTestRandReadDiffers() bool { return testRandReadDiffers() }
 
