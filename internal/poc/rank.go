@@ -250,6 +250,38 @@ func unexportedArg(abi *contract.ABI, cx *contract.Counterexample) string {
 		if f := unexportedSetIn(abi, cx, p); f != "" {
 			return p.Go + "." + f
 		}
+		if f := unexportedSetInAlt(abi, cx, p); f != "" {
+			return p.Go + "." + f
+		}
+	}
+	return ""
+}
+
+// unexportedSetInAlt is unexportedSetIn for an interface parameter
+// holding one of its alternatives (blackfriday's Renderer holding an
+// *Html with a forged tocMarker, #237): the alternative the value's tag
+// names, checked on the value inside.
+func unexportedSetInAlt(abi *contract.ABI, cx *contract.Counterexample, p contract.ABIParam) string {
+	if len(p.Alts) == 0 {
+		return ""
+	}
+	raw, ok := cx.Objects[p.Go]
+	if !ok {
+		return ""
+	}
+	var boxed struct {
+		Tag uint32          `json:"tag"`
+		V   json.RawMessage `json:"v"`
+	}
+	if json.Unmarshal(raw, &boxed) != nil || boxed.V == nil {
+		return ""
+	}
+	for _, a := range p.Alts {
+		if a.Tag != boxed.Tag {
+			continue
+		}
+		inner := &contract.Counterexample{Objects: map[string]json.RawMessage{a.Go: boxed.V}}
+		return unexportedSetIn(abi, inner, a)
 	}
 	return ""
 }

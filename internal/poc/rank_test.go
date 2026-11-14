@@ -293,3 +293,16 @@ func TestUnexportedArg(t *testing.T) {
 		}
 	}
 }
+
+// An interface argument holding the package's struct with an unexported
+// field set: blackfriday's Renderer as an *Html with a forged tocMarker.
+func TestUnexportedArgInAlt(t *testing.T) {
+	html := contract.ABIParam{Go: "renderer", GoType: "*Html", Kind: contract.ABIPtr, Tag: 7, Pointee: &contract.ABIParam{
+		Go: "renderer", GoType: "Html", Kind: contract.ABIStruct, Fields: []contract.ABIParam{
+			{Go: "flags", Kind: contract.ABIInt}, {Go: "tocMarker", Kind: contract.ABIInt}}}}
+	abi := &contract.ABI{Params: []contract.ABIParam{{Go: "renderer", GoType: "Renderer", Kind: contract.ABIAny, Alts: []contract.ABIParam{html}}}}
+	cx := &contract.Counterexample{Objects: map[string]json.RawMessage{"renderer": json.RawMessage(`{"tag": 7, "v": ["0", "91"]}`)}}
+	if got := unexportedArg(abi, cx); got != "renderer.tocMarker" {
+		t.Errorf("unexportedArg = %q, want renderer.tocMarker", got)
+	}
+}

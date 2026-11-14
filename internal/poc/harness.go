@@ -371,7 +371,10 @@ func harnessFunc(t *contract.Target, p *contract.Property, cx *contract.Countere
 	// qualifier the generated declarations mention.
 	decls := strings.Join(d.Decls, "\n") + "\n" + strings.Join(d.RetTypes, " ")
 	for ip := range imports {
-		if fixedImports[ip] {
+		if fixedImports[ip] || ip == abi.Package {
+			// The test is in the package itself: importing it is a cycle
+			// (go-jmespath's name, jmespath, appeared in a string literal
+			// and passed for a use of the package).
 			continue
 		}
 		name := importName(abi, ip)
