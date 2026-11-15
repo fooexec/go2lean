@@ -4688,6 +4688,15 @@ func (t *fnState) call(x *ssa.Call) error {
 			return nil
 		}
 	}
+	if callee != nil && callee.Name() == "go2leanAssume" && callee.Pkg != nil && shimPaths[callee.Pkg.Pkg.Path()] && len(x.Call.Args) == 1 {
+		// A model's assumption (osmodel: a file the program never wrote
+		// does not exist): recorded on the run that reaches it.
+		if c, ok := x.Call.Args[0].(*ssa.Const); ok && c.Value != nil && c.Value.Kind() == constant.String {
+			t.assume("%s", constant.StringVal(c.Value))
+			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
+			return nil
+		}
+	}
 	if callee != nil && callee.Name() == "go2leanProbe" && len(x.Call.Args) == 2 {
 		// A spec's probe: record the value, run nothing.
 		if c, ok := x.Call.Args[0].(*ssa.Const); ok && c.Value != nil && c.Value.Kind() == constant.String {

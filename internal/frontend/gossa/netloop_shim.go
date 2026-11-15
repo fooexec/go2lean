@@ -34,6 +34,12 @@ var osmodelSrc string
 var osmodelCalls = map[string]string{
 	"os.Getenv": "Getenv", "os.LookupEnv": "LookupEnv", "os.Setenv": "Setenv",
 	"os.Unsetenv": "Unsetenv", "os.Clearenv": "Clearenv", "os.MkdirTemp": "MkdirTemp",
+	// The file system (#70's follow-up): magiconair/properties' loaders
+	// read files the replay's sandbox does not have, and a havoc read made
+	// 5 spurious verdicts.
+	"os.ReadFile": "ReadFile", "os.WriteFile": "WriteFile", "os.Remove": "Remove",
+	"os.RemoveAll": "RemoveAll", "os.Mkdir": "Mkdir", "os.MkdirAll": "MkdirAll",
+	"os.Stat": "Stat", "os.Lstat": "Lstat", "os.IsNotExist": "IsNotExist", "os.IsExist": "IsExist",
 }
 
 // randmodelPath is the import path crypto/rand's model is checked under.

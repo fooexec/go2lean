@@ -44,7 +44,7 @@ own.
 |---|---|---|
 | A test variant's own type spelled with the package's qualifier (`jmespath.ASTNode{}`, from an assertion in the call tree): the PoC imported its own package, an import cycle | 1 inconclusive (go-jmespath) | fixed: packages compared by path |
 | An interface argument holding the package's struct with forged unexported fields ranked "plain inputs" | 2 blackfriday findings at tier 1 | fixed: tier 2 |
-| `os.ReadFile` is not modelled: the model reads a file Go does not find | 5 spurious (properties) | known (#70) |
+| `os.ReadFile` is not modelled: the model reads a file Go does not find | 5 spurious (properties) | fixed: a file system in the model (#243); properties then has 0 spurious |
 | A regexp from a non-constant pattern | 1 spurious (blackfriday) | known |
 
 Rerun with the fixes, go-jmespath has no inconclusive verdict and
@@ -55,6 +55,6 @@ blackfriday one tier-1 finding (`Latex.BlockCode`).
 - With the sixth run's govaluate, this is the second library where the
   default run, with no spec, finds a real defect a maintainer would fix;
   this one is not in the project's tracker.
-- The noise left is the outside world (files) and unmodelled regexps,
-  both known; the run's own mistakes (a PoC that did not build, two
+- The noise left was the outside world (files, since modelled) and
+  unmodelled regexps; the run's own mistakes (a PoC that did not build, two
   rankings) are fixed.
