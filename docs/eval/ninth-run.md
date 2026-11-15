@@ -56,12 +56,30 @@ for two routers many services stand on.
   interpreted as /user/:name/... routes". The sentence predates gin's
   static-over-param fallback; gin's open PR #4914 (2026-10-26) removes it
   for the same reason. Found independently, but not new.
+- **gin's `Context.ClientIP`.** Its doc states when the remote address is
+  returned (an untrusted remote, headers that are not valid, no trusted
+  proxies) and, read with it, that the result is otherwise an address from
+  the headers. A sequence spec over remote addresses, `X-Forwarded-For` and
+  `X-Real-IP` values (malformed ones included) and trusted-proxy lists.
+  The model's counterexample was spurious (it does not follow `net`'s
+  address parsing); Go's fuzzer held for 60 s (675k executions, the whole
+  table). No defect.
+- **gin's `AsciiJSON`.** The doc: "Generates ASCII-only JSON with escaped
+  non-ASCII characters". The spec renders a string drawn from a table of
+  characters and checks the output is ASCII and decodes back to the same
+  string. go2lean found a violation at trial 2, confirmed in Go: a
+  character above U+FFFF is written as `\u` and five hex digits, so `😀`
+  becomes `"\u1f600"`, which every JSON parser reads as `"ὠ0"`; `𝄞`
+  becomes `"ᴑe"`. The escape must be a UTF-16 surrogate pair
+  (`\ud83d\ude00`). It is gin's open issue #4688 (2026-06-03), with seven
+  open fix PRs, none merged. Found independently, five months later.
 
 ## What this says
 
 These five are mature and widely fuzzed or tested, and the default run
 finds no bug in them, which is what one would expect. A spec from the
-docs found the one place where gin's documentation and its router
-disagree, which a reader had reported three weeks earlier. The two fixes widen
+docs found two defects in gin within minutes each: a router behaviour its
+documentation denies and `AsciiJSON` corrupting every emoji. Both had been
+reported, three weeks and five months earlier, and neither is fixed. The two fixes widen
 what the search reaches (callbacks, partly broken modules); neither
 changes a verdict on the libraries above but jsonparser's.
