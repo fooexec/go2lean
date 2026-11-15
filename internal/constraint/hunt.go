@@ -292,6 +292,9 @@ func genIn(abi *contract.ABI, p contract.ABIParam, maxLen int, open []string) (m
 		if p.Zero == "nil" {
 			v = "nil"
 		}
+		if p.FuncLit != "" {
+			v = "nonnil" // a no-op callback (FuncLit), as the PoC passes
+		}
 		g := map[string]any{"k": "opaque", "name": p.Go, "v": v}
 		if p.ZeroModel != nil {
 			// An unexported field of a foreign struct: always its zero.

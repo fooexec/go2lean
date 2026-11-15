@@ -460,6 +460,12 @@ type ABIParam struct {
 	// foreign struct, which a test cannot set: the generator fixes the
 	// field to it (shape decoded by the Lean driver's valOfJson).
 	ZeroModel any `json:"zero_model,omitempty"`
+	// FuncLit is the Go literal of a no-op function of an opaque func
+	// type with no results (a callback): the search passes a non-nil
+	// function, calling it does nothing, and the PoC writes this literal
+	// (jsonparser's ArrayEach callback was always nil, and every search
+	// stopped at calling it).
+	FuncLit string `json:"func_lit,omitempty"`
 	// MaxLen, when negative, pins a string parameter to the empty string
 	// (strings.Builder: the test can only pass an empty one).
 	MaxLen int `json:"max_len,omitempty"`

@@ -147,7 +147,17 @@ func TranslateAllOpts(dir string, opts Options, patterns ...string) ([]*ir.Prog,
 		return nil, "", err
 	}
 	if errs := loadErrors(loaded); len(errs) > 0 {
-		return nil, "", fmt.Errorf("packages %s do not load:\n  %s", strings.Join(patterns, " "), strings.Join(errs, "\n  "))
+		// A package that does not load (easyjson's tests/, which needs
+		// generated code) is left out and named; the others are searched.
+		// A test variant that does not load falls back to the package.
+		ok, dropped := loadable(loaded)
+		if len(ok) == 0 {
+			return nil, "", fmt.Errorf("packages %s do not load:\n  %s", strings.Join(patterns, " "), strings.Join(errs, "\n  "))
+		}
+		for _, d := range dropped {
+			fmt.Fprintf(os.Stderr, "go2lean: %s does not load, not searched: %s\n", d.name, d.err)
+		}
+		loaded = ok
 	}
 	pkgs := selectVariant(loaded, opts.Tests)
 	if len(pkgs) == 0 {
@@ -1987,6 +1997,49 @@ func loadErrors(loaded []*packages.Package) []string {
 		}
 	})
 	return errs
+}
+
+type droppedPkg struct{ name, err string }
+
+// loadable splits the loaded packages into those that load with all they
+// import and the others, each named with its first error.
+func loadable(loaded []*packages.Package) ([]*packages.Package, []droppedPkg) {
+	bad := map[*packages.Package]string{}
+	var check func(p *packages.Package, seen map[*packages.Package]bool) string
+	check = func(p *packages.Package, seen map[*packages.Package]bool) string {
+		if e, ok := bad[p]; ok {
+			return e
+		}
+		if seen[p] {
+			return ""
+		}
+		seen[p] = true
+		e := ""
+		if len(p.Errors) > 0 {
+			e = p.Errors[0].Error()
+		} else {
+			for _, q := range p.Imports {
+				if qe := check(q, seen); qe != "" {
+					e = qe
+					break
+				}
+			}
+		}
+		bad[p] = e
+		return e
+	}
+	var ok []*packages.Package
+	var dropped []droppedPkg
+	for _, p := range loaded {
+		if e := check(p, map[*packages.Package]bool{}); e != "" {
+			if !strings.HasSuffix(p.PkgPath, ".test") {
+				dropped = append(dropped, droppedPkg{p.ID, e})
+			}
+			continue
+		}
+		ok = append(ok, p)
+	}
+	return ok, dropped
 }
 
 // selectVariant keeps the internal test variant of each package when one was
@@ -11022,6 +11075,9 @@ func (ab *abiBuilder) param(name string, t types.Type, stack []*types.Named) (co
 		return contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, Width: w, Model: []string{name}, Kind: contract.ABIFloat}, nil
 	case isOpaqueType(t) || isForeignOpaqueStruct(pkg, t) || isForeignUnexported(pkg, t):
 		p := contract.ABIParam{Go: name, GoType: src, TypePkg: ipath, ExtraPkgs: extra, Model: []string{name}, Kind: contract.ABIOpaque, Zero: zeroLit(t, src)}
+		if !isForeignUnexported(pkg, t) {
+			p.FuncLit = noopFuncLit(pkg, t, src)
+		}
 		if n, ok := types.Unalias(t).(*types.Named); ok && n.Obj().Pkg() != nil && isStruct(n) {
 			// A struct of a package translated from source (a big.Int): the
 			// test passes its zero value, and the translated methods read
@@ -11513,4 +11569,32 @@ func thunkMethod(fn *ssa.Function) *ssa.Function {
 		return nil
 	}
 	return method
+}
+
+// noopFuncLit is the Go literal of a function of type t that does nothing,
+// when t is a func type with no results (a callback): func(_ []byte, _ int)
+// {}, converted to t when t is named. "" otherwise.
+func noopFuncLit(pkg *types.Package, t types.Type, src string) string {
+	sig, ok := t.Underlying().(*types.Signature)
+	if !ok || sig.Results().Len() != 0 || sig.Recv() != nil {
+		return ""
+	}
+	var ps []string
+	for i := 0; i < sig.Params().Len(); i++ {
+		pt := sig.Params().At(i).Type()
+		if sig.Variadic() && i == sig.Params().Len()-1 {
+			if sl, ok := pt.(*types.Slice); ok {
+				es, _ := spellAll(pkg, sl.Elem())
+				ps = append(ps, "_ ..."+es)
+				continue
+			}
+		}
+		ps0, _ := spellAll(pkg, pt)
+		ps = append(ps, "_ "+ps0)
+	}
+	lit := "func(" + strings.Join(ps, ", ") + ") {}"
+	if _, named := types.Unalias(t).(*types.Named); named {
+		return src + "(" + lit + ")"
+	}
+	return lit
 }
