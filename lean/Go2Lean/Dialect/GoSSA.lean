@@ -427,6 +427,11 @@ inductive Op where
   | sprintln
   /-- Can `sprintln` format these arguments? -/
   | sprintlnOk
+  /-- `fmt.Sprint(args...)`: `sprintf` of one `%v` per operand, with a
+  space between two operands when neither is a string, as Go formats it. -/
+  | sprint
+  /-- Can `sprint` format these arguments? -/
+  | sprintOk
   /-- `regexp.MustCompile(p)` of a pattern built at run time: 0 when the
   model compiles it (`reCompile`), 1 when Go rejects it, 2 when the model
   does not take its syntax (#46). -/
@@ -1227,6 +1232,20 @@ def reflectValF (heap : Heap Val) (m : Nat) (kinds elems : List (Nat × Nat)) (x
 spaces between, a newline at the end. -/
 def sprintlnFormat (n : Nat) : List Nat :=
   List.intercalate [32] (List.replicate n [37, 118]) ++ [10]
+
+/-- Is the operand a string to `fmt.Sprint`: of a type of kind string
+(Go asks reflect for the kind, so a named string type counts)? -/
+def sprintIsString : Val → Bool
+  | .boxed _ (.str ..) => true
+  | _ => false
+
+/-- The format `fmt.Sprint` amounts to for the operands `xs`: `%v` each,
+a space between two operands when neither is a string. -/
+def sprintFormat : List Val → List Nat
+  | [] => []
+  | [_] => [37, 118]
+  | a :: tl@(b :: _) =>
+    [37, 118] ++ (if sprintIsString a || sprintIsString b then [] else [32]) ++ sprintFormat tl
 
 mutual
 /-- Format `fmt` with `args` (see `Op.sprintf`): the verbs `%v %s %d %t %x
@@ -3921,6 +3940,17 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
     match sliceElems heap args with
     | some xs => .ok (.bool ((sprintfBytes heap bt.toNat (natsOf us) (sprintlnFormat xs.length) xs).isSome), heap)
     | none => .ok (.bool false, heap)
+  | .sprintOk, [args, .int _ bt, .arr us] =>
+    match sliceElems heap args with
+    | some xs => .ok (.bool ((sprintfBytes heap bt.toNat (natsOf us) (sprintFormat xs) xs).isSome), heap)
+    | none => .ok (.bool false, heap)
+  | .sprint, [args, .int _ bt, .arr us] =>
+    match sliceElems heap args with
+    | some xs =>
+      match sprintfBytes heap bt.toNat (natsOf us) (sprintFormat xs) xs with
+      | some r => if r.length > strLimit then .panic .modelStuck else .ok (strAlloc heap r)
+      | none => .panic .modelStuck
+    | none => .panic .modelStuck
   | .sprintln, [args, .int _ bt, .arr us] =>
     match sliceElems heap args with
     | some xs =>

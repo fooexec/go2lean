@@ -39,7 +39,7 @@ No bug: nothing at tier 1 in any of the five. Below it:
 
 With templates finding nothing, specs were written from the docs alone
 (the [go2lean-spec skill](../../.claude/skills/go2lean-spec/SKILL.md)),
-for two routers many services stand on.
+for the routers many services stand on.
 
 - **httprouter's `CleanPath`.** Its doc calls it "the URL version of
   path.Clean": the spec compares it with `path.Clean("/"+p)`, trailing
@@ -73,13 +73,75 @@ for two routers many services stand on.
   becomes `"ᴑe"`. The escape must be a UTF-16 surrogate pair
   (`\ud83d\ude00`). It is gin's open issue #4688 (2026-06-03), with seven
   open fix PRs, none merged. Found independently, five months later.
+- **echo's router priority** ([labstack/echo](https://github.com/labstack/echo)
+  v5 `f275a6b`). A sequence spec over the routes added (static, `:param`,
+  `*`) and a request checks the guide's order (static, then param, then
+  any) against a reference matcher. The model's counterexample was
+  spurious, but Go's fuzzer found a difference in seconds: with only
+  `/users/:id`, `/users/42/files` is served with `id=42/files`. This is
+  deliberate (the router's comment: a param that ends a route "should act
+  similarly to any node"), and v4.16.5 does the same. The reference
+  matcher assumed that a param stops at a slash; that was the spec's
+  mistake. No defect.
+- **go-playground/validator** (`19397f2`). Most tags call the standard
+  library's parsers; probes of the edges, against what the doc says,
+  found three: `cidrv4` rejects an address with host bits
+  (`192.168.1.5/24`) that `cidr` and `cidrv6` accept (open issue #909),
+  `ipv4` takes an IPv4-mapped IPv6 address (open issue #1311), and
+  `hostname_port` takes the port `+80` (as Go's `net` does). Nothing new.
+- **Masterminds/semver** ([Masterminds/semver](https://github.com/Masterminds/semver)
+  `dd2b995`, the version library of Helm and many others). Five sequence
+  specs: `StrictNewVersion` takes semver.org's grammar and `Compare` is its
+  precedence (both against `golang.org/x/mod/semver`); `Compare` is a total
+  order; a parsed version's `String` parses back; and `Constraints.Check`
+  of AND and OR lists means what the README's tables say, for release
+  versions. In the model, the specs held (the constraint spec exhausted
+  87k inputs once `fmt.Sprint` was modelled; before, its havoc gave one
+  spurious verdict). Go's fuzzer found four violations, each in seconds:
+  - `~0.0.0` accepts `1.0.0`, where the README's `~1.2.3` rule gives
+    `< 0.1.0`: a special case in the code ("equivalent to >= 0.0.0"),
+    asked about in its open issue #254;
+  - a prerelease number above uint64 is compared as text, so
+    `9.9.9-10.-0` sorts below `9.9.9-10.99999999999999999999`: open PRs
+    #315 and #326;
+  - a version number above uint64 is rejected, and so is a string over
+    256 bytes: implementation limits, so the spec was narrowed to skip them;
+  - a version that `NewVersion` coerces (`1-` and 252 bytes) has a
+    `String` of 258 bytes, over the 256-byte limit that parsing checks, so
+    it cannot be read back from its JSON, text or SQL form; `SetPrerelease`
+    and `New` build such versions too. Not reported yet (the limit came in
+    April 2026); a draft issue waits for review.
+- **dustin/go-humanize** (`f5b54ae`). Nine specs from the docs: `Comma`
+  groups by three and `ParseComma` reads it back, `BigComma` is `Comma`,
+  `Commaf` round-trips, `CommafWithDigits` gives exactly the decimals
+  asked for, `Ordinal` follows the English rule, `BytesN` parses back
+  within its last digit, and `Bytes` and `SI` never show `1000` of a unit.
+  The model found two violations, both confirmed in Go:
+  - `Ordinal(-1)` is `-1th` (open PRs #171 and #179);
+  - `BytesN(MaxUint64, 4)` is `18.45 EB`, rounded up past MaxUint64, so
+    `ParseBytes` rejects it as too large; `IBytes(MaxUint64)` gives
+    `16 EiB` the same way. Go's fuzzer held on that spec for 40 s
+    (4.4M executions), since it rarely draws the top of the range. Not
+    reported (the open #182 and #183 are about exact halves); a draft waits
+    for review.
+  The fuzzer's one other violation was the spec's mistake: `Commaf` prints
+  a float's shortest decimal form, not the integer it holds. The model
+  gave two spurious verdicts, from `strconv.ParseFloat` (havoc on a
+  300-digit number) and the portable `math.Log`.
 
 ## What this says
 
-These five are mature and widely fuzzed or tested, and the default run
+These are mature and widely fuzzed or tested, and the default run
 finds no bug in them, which is what one would expect. A spec from the
 docs found two defects in gin within minutes each: a router behaviour its
 documentation denies and `AsciiJSON` corrupting every emoji. Both had been
-reported, three weeks and five months earlier, and neither is fixed. The two fixes widen
-what the search reaches (callbacks, partly broken modules); neither
+reported, three weeks and five months earlier, and neither is fixed.
+Specs on echo, go-playground/validator (by hand, against the standard
+library's parsers), Masterminds/semver and go-humanize found behaviours
+that the docs do not describe; all but two were already reported or by
+design, and the two left (semver's over-long versions, humanize's sizes
+near 2^64) are minor. These libraries are now combed by many automated
+fix PRs (17 opened on humanize and 23 on semver in 2026, still open), which leaves
+little for a newcomer. The fixes widen
+what the search reaches (callbacks, partly broken modules, `fmt.Sprint`); none
 changes a verdict on the libraries above but jsonparser's.

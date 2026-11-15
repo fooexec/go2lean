@@ -139,6 +139,8 @@ func TestGoose(t *testing.T) {
 		"testFloatSignedZero": testFloatSignedZero,
 		"testFloatToInt": testFloatToInt,
 		"testFmtHexByte": testFmtHexByte,
+		"testFmtSprint": testFmtSprint,
+		"testFmtSprintSpread": testFmtSprintSpread,
 		"testFmtSprintln": testFmtSprintln,
 		"testFmtSprintlnSpread": testFmtSprintlnSpread,
 		"testFmtWidthNarrow": testFmtWidthNarrow,

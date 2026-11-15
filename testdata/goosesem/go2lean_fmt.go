@@ -47,3 +47,21 @@ func sprintlnOf(args ...any) string { return fmt.Sprintln(args...) }
 func testFmtSprintlnSpread() bool {
 	return sprintlnOf("level", 7) == "level 7\n"
 }
+
+// fmt.Sprint: every operand with %v, a space between two operands only
+// when neither is a string (Masterminds/semver's spec formats versions
+// with it; havoc made a spurious verdict).
+
+func testFmtSprint() bool {
+	return fmt.Sprint(1, 2) == "1 2" && fmt.Sprint("a", 1, 2, "b") == "a1 2b" &&
+		fmt.Sprint() == "" && fmt.Sprint("x", "y") == "xy" && fmt.Sprint(true, 3) == "true 3"
+}
+
+type sprintName string
+
+func sprintOf(args ...any) string { return fmt.Sprint(args...) }
+
+func testFmtSprintSpread() bool {
+	// A named string type is a string to Sprint: no space next to it.
+	return sprintOf(sprintName("v"), 1, 2) == "v1 2" && sprintOf(uint8(255), -1) == "255 -1"
+}
