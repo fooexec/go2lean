@@ -39,7 +39,7 @@ No bug: nothing at tier 1 in any of the five. Below it:
 
 With templates finding nothing, specs were written from the docs alone
 (the [go2lean-spec skill](../../.claude/skills/go2lean-spec/SKILL.md)),
-for two routers many services stand on.
+for the routers many services stand on.
 
 - **httprouter's `CleanPath`.** Its doc calls it "the URL version of
   path.Clean": the spec compares it with `path.Clean("/"+p)`, trailing
@@ -73,10 +73,20 @@ for two routers many services stand on.
   becomes `"ᴑe"`. The escape must be a UTF-16 surrogate pair
   (`\ud83d\ude00`). It is gin's open issue #4688 (2026-06-03), with seven
   open fix PRs, none merged. Found independently, five months later.
+- **echo's router priority** ([labstack/echo](https://github.com/labstack/echo)
+  v5 `f275a6b`). A sequence spec over the routes added (static, `:param`,
+  `*`) and a request checks the guide's order (static, then param, then
+  any) against a reference matcher. The model's counterexample was
+  spurious, but Go's fuzzer found a difference in seconds: with only
+  `/users/:id`, `/users/42/files` is served with `id=42/files`. This is
+  deliberate (the router's comment: a param that ends a route "should act
+  similarly to any node"), and v4.16.5 does the same. The reference
+  matcher assumed that a param stops at a slash; that was the spec's
+  mistake. No defect.
 
 ## What this says
 
-These five are mature and widely fuzzed or tested, and the default run
+These are mature and widely fuzzed or tested, and the default run
 finds no bug in them, which is what one would expect. A spec from the
 docs found two defects in gin within minutes each: a router behaviour its
 documentation denies and `AsciiJSON` corrupting every emoji. Both had been
