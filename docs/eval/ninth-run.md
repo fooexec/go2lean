@@ -35,9 +35,33 @@ No bug: nothing at tier 1 in any of the five. Below it:
 | A callback that returns a value (`ArrayEachErr`'s) is still nil | 5 jsonparser findings at tier 2 and 3 | open |
 | `utf8.EncodeRune` from `x/net/html` not translated | 2 spurious (bluemonday) | open |
 
+## Specs from the documentation
+
+With templates finding nothing, specs were written from the docs alone
+(the [go2lean-spec skill](../../.claude/skills/go2lean-spec/SKILL.md)),
+for two routers many services stand on.
+
+- **httprouter's `CleanPath`.** Its doc calls it "the URL version of
+  path.Clean": the spec compares it with `path.Clean("/"+p)`, trailing
+  slash aside (the doc is silent on it), and checks the result is rooted
+  and canonical. Exhausted over the bounded domain in the model, and Go's
+  fuzzer held on both specs for 60 s each (5.5M executions). No defect.
+- **gin's routing tree** ([gin-gonic/gin](https://github.com/gin-gonic/gin)
+  `0f09c3a`). A sequence spec encodes the four rules of docs/doc.md,
+  "Parameters in path", over the order the routes are added and the
+  request. go2lean found a violation at trial 1, confirmed in Go: with
+  `/user/:name`, `/user/:name/*action` and `/user/groups`, a request for
+  `/user/groups/x` is served by `/user/:name/*action` (`name=groups`),
+  where the doc says "Routes starting with /user/groups are never
+  interpreted as /user/:name/... routes". The sentence predates gin's
+  static-over-param fallback; gin's open PR #4914 (2026-10-26) removes it
+  for the same reason. Found independently, but not new.
+
 ## What this says
 
 These five are mature and widely fuzzed or tested, and the default run
-finds no bug in them, which is what one would expect. The two fixes widen
+finds no bug in them, which is what one would expect. A spec from the
+docs found the one place where gin's documentation and its router
+disagree, which a reader had reported three weeks earlier. The two fixes widen
 what the search reaches (callbacks, partly broken modules); neither
 changes a verdict on the libraries above but jsonparser's.
