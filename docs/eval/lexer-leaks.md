@@ -34,8 +34,10 @@ its state machine inside `NextToken`.
 Every syntax error leaves one goroutine behind: `{{/bar}}`,
 `{{#each a}}{{/if}}`, `{{> }}`, `{{foo bar=}}`, `{{^}}`, `{{else`. A lexer
 error (`{{!-- x`, an unclosed comment) does not leak: the error token is
-the lexer's last send. Neither repository's tracker mentions it. An issue
-for mailgun/raymond is drafted, not filed.
+the lexer's last send. Neither repository's tracker mentions it, and
+neither will be told: both are archived (aymerick/raymond in June 2025,
+the mailgun fork in March 2024), so the leak is not reported. Projects
+that import raymond keep it.
 
 **What go2lean found, and what it took.** The first `go2lean run` found
 the leak only through `lexer.Scan` (tier 1). `Parse` and `Render` were

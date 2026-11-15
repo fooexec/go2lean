@@ -31,6 +31,10 @@ replays each candidate as a real `go test`. Keep the name go2lean.
 - Do not post to other projects' trackers (issues, PRs, comments) without
   the user's consent.
 
+- Evaluate only maintained projects: before picking a repository, check
+  that it, and the fork a finding would be reported to, is not archived
+  (a fork's status needs `fork:true` in a repository search).
+
 ## Words
 
 - The pipeline has three stages: the **compile stage** (Go to the Lean
