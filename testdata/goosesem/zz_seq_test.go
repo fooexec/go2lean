@@ -329,6 +329,30 @@ func SeqTestErrorsIsWrapped() bool { return testErrorsIsWrapped() }
 // go2lean:sequence testExplicitBlockStmt
 func SeqTestExplicitBlockStmt() bool { return testExplicitBlockStmt() }
 
+// go2lean:sequence testFSMissing
+func SeqTestFSMissing() bool { return testFSMissing() }
+
+// go2lean:sequence testFSMkdirAllStat
+func SeqTestFSMkdirAllStat() bool { return testFSMkdirAllStat() }
+
+// go2lean:sequence testFSMkdirExists
+func SeqTestFSMkdirExists() bool { return testFSMkdirExists() }
+
+// go2lean:sequence testFSOverwrite
+func SeqTestFSOverwrite() bool { return testFSOverwrite() }
+
+// go2lean:sequence testFSRemove
+func SeqTestFSRemove() bool { return testFSRemove() }
+
+// go2lean:sequence testFSRemoveAll
+func SeqTestFSRemoveAll() bool { return testFSRemoveAll() }
+
+// go2lean:sequence testFSRemoveNonEmpty
+func SeqTestFSRemoveNonEmpty() bool { return testFSRemoveNonEmpty() }
+
+// go2lean:sequence testFSWriteRead
+func SeqTestFSWriteRead() bool { return testFSWriteRead() }
+
 // go2lean:sequence testFieldSliceAlias
 func SeqTestFieldSliceAlias() bool { return testFieldSliceAlias() }
 
