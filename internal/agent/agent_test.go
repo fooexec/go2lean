@@ -1,8 +1,14 @@
 package agent
 
 import (
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fooexec/go2lean/internal/contract"
 )
@@ -126,5 +132,54 @@ func TestAskReportRetriesNonReport(t *testing.T) {
 	got, err := askReport(ask, "P")
 	if err != nil || !strings.HasPrefix(got, "# report") || n != 2 {
 		t.Fatalf("askReport = %q, %v after %d calls", got, err, n)
+	}
+}
+
+// goTestBuild reports a spec file that does not build as go test builds
+// it, which the compile stage tolerates (a variadic parameter before the
+// result, as an agent wrote for panjf2000/ants).
+func TestGoTestBuildReportsBadSpec(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, src string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/m\n\ngo 1.22\n")
+	write("m.go", "package m\n\nfunc F(xs ...int) int { return len(xs) }\n")
+	if errs := goTestBuild(dir, "."); errs != nil {
+		t.Fatalf("a package with no spec: %v", errs)
+	}
+	write("go2lean_specs_test.go", "package m\n\nfunc SpecF(xs ...int, ret int) bool { return ret == len(xs) }\n")
+	errs := goTestBuild(dir, ".")
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "final parameter") {
+		t.Fatalf("want the compiler's error, got %v", errs)
+	}
+}
+
+type flakyLLM struct{ fails, calls int }
+
+func (f *flakyLLM) Name() string { return "flaky" }
+
+func (f *flakyLLM) Complete(context.Context, string, string) (string, error) {
+	f.calls++
+	if f.calls <= f.fails {
+		return "", errors.New("read: connection reset by peer")
+	}
+	return "ok", nil
+}
+
+// completeRetrying survives a dropped connection (a proxy reset ended an
+// agent run on alitto/pond) and gives up after llmAttempts tries.
+func TestCompleteRetrying(t *testing.T) {
+	defer func(w time.Duration) { llmRetryWait = w }(llmRetryWait)
+	llmRetryWait = time.Millisecond
+	f := &flakyLLM{fails: 1}
+	if resp, err := completeRetrying(context.Background(), f, "s", "u", io.Discard); err != nil || resp != "ok" || f.calls != 2 {
+		t.Fatalf("one failure: %q, %v after %d calls", resp, err, f.calls)
+	}
+	f = &flakyLLM{fails: llmAttempts}
+	if _, err := completeRetrying(context.Background(), f, "s", "u", io.Discard); err == nil || f.calls != llmAttempts {
+		t.Fatalf("every attempt fails: %v after %d calls", err, f.calls)
 	}
 }
