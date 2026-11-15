@@ -4380,6 +4380,13 @@ func (t *fnState) conv(dst ssa.Value, src ssa.Value) error {
 			return t.complexGuarded(dst, sw, ir.Raw(fmt.Sprintf("(.cconv %d %d)", sw, dw)), []ir.Var{a}, fmt.Sprintf("conversion %s -> %s", src.Type(), dst.Type()))
 		}
 	}
+	if done, err := t.unsafeCast(dst, src); done || err != nil {
+		return err
+	}
+	if isUnsafePointerType(dst.Type()) && onlyUnsafeCasts(dst) {
+		// Read only by the conversions unsafeCast lowers: nothing to do.
+		return nil
+	}
 	if isOpaqueType(dst.Type()) || isOpaqueType(src.Type()) {
 		// complex numbers, unsafe pointers: the model does not compute with them.
 		return t.havoc(dst, fmt.Sprintf("conversion %s -> %s", src.Type(), dst.Type()), "opaque-op", "")
