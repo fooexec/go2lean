@@ -863,6 +863,9 @@ func SeqTestSlicesSortInts() bool { return testSlicesSortInts() }
 // go2lean:sequence testSlicesSortStableFunc
 func SeqTestSlicesSortStableFunc() bool { return testSlicesSortStableFunc() }
 
+// go2lean:sequence testSortInts
+func SeqTestSortInts() bool { return testSortInts() }
+
 // go2lean:sequence testSortSearch
 func SeqTestSortSearch() bool { return testSortSearch() }
 
