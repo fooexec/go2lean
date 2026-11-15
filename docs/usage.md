@@ -233,7 +233,11 @@ a model ID supported by your chosen endpoint.
 go run ./cmd/go2lean agent -model model_name -base-url https://api.minimaxi.com/anthropic ./examples/oob
 ```
 
-Every prompt and response is
+Each spec file the agent writes is first built as `go test` builds the
+package's tests (`go test -c`), since the compile stage tolerates type
+errors; the compiler's errors and the specs the frontend rejects go back to
+the agent, for up to `-repairs` rounds. A call to the LLM that fails (a
+dropped connection) is tried twice more. Every prompt and response is
 written to `out/agent/<package>/`, and the report lands in `out/agent/<package>/report.md`. A
 revised spec file in the report round triggers one more pass.
 

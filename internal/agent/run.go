@@ -74,7 +74,7 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 		call++
 		_ = os.WriteFile(filepath.Join(logDir, fmt.Sprintf("call-%d-prompt.md", call)), []byte(system+"\n\n---\n\n"+user), 0o644)
 		fmt.Fprintf(out, "== agent (%s) call %d\n", llm.Name(), call)
-		resp, err := llm.Complete(ctx, system, user)
+		resp, err := completeRetrying(ctx, llm, system, user, out)
 		if err != nil {
 			return "", err
 		}
@@ -102,13 +102,23 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 				return "", nil, err
 			}
 			fmt.Fprintf(out, "== Compile stage (specs, attempt %d)\n", repair+1)
-			report, err := pipeline.Compile(ws, env, pattern, out)
-			var issues []string
-			if err != nil {
-				// A spec that does not even type-check is an issue for the agent, not a crash.
-				issues = []string{"go build: " + err.Error()}
-			} else {
-				issues = specIssues(report)
+			var report *contract.ModelReport
+			// The compile stage tolerates type errors (it builds what
+			// loads), so the spec file is first built as go test builds the
+			// package's tests: the replay runs them that way.
+			issues := goTestBuild(moduleDir, pattern)
+			var err error
+			switch {
+			case issues != nil:
+				err = fmt.Errorf("go test build of %s failed", pattern)
+			default:
+				report, err = pipeline.Compile(ws, env, pattern, out)
+				if err != nil {
+					// A spec that does not even type-check is an issue for the agent, not a crash.
+					issues = []string{"go build: " + err.Error()}
+				} else {
+					issues = specIssues(report)
+				}
 			}
 			if len(issues) == 0 {
 				_ = os.WriteFile(filepath.Join(logDir, specFile), []byte(spec), 0o644)
@@ -353,6 +363,60 @@ func goList(root, pattern string) (dir, name, path string, err error) {
 		return "", "", "", fmt.Errorf("go list %s: unexpected output %q", pattern, b)
 	}
 	return parts[0], parts[1], parts[2], nil
+}
+
+// llmAttempts is how many times one LLM call is tried: a long call can
+// lose its connection (a proxy's reset), which should not end a run whose
+// specs took minutes to write.
+const llmAttempts = 3
+
+// llmRetryWait is the first pause before trying an LLM call again.
+var llmRetryWait = 5 * time.Second
+
+// completeRetrying calls llm, trying again after an error, with a pause
+// that doubles, unless ctx is done.
+func completeRetrying(ctx context.Context, llm LLM, system, user string, out io.Writer) (string, error) {
+	wait := llmRetryWait
+	var err error
+	for attempt := 1; attempt <= llmAttempts; attempt++ {
+		var resp string
+		if resp, err = llm.Complete(ctx, system, user); err == nil {
+			return resp, nil
+		}
+		if attempt == llmAttempts || ctx.Err() != nil {
+			break
+		}
+		fmt.Fprintf(out, "  %s: %v; trying again in %s\n", llm.Name(), err, wait)
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+		wait *= 2
+	}
+	return "", err
+}
+
+// goTestBuild builds the test binary of pattern (in root) as go test
+// would, discarding it, and returns the compiler's error lines, or nil when
+// it builds.
+func goTestBuild(root, pattern string) []string {
+	cmd := exec.Command("go", "test", "-c", "-o", os.DevNull, pattern)
+	cmd.Dir = root
+	b, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			lines = append(lines, "go build: "+l)
+		}
+	}
+	if len(lines) == 0 {
+		lines = []string{"go build: " + err.Error()}
+	}
+	return lines
 }
 
 // specFuncs names the functions a spec file declares.

@@ -53,9 +53,10 @@ Rules for a spec function:
   errors compared with nil, encoding/json Marshal and Unmarshal (structs,
   maps, slices, interface{}; the OpenAI and Anthropic SDK types included),
   calls to functions and methods of the package and of the packages it
-  imports. Floats are opaque (no float arithmetic or comparisons in a
-  spec); goroutines, channels and select are not modelled; time.Now, I/O
-  and the network give unknown values.
+  imports, floats (IEEE arithmetic and comparisons), goroutines,
+  channels, select, sync (Mutex, RWMutex, WaitGroup, Once, Cond) and
+  sync/atomic, with every interleaving searched and goroutine leaks and
+  deadlocks detected. time.Now, I/O and the network give unknown values.
 - A spec may call unexported functions of the package and build its own
   helper values (a converter struct literal, a replayed event sequence).
 - A loop is fine; the model runs it with bounded fuel.
@@ -97,6 +98,19 @@ reach a bad state). Write them as a sequence spec:
           }
           return sum == c.total
       }
+
+Stateful and concurrent APIs (a pool, a cache, a scheduler, a queue, a
+client with a connection): the bugs are in how operations combine, so a
+spec of one method alone rarely finds them. Write a sequence spec that
+drives the object through its documented operations in any order (submit,
+resize, remove, close, restart), each event choosing one, and checks the
+documented contract after every step against what the sequence knows: a
+reference model (a map, a list, a counter) for what it holds, and what the
+docs promise for each call (the error a closed object returns, a capacity
+that limits how much runs at once, a limit on how many times something
+runs). Make the state the spec reasons about observable: tasks that block
+on a channel the sequence closes, so the number running is known. Close
+the object at the end; the replay then reports any goroutine left behind.
 
 Good properties are ones a real bug could violate: results inside a range,
 sign and overflow behaviour on large inputs, off-by-one at boundaries
