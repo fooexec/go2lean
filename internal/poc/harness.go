@@ -499,6 +499,9 @@ func paramDecl(abi *contract.ABI, p contract.ABIParam, cx *contract.Counterexamp
 		if p.GoType == "*testing.T" {
 			return fmt.Sprintf("%s := go2leanT", p.Go), nil
 		}
+		if p.FuncLit != "" {
+			return fmt.Sprintf("var %s %s = %s", p.Go, p.GoType, p.FuncLit), nil
+		}
 		return fmt.Sprintf("var %s %s", p.Go, p.GoType), nil
 	case contract.ABIString:
 		if p.MaxLen < 0 {
@@ -620,6 +623,9 @@ func literal(abi *contract.ABI, p contract.ABIParam, v any) (string, error) {
 	case contract.ABIBool:
 		return fmt.Sprint(v), nil
 	case contract.ABIOpaque:
+		if p.FuncLit != "" {
+			return p.FuncLit, nil
+		}
 		if p.Zero != "" {
 			return p.Zero, nil
 		}

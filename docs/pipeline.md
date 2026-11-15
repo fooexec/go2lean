@@ -27,6 +27,11 @@ come from a read-only memory oracle fixed per run; values the frontend cannot
 model are explicit havoc inputs. The model may over-approximate; it never
 silently guesses. Lean core only — no Mathlib.
 
+A package of the patterns that does not load (a type error in it, or in
+what it imports, as easyjson's `tests/` without its generated code) is left
+out: the run names it with its first error and compiles the others. A test
+variant that does not load falls back to the package without its tests.
+
 ### Spec & search stage
 
 Three property shapes:

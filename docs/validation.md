@@ -71,6 +71,10 @@ A [hunt for goroutine lexers](../docs/eval/lexer-leaks.md) found the
 properties leak again in raymond (and its maintained fork): every template
 syntax error leaks a goroutine, unreported; after five model and replay
 fixes, `go2lean run` finds it through `raymond.Parse` at tier 1.
+A [ninth run](../docs/eval/ninth-run.md) on five widely used libraries
+(go-ini, jsonparser, httprouter, bluemonday, easyjson) found no bug, and
+two places the search stopped short (callbacks, a package that does not
+load), fixed.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover
