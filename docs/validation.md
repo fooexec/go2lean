@@ -64,7 +64,7 @@ repository is archived) with no spec, at tier 1; the others showed three problem
 #234), two of them fixed since.
 A [seventh run](../docs/eval/seventh-run.md) on five more parsers found
 a goroutine leak on every parse error in magiconair/properties, with no
-spec; it is not in the project's tracker.
+spec; reported as magiconair/properties#101.
 An [eighth run](../docs/eval/eighth-run.md) on five string and CSS
 libraries found no new bug, and two replay problems, fixed.
 A [hunt for goroutine lexers](../docs/eval/lexer-leaks.md) found the
