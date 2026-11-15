@@ -83,6 +83,11 @@ An [eleventh run](../docs/eval/eleventh-run.md) on concurrent libraries
 found that panjf2000/ants's `Tune` does not shrink a pool (unreported) and
 that gocron's `WithLimitedRuns` overruns (an open PR), both with sequence
 specs from the docs under `go2lean fuzz`.
+A [twelfth run](../docs/eval/twelfth-run.md) let `go2lean agent` write the
+specs. With Claude Opus 5.5 it found pond's subpool hang (an open issue)
+and two unreported ants defects (`Invoke(nil)` dropped, sizes above
+MaxInt32 wrapped). It also fixed three agent problems: specs that do not
+build, dropped connections, an outdated prompt.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover
