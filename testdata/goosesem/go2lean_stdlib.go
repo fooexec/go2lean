@@ -59,3 +59,16 @@ func testSortSearch() bool {
 	return i == 3 && sort.SearchInts(xs, 9) == 4 && sort.SearchInts(xs, 10) == 5 &&
 		sort.SearchStrings(words, "kiwi") == 1 && sort.SearchStrings(words, "a") == 0
 }
+
+// sort's sorts of basic slices, which call slices.Sort and slices.IsSorted.
+func testSortInts() bool {
+	xs := []int{3, -1, 2, 2, 0}
+	ws := []string{"pear", "", "apple", "kiwi"}
+	if sort.IntsAreSorted(xs) || sort.StringsAreSorted(ws) {
+		return false
+	}
+	sort.Ints(xs)
+	sort.Strings(ws)
+	return sort.IntsAreSorted(xs) && sort.StringsAreSorted(ws) &&
+		xs[0] == -1 && xs[1] == 0 && xs[2] == 2 && xs[4] == 3 && ws[0] == "" && ws[1] == "apple" && ws[3] == "pear"
+}

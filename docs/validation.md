@@ -79,6 +79,10 @@ A [tenth run](../docs/eval/tenth-run.md) on libraries with an exact
 reference (shopspring/decimal against `math/big`, tidwall/gjson and sjson
 against `encoding/json`) found no bug; it fixed two model gaps (unsafe
 string casts, `DeepEqual` on decoded JSON).
+An [eleventh run](../docs/eval/eleventh-run.md) on concurrent libraries
+found that panjf2000/ants's `Tune` does not shrink a pool (unreported) and
+that gocron's `WithLimitedRuns` overruns (an open PR), both with sequence
+specs from the docs under `go2lean fuzz`.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover

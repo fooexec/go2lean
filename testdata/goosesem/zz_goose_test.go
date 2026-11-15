@@ -293,6 +293,7 @@ func TestGoose(t *testing.T) {
 		"testSlicesSortFunc": testSlicesSortFunc,
 		"testSlicesSortInts": testSlicesSortInts,
 		"testSlicesSortStableFunc": testSlicesSortStableFunc,
+		"testSortInts": testSortInts,
 		"testSortSearch": testSortSearch,
 		"testStandardForLoop": testStandardForLoop,
 		"testStoreComposite": testStoreComposite,

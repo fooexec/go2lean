@@ -1751,13 +1751,18 @@ var modelledNet = map[string]bool{
 // modelledFunc says whether a function of a standard-library package that
 // is not modelled as a whole is translated from source on its own.
 // modelledSort are the binary searches of package sort, translated from
-// source (#46): a loop calling the program's predicate. A havoc result
+// source (#46): a loop calling the program's predicate; and the sorts of
+// basic slices, which call package slices. A havoc result
 // indexed past the slice searched (golang.org/x/text/language's
 // Canonicalize, eval 5's c022).
 var modelledSort = map[string]bool{
 	"sort.Search": true, "sort.SearchInts": true, "sort.SearchStrings": true,
 	"sort.Find": true, "(sort.IntSlice).Search": true, "(sort.StringSlice).Search": true,
 	"sort.SearchInts$1": true, "sort.SearchStrings$1": true,
+	// The sorts of basic slices: slices.Sort and slices.IsSorted, which the
+	// model translates (golang-lru's spec sorts the keys it compares).
+	"sort.Ints": true, "sort.Strings": true, "sort.Float64s": true,
+	"sort.IntsAreSorted": true, "sort.StringsAreSorted": true, "sort.Float64sAreSorted": true,
 }
 
 // modelledMath are the functions of package math translated from source
