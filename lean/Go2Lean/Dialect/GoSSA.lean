@@ -363,6 +363,13 @@ inductive Op where
   | bytesToStr
   /-- `[]byte(s)`; copies. -/
   | strToBytes
+  /-- A zero-copy view as a string (`unsafeStr data n`): the first `n` bytes
+  of `data`, a string or byte slice, sharing its bytes; the unsafe
+  conversions `*(*string)(unsafe.Pointer(&b))` and a string header's. -/
+  | unsafeStr
+  /-- A zero-copy view as a byte slice (`unsafeBytes data n c`): length `n`
+  and capacity `c` over the bytes of `data`, a string or byte slice. -/
+  | unsafeBytes
   /-- `[]rune(s)`: UTF-8 decoded, invalid bytes become U+FFFD. -/
   | strToRunes
   /-- `string(rs)` for a slice of runes. -/
@@ -1297,6 +1304,33 @@ def mapEntries (heap : Heap Val) : Val → Option (Val × List (Val × Val))
 def mapObj (entries : List (Val × Val)) : Val :=
   .arr (entries.map fun (k, v) => .tuple [k, v])
 
+/-- The bits of a float64 that `knownFloat`'s decimal bytes denote
+(digits, an optional point and fraction, an optional sign), correctly
+rounded. -/
+def decimalBits (bs : List Val) : Option Nat := do
+  let cs ← bs.mapM fun | .int 8 b => some b.toNat | _ => none
+  let digit (c : Nat) := 48 ≤ c && c ≤ 57
+  let (neg, rest) := match cs with
+    | 45 :: r => (true, r)
+    | r => (false, r)
+  let ip := rest.takeWhile digit
+  let fp ← match rest.drop ip.length with
+    | [] => some []
+    | 46 :: r => if r.all digit then some r else none
+    | _ => none
+  if ip.isEmpty then none
+  let m := (ip ++ fp).foldl (fun acc c => acc * 10 + (c - 48)) 0
+  let f := Float.ofScientific m true fp.length
+  some (if neg then -f else f).toBits.toNat
+
+/-- The IEEE bits of a `w`-bit float value the model knows. -/
+def floatBits? (w : Nat) : Val → Option Nat
+  | .int w' b => if w' == w then some b.toNat else none
+  | .tuple [.arr bs] => if w == 64 then decimalBits bs else none
+  | _ => none
+
+def f64Of (n : Nat) : Float := Float.ofBits (UInt64.ofNat n)
+
 /-- How many levels `reflectDeepEq` follows (pointers, elements, fields). -/
 def deepEqLevels : Nat := 32
 
@@ -1349,6 +1383,13 @@ def reflectDeepEq (heap : Heap Val) : Nat → Val → Val → Option Bool
     | .opaqueNil, .opaqueNil => some true
     | .opaqueNil, .boxed .. | .boxed .., .opaqueNil => some false
     | .opaqueNil, .slice r .. | .slice r .., .opaqueNil => some (r == 0)
+    -- A float64 decoded from JSON (knownFloat's decimal bytes) against one
+    -- the program computed or another decoded one: compared as floats, as
+    -- DeepEqual does (==).
+    | .tuple [.arr _], .int 64 _ | .int 64 _, .tuple [.arr _] | .tuple [.arr _], .tuple [.arr _] =>
+      match floatBits? 64 a, floatBits? 64 b with
+      | some x, some y => some (f64Of x == f64Of y)
+      | _, _ => none
     | .int .., .int .. | .bool .., .bool .. | .err false, .err false => eqVal a b
     | _, _ => none
 where
@@ -1769,32 +1810,6 @@ library's fixed buffers, bufio's 4096 bytes and a stripe lock table
 (#71). -/
 def sliceBound : Nat := 16384
 
-/-- The bits of a float64 that `knownFloat`'s decimal bytes denote
-(digits, an optional point and fraction, an optional sign), correctly
-rounded. -/
-def decimalBits (bs : List Val) : Option Nat := do
-  let cs ← bs.mapM fun | .int 8 b => some b.toNat | _ => none
-  let digit (c : Nat) := 48 ≤ c && c ≤ 57
-  let (neg, rest) := match cs with
-    | 45 :: r => (true, r)
-    | r => (false, r)
-  let ip := rest.takeWhile digit
-  let fp ← match rest.drop ip.length with
-    | [] => some []
-    | 46 :: r => if r.all digit then some r else none
-    | _ => none
-  if ip.isEmpty then none
-  let m := (ip ++ fp).foldl (fun acc c => acc * 10 + (c - 48)) 0
-  let f := Float.ofScientific m true fp.length
-  some (if neg then -f else f).toBits.toNat
-
-/-- The IEEE bits of a `w`-bit float value the model knows. -/
-def floatBits? (w : Nat) : Val → Option Nat
-  | .int w' b => if w' == w then some b.toNat else none
-  | .tuple [.arr bs] => if w == 64 then decimalBits bs else none
-  | _ => none
-
-def f64Of (n : Nat) : Float := Float.ofBits (UInt64.ofNat n)
 def f32Of (n : Nat) : Float32 := Float32.ofBits (UInt32.ofNat n)
 def f64Val (f : Float) : Val := .int 64 (BitVec.ofNat 64 f.toBits.toNat)
 def f32Val (f : Float32) : Val := .int 32 (BitVec.ofNat 32 f.toBits.toNat)
@@ -3973,6 +3988,17 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
     let k := heap.size
     let (_, heap) := heapAlloc heap .unit
     .ok (.arr ((List.range n).map fun i => .int 8 (BitVec.ofNat 8 (k / 256 ^ (n - 1 - i)))), heap)
+  | .unsafeStr, [d, .int _ n] =>
+    let n := BitVec.ofNat 64 n.toNat
+    if n == 0#64 then .ok (.str 0 0#64 0#64, heap) else
+    match d with
+    | .str ref off _ | .slice ref off _ _ => .ok (.str ref off n, heap)
+    | _ => .panic .modelStuck
+  | .unsafeBytes, [d, .int _ n, .int _ c] =>
+    match d with
+    | .str ref off _ | .slice ref off _ _ =>
+      .ok (.slice ref off (BitVec.ofNat 64 n.toNat) (BitVec.ofNat 64 c.toNat), heap)
+    | _ => .panic .modelStuck
   | .bytesToStr, [.slice ref off len _] =>
     match strBytes heap (.str ref off len) with
     | some x => .ok (strAlloc heap x)

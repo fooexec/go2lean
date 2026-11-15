@@ -248,6 +248,12 @@ func SeqTestCopyShorterSrc() bool { return testCopyShorterSrc() }
 // go2lean:sequence testCopySimple
 func SeqTestCopySimple() bool { return testCopySimple() }
 
+// go2lean:sequence testDeepEqualJSONMap
+func SeqTestDeepEqualJSONMap() bool { return testDeepEqualJSONMap() }
+
+// go2lean:sequence testDeepEqualJSONNumbers
+func SeqTestDeepEqualJSONNumbers() bool { return testDeepEqualJSONNumbers() }
+
 // go2lean:sequence testDeepEqualMaps
 func SeqTestDeepEqualMaps() bool { return testDeepEqualMaps() }
 
@@ -949,6 +955,18 @@ func SeqTestUnicodeLetterTables() bool { return testUnicodeLetterTables() }
 
 // go2lean:sequence testUnicodeUpperLower
 func SeqTestUnicodeUpperLower() bool { return testUnicodeUpperLower() }
+
+// go2lean:sequence testUnsafeBytesToString
+func SeqTestUnsafeBytesToString() bool { return testUnsafeBytesToString() }
+
+// go2lean:sequence testUnsafeHeaderFields
+func SeqTestUnsafeHeaderFields() bool { return testUnsafeHeaderFields() }
+
+// go2lean:sequence testUnsafeReflectHeader
+func SeqTestUnsafeReflectHeader() bool { return testUnsafeReflectHeader() }
+
+// go2lean:sequence testUnsafeStringHeaderToBytes
+func SeqTestUnsafeStringHeaderToBytes() bool { return testUnsafeStringHeaderToBytes() }
 
 // go2lean:sequence testUnsetenv
 func SeqTestUnsetenv() bool { return testUnsetenv() }

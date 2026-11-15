@@ -75,6 +75,10 @@ A [ninth run](../docs/eval/ninth-run.md) on five widely used libraries
 (go-ini, jsonparser, httprouter, bluemonday, easyjson) found no bug, and
 two places the search stopped short (callbacks, a package that does not
 load), fixed.
+A [tenth run](../docs/eval/tenth-run.md) on libraries with an exact
+reference (shopspring/decimal against `math/big`, tidwall/gjson and sjson
+against `encoding/json`) found no bug; it fixed two model gaps (unsafe
+string casts, `DeepEqual` on decoded JSON).
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover
