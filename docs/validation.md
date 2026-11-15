@@ -59,8 +59,8 @@ them. logrus's came from library calls not modelled yet (`sync.Pool` in a
 field, `fmt.Sprintln`), groupcache's from protobuf's text rendering
 (#215). With those modelled, none of the seven gives a spurious verdict.
 A [sixth run](../docs/eval/sixth-run.md) (dateparse, govaluate, regexp2,
-gomarkdown) found govaluate's open crash on a trailing backslash with no
-spec, at tier 1; the others showed three problems in the tool (#232, #233,
+gomarkdown) found govaluate's crash on a trailing backslash (issue #162, open; the
+repository is archived) with no spec, at tier 1; the others showed three problems in the tool (#232, #233,
 #234), two of them fixed since.
 A [seventh run](../docs/eval/seventh-run.md) on five more parsers found
 a goroutine leak on every parse error in magiconair/properties, with no
@@ -68,8 +68,8 @@ spec; it is not in the project's tracker.
 An [eighth run](../docs/eval/eighth-run.md) on five string and CSS
 libraries found no new bug, and two replay problems, fixed.
 A [hunt for goroutine lexers](../docs/eval/lexer-leaks.md) found the
-properties leak again in raymond (and its maintained fork): every template
-syntax error leaks a goroutine, unreported; after five model and replay
+properties leak again in raymond (and its mailgun fork, both archived): every template
+syntax error leaks a goroutine, not reportable; after five model and replay
 fixes, `go2lean run` finds it through `raymond.Parse` at tier 1.
 A [ninth run](../docs/eval/ninth-run.md) on five widely used libraries
 (go-ini, jsonparser, httprouter, bluemonday, easyjson) found no bug, and
