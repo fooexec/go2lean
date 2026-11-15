@@ -4774,6 +4774,9 @@ func (t *fnState) call(x *ssa.Call) error {
 	if callee != nil && callee.String() == "fmt.Sprintln" && len(x.Call.Args) == 1 {
 		return t.sprintln(x)
 	}
+	if callee != nil && callee.String() == "fmt.Sprint" && len(x.Call.Args) == 1 {
+		return t.sprint(x)
+	}
 	if callee != nil && callee.String() == "fmt.Fprintf" && len(x.Call.Args) == 3 {
 		if done, err := t.fprintf(x); done || err != nil {
 			return err
@@ -6039,6 +6042,17 @@ func (t *fnState) sprintln(x *ssa.Call) error {
 	return t.formatInto(t.def(x), "sprintln", nil, args, "call fmt.Sprintln")
 }
 
+// sprint lowers fmt.Sprint(args...): Sprintf with one %v per operand and
+// a space between two operands when neither is a string, as Go formats
+// it (the model's sprint op works the spaces out from the operands).
+func (t *fnState) sprint(x *ssa.Call) error {
+	args, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return err
+	}
+	return t.formatInto(t.def(x), "sprint", nil, args, "call fmt.Sprint")
+}
+
 // sprintfTo binds dst to fmt.Sprintf(format, args...) (args the variadic
 // slice), havoc when the model cannot format them.
 func (t *fnState) sprintfTo(dst ir.Var, format, argSlice ssa.Value, site string) error {
@@ -6053,7 +6067,7 @@ func (t *fnState) sprintfTo(dst ir.Var, format, argSlice ssa.Value, site string)
 	return t.formatInto(dst, "sprintf", []ir.Var{f}, args, site)
 }
 
-// formatInto binds dst to the model's op (sprintf or sprintln) on lead
+// formatInto binds dst to the model's op (sprintf, sprintln or sprint) on lead
 // (the format, if any) and the operand slice args, havoc when the model
 // cannot format them.
 func (t *fnState) formatInto(dst ir.Var, op string, lead []ir.Var, args ir.Var, site string) error {

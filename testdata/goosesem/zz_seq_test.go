@@ -401,6 +401,12 @@ func SeqTestFloatToInt() bool { return testFloatToInt() }
 // go2lean:sequence testFmtHexByte
 func SeqTestFmtHexByte() bool { return testFmtHexByte() }
 
+// go2lean:sequence testFmtSprint
+func SeqTestFmtSprint() bool { return testFmtSprint() }
+
+// go2lean:sequence testFmtSprintSpread
+func SeqTestFmtSprintSpread() bool { return testFmtSprintSpread() }
+
 // go2lean:sequence testFmtSprintln
 func SeqTestFmtSprintln() bool { return testFmtSprintln() }
 
