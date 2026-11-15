@@ -22,8 +22,8 @@ own.
   the lexer. 100 failed parses leave 100 goroutines. The `no_panic`
   template caught it because a replay checks for leaked goroutines.
   Upstream fixed a different leak in 2014 (magiconair/properties#2, a
-  second lexer never drained); the error path is not in its tracker. An
-  issue is drafted, not filed. The other nine tier-1 findings are
+  second lexer never drained); the error path was not in its tracker.
+  Reported as magiconair/properties#101 (2026-11-15). The other nine tier-1 findings are
   documented: the `Must` functions, `PanicHandler`, and an encoding value
   outside the declared constants.
 - **blackfriday: misuse, now ranked as such.** `Markdown` and

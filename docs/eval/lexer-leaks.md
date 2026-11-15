@@ -76,7 +76,8 @@ and `Template.Exec`. Spurious verdicts go from 10 to 3.
 
 - A plain run finds this class of bug: the replay checks every call for a
   goroutine left blocked, so a `no_panic` template catches a leak with no
-  spec. Two libraries in five with the design leak, both unreported.
+  spec. Two libraries in five with the design leak: properties (reported as
+  magiconair/properties#101) and raymond (archived, not reportable).
 - On raymond the tool needed five fixes before it could say so through the
   public API; each was a gap a template engine exercises and the earlier
   runs had not.
