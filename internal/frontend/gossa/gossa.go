@@ -107,6 +107,9 @@ type Options struct {
 const (
 	depDepth = 4
 	depLimit = 1500
+	// forcedDepth is how deep the callees of a forced function past
+	// depDepth are walked.
+	forcedDepth = 2
 )
 
 // modelTags are the build tags the model is translated under: the ones
@@ -613,10 +616,13 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 		}
 		level = next
 	}
-	// Past the depth, only the forced callees: each is modelled, its own
-	// calls stay unmodelled unless forced too.
+	// Past the depth, only the forced callees, each with its own callees
+	// forcedDepth calls deep (within depLimit): a forced function past the
+	// depth would otherwise call only unmodelled functions, and the
+	// refinement loop would need one round per call level (fiber's
+	// findNextNonEscapedCharsetPosition calls findNextCharsetPosition).
 	for len(force) > 0 && len(level) > 0 {
-		next = nil
+		var found []*ssa.Function
 		for _, f := range level {
 			for _, b := range f.Blocks {
 				for _, in := range b.Instrs {
@@ -631,11 +637,19 @@ func depClosure(roots []*ssa.Function, mainPaths map[string]bool, zeros map[*ssa
 					seen[callee] = true
 					path := callee.Pkg.Pkg.Path()
 					out[path] = append(out[path], callee)
-					next = append(next, callee)
+					found = append(found, callee)
 				}
 			}
 		}
-		level = next
+		sub := found
+		for d := 1; d <= forcedDepth && len(sub) > 0; d++ {
+			next = nil
+			for _, f := range sub {
+				visit(f)
+			}
+			sub = next
+		}
+		level = found
 	}
 	return out
 }

@@ -133,8 +133,9 @@ With `-deps`, a `spurious` or `inconclusive` verdict can name the
 dependency function whose unmodelled call it read, for example one past
 the four calls `-deps` translates. Only the reads the violation depends
 on count (`relevant_havoc`). The loop then translates that function
-(`gossa.Options.Translate`, whatever its depth), recompiles, and searches
-and replays that property again (#85):
+(`gossa.Options.Translate`, whatever its depth) with its own callees two
+calls deep, recompiles, and searches and replays that property again
+(#85):
 
 ```
 == Refinement round 1: translating github.com/fooexec/go2lean/testdata/refinedeep.Level5
@@ -150,7 +151,7 @@ Some calls cannot be translated this way: standard-library calls,
 interface methods, sockets, `reflect`. They stay as they are, so their
 verdicts stay. Those sites need a contract (#89) or a stub.
 `examples/refine` is the ground truth: a digit the dependency computes
-five calls deep.
+seven calls deep, which one round translates.
 
 ### Generated support sources
 
