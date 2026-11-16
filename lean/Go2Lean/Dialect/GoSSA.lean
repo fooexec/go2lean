@@ -263,7 +263,9 @@ inductive ConcOp where
   /-- `context`: a context is a heap object (`ctxObj`). `ctxBackground`
   (no args) never ends; `ctxNew` `[parent]` is a cancellable child;
   `ctxDone` `[ctx]` is its done channel (nil, which blocks forever, for a
-  context the model did not make); `ctxErr` `[ctx]` its error;
+  context the model did not make); `ctxErr` `[ctx]` its error (with
+  `[ctx, canceled, deadline]`: the program's `context.Canceled` and
+  `DeadlineExceeded`, by the code it was cancelled with);
   `ctxCancel code` `[ctx]` ends it and its children (1 canceled, 2
   deadline exceeded). `ctxWithValue` `[parent, key, val]` is
   `context.WithValue`: an object `structv [tuple [parent, key, val]]`,
@@ -3705,6 +3707,14 @@ def denoteConc (heap : Heap Val) : ConcOp → List Val → Res (Val × Heap Val)
     | none => .ok (r, heap)
   | .ctxDone, [c] => .ok ((ctxGet heap c).elim (.ptr 0 []) (·.2.1), heap)
   | .ctxErr, [c] => .ok (.err (match ctxGet heap c with | some (_, _, e, _) => e != 0 | none => false), heap)
+  -- With the program's context.Canceled and context.DeadlineExceeded (as
+  -- loads of them give), so that ctx.Err() == context.Canceled holds (#256).
+  | .ctxErr, [c, canceled, deadline] =>
+    .ok ((match ctxGet heap c with
+      | some (_, _, 1, _) => canceled
+      | some (_, _, 2, _) => deadline
+      | some (_, _, 0, _) | none => .err false
+      | some _ => .err true), heap)
   | .ctxCancel code, [c] => .ok (.unit, ctxCancelRec code 16 heap c)
   | .ctxWithValue, [parent, key, val] =>
     .ok (heapAlloc heap (.structv [.tuple [parent, key, val]]))

@@ -1,6 +1,10 @@
 package semantics
 
-import "context"
+import (
+	"context"
+	"errors"
+	"time"
+)
 
 // go2lean's own tests: context.WithValue and ctx.Value, with the
 // cancellation of a context under a value context (grpc's metadata
@@ -57,5 +61,17 @@ func testContextCause() bool {
 	ctx, cancel := context.WithCancel(context.Background())
 	before := context.Cause(ctx)
 	cancel()
-	return before == nil && context.Cause(ctx) != nil && context.Cause(context.Background()) == nil
+	return before == nil && context.Cause(ctx) == context.Canceled && context.Cause(context.Background()) == nil
+}
+
+// A context's error is context.Canceled or context.DeadlineExceeded, as
+// == and errors.Is compare them (#256).
+func testContextErrSentinels() bool {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tctx, tcancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer tcancel()
+	<-tctx.Done()
+	return ctx.Err() == context.Canceled && errors.Is(ctx.Err(), context.Canceled) &&
+		tctx.Err() == context.DeadlineExceeded && ctx.Err() != context.DeadlineExceeded
 }

@@ -230,6 +230,9 @@ func SeqTestContextCancelUnderValue() bool { return testContextCancelUnderValue(
 // go2lean:sequence testContextCause
 func SeqTestContextCause() bool { return testContextCause() }
 
+// go2lean:sequence testContextErrSentinels
+func SeqTestContextErrSentinels() bool { return testContextErrSentinels() }
+
 // go2lean:sequence testContextValueFound
 func SeqTestContextValueFound() bool { return testContextValueFound() }
 

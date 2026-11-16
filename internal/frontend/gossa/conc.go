@@ -3,6 +3,7 @@ package gossa
 import (
 	"fmt"
 	"go/types"
+	"hash/fnv"
 
 	"golang.org/x/tools/go/ssa"
 
@@ -194,7 +195,7 @@ func (t *fnState) concCall(x *ssa.Call) (bool, error) {
 		if err != nil {
 			return true, err
 		}
-		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("ctxErr"), Args: as[:1]})
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("ctxErr"), Args: t.ctxErrArgs(as[0])})
 	case "context.WithValue":
 		as, err := args()
 		if err != nil {
@@ -331,8 +332,10 @@ func (t *fnState) concInvoke(x *ssa.Call) (bool, error) {
 		return true, err
 	}
 	switch op {
-	case "ctxDone", "ctxErr":
+	case "ctxDone":
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc(op), Args: []ir.Var{recv}})
+	case "ctxErr":
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc(op), Args: t.ctxErrArgs(recv)})
 	case "ctxValue":
 		key, err := t.val(x.Call.Args[0])
 		if err != nil {
@@ -343,6 +346,45 @@ func (t *fnState) concInvoke(x *ssa.Call) (bool, error) {
 		t.syncOp(t.prog.lockerOp(op), t.def(x), recv)
 	}
 	return true, nil
+}
+
+// ctxErrArgs are ctxErr's arguments for ctx: ctx and the values a load of
+// context.Canceled and context.DeadlineExceeded gives (sentinelErr), so
+// that ctx.Err() == context.Canceled and errors.Is hold in the model
+// (#256). Only ctx when the program does not have them.
+func (t *fnState) ctxErrArgs(ctx ir.Var) []ir.Var {
+	canceled, deadline, ok := ctxSentinels(t.f.Prog)
+	if !ok {
+		return []ir.Var{ctx}
+	}
+	c, d := t.fresh(), t.fresh()
+	t.emit(ir.Instr{Dst: c, Op: ir.Const{V: canceled}})
+	t.emit(ir.Instr{Dst: d, Op: ir.Const{V: deadline}})
+	return []ir.Var{ctx, c, d}
+}
+
+// ctxSentinels are the model's values of context.Canceled (errors.New:
+// the sentinel tag and the variable's identity) and DeadlineExceeded (a
+// deadlineExceededError{}, a struct without fields), as sentinelErr gives
+// them for a load.
+func ctxSentinels(prog *ssa.Program) (canceled, deadline ir.Val, ok bool) {
+	pkg := prog.ImportedPackage("context")
+	if pkg == nil {
+		return nil, nil, false
+	}
+	g := pkg.Var("Canceled")
+	obj := pkg.Pkg.Scope().Lookup("deadlineExceededError")
+	if g == nil || obj == nil {
+		return nil, nil, false
+	}
+	zero, ok := zeroVal(obj.Type())
+	if !ok {
+		return nil, nil, false
+	}
+	h := fnv.New32a()
+	h.Write([]byte(g.String()))
+	return ir.Boxed{Tag: sentinelTag, V: ir.IntVal{Width: 64, Bits: fmt.Sprint(h.Sum32())}},
+		ir.Boxed{Tag: typeTag(obj.Type()), V: zero}, true
 }
 
 // lockerOrCtx names the model of method m on interface type typ: ctxDone,
