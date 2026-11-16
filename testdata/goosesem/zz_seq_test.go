@@ -641,6 +641,30 @@ func SeqTestNetPipeWriteRead() bool { return testNetPipeWriteRead() }
 // go2lean:sequence testNetSplitHostPort
 func SeqTestNetSplitHostPort() bool { return testNetSplitHostPort() }
 
+// go2lean:sequence testNetipAddrPort
+func SeqTestNetipAddrPort() bool { return testNetipAddrPort() }
+
+// go2lean:sequence testNetipCompare
+func SeqTestNetipCompare() bool { return testNetipCompare() }
+
+// go2lean:sequence testNetipInvalid
+func SeqTestNetipInvalid() bool { return testNetipInvalid() }
+
+// go2lean:sequence testNetipMapped
+func SeqTestNetipMapped() bool { return testNetipMapped() }
+
+// go2lean:sequence testNetipParseV4
+func SeqTestNetipParseV4() bool { return testNetipParseV4() }
+
+// go2lean:sequence testNetipParseV6
+func SeqTestNetipParseV6() bool { return testNetipParseV6() }
+
+// go2lean:sequence testNetipPrefix
+func SeqTestNetipPrefix() bool { return testNetipPrefix() }
+
+// go2lean:sequence testNetipZone
+func SeqTestNetipZone() bool { return testNetipZone() }
+
 // go2lean:sequence testNilDefault
 func SeqTestNilDefault() bool { return testNilDefault() }
 
