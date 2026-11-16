@@ -82,6 +82,7 @@ func TestGoose(t *testing.T) {
 		"testComplexDivEdges": testComplexDivEdges,
 		"testContextCancelUnderValue": testContextCancelUnderValue,
 		"testContextCause": testContextCause,
+		"testContextErrSentinels": testContextErrSentinels,
 		"testContextValueFound": testContextValueFound,
 		"testContextValueMissing": testContextValueMissing,
 		"testContextValueNearest": testContextValueNearest,
