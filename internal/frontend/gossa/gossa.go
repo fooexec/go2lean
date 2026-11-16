@@ -9116,7 +9116,7 @@ func (t *fnState) randBounded(x *ssa.Call, callee *ssa.Function) (bool, error) {
 	switch name {
 	case "Intn", "Int63n", "Int31n", "IntN", "Int64N", "Int32N", "UintN", "Uint64N", "Uint32N":
 	default:
-		return false, nil
+		return t.randDraw(x, callee, name)
 	}
 	args := x.Call.Args
 	if len(args) == 0 {
@@ -9145,6 +9145,76 @@ func (t *fnState) randBounded(x *ssa.Call, callee *ssa.Function) (bool, error) {
 	raw := t.fresh()
 	t.emit(ir.Instr{Dst: raw, HavocSite: t.prog.newHavoc(width, fmt.Sprintf("%s: %s", t.f.Name(), callee.Name()), "unmodeled-call", "")})
 	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("urem"), Args: []ir.Var{raw, n}})
+	return true, nil
+}
+
+// randDraw lowers the rest of math/rand's and math/rand/v2's draws to a
+// value in the range Go documents, and their constructors exactly (#256):
+// the backoffs of go-retryablehttp, backoff and retry-go jitter with them,
+// and a havoc outside the range (a Float64 of 2) made spurious verdicts.
+//   - Float64, Float32: in [0, 1) (a float's bits below those of 1.0);
+//   - Int63, Int31, Int, and v2's Int64, Int32: non-negative;
+//   - Uint32, Uint64, Uint: any value;
+//   - New, NewSource, NewPCG, NewChaCha8: a fresh generator (every draw
+//     above ignores its state), Seed: nothing.
+// The draws are havoc of reason "random": the search picks them, and the
+// replay's own draws differ, as two runs of Go do.
+func (t *fnState) randDraw(x *ssa.Call, callee *ssa.Function, name string) (bool, error) {
+	method := callee.Signature.Recv() != nil
+	bound := func(width int, limit string) {
+		raw := t.fresh()
+		t.emit(ir.Instr{Dst: raw, HavocSite: t.prog.newHavoc(width, fmt.Sprintf("%s: %s", t.f.Name(), callee.Name()), "random", "")})
+		if limit == "" {
+			t.vars[x] = raw
+			return
+		}
+		lim := t.fresh()
+		t.emit(ir.Instr{Dst: lim, Op: ir.Const{V: ir.IntVal{Width: width, Bits: limit}}})
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("urem"), Args: []ir.Var{raw, lim}})
+	}
+	switch name {
+	case "Float64":
+		bound(64, "4607182418800017408") // 0x3FF0000000000000, the bits of 1.0
+	case "Float32":
+		bound(32, "1065353216") // 0x3F800000
+	case "Int63", "Int", "Int64":
+		if w, _, ok := intWidth(x.Type()); !ok || w != 64 {
+			return false, nil
+		}
+		bound(64, "9223372036854775808")
+	case "Int31", "Int32":
+		if w, _, ok := intWidth(x.Type()); !ok || w != 32 {
+			return false, nil
+		}
+		bound(32, "2147483648")
+	case "Uint32", "Uint64", "Uint":
+		w, _, ok := intWidth(x.Type())
+		if !ok {
+			return false, nil
+		}
+		bound(w, "")
+	case "New", "NewSource", "NewPCG", "NewChaCha8":
+		if method {
+			return false, nil
+		}
+		switch rt := x.Type().Underlying().(type) {
+		case *types.Pointer:
+			zero, ok := zeroVal(rt.Elem())
+			if !ok {
+				return false, nil
+			}
+			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Alloc{Zero: zero}})
+		case *types.Interface:
+			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.OpaqueNonNil{}}})
+		default:
+			return false, nil
+		}
+	case "Seed":
+		// No draw above reads the generator's state.
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.UnitVal{}}})
+	default:
+		return false, nil
+	}
 	return true, nil
 }
 

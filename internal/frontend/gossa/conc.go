@@ -186,6 +186,15 @@ func (t *fnState) concCall(x *ssa.Call) (bool, error) {
 	switch callee.String() {
 	case "context.Background", "context.TODO":
 		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("ctxBackground")})
+	case "context.Cause":
+		// "Cause returns ... c.Err()" unless a cause was set with
+		// WithCancelCause and the like, which the model does not build
+		// (#256: retry-go reads it after every attempt).
+		as, err := args()
+		if err != nil {
+			return true, err
+		}
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("ctxErr"), Args: as[:1]})
 	case "context.WithValue":
 		as, err := args()
 		if err != nil {

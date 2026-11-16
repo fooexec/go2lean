@@ -227,6 +227,9 @@ func SeqTestComplexDivEdges() bool { return testComplexDivEdges() }
 // go2lean:sequence testContextCancelUnderValue
 func SeqTestContextCancelUnderValue() bool { return testContextCancelUnderValue() }
 
+// go2lean:sequence testContextCause
+func SeqTestContextCause() bool { return testContextCause() }
+
 // go2lean:sequence testContextValueFound
 func SeqTestContextValueFound() bool { return testContextValueFound() }
 
@@ -538,6 +541,15 @@ func SeqTestMathModFloor() bool { return testMathModFloor() }
 
 // go2lean:sequence testMathModf
 func SeqTestMathModf() bool { return testMathModf() }
+
+// go2lean:sequence testMathRandJitter
+func SeqTestMathRandJitter() bool { return testMathRandJitter() }
+
+// go2lean:sequence testMathRandRanges
+func SeqTestMathRandRanges() bool { return testMathRandRanges() }
+
+// go2lean:sequence testMathRandV2Ranges
+func SeqTestMathRandV2Ranges() bool { return testMathRandV2Ranges() }
 
 // go2lean:sequence testMathSqrtPow
 func SeqTestMathSqrtPow() bool { return testMathSqrtPow() }

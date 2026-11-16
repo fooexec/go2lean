@@ -50,3 +50,12 @@ func testContextCancelUnderValue() bool {
 	<-child.Done()
 	return ctx.Err() != nil && child.Err() != nil
 }
+
+// context.Cause is ctx.Err() when no cause was set (retry-go reads it
+// after every attempt, #256).
+func testContextCause() bool {
+	ctx, cancel := context.WithCancel(context.Background())
+	before := context.Cause(ctx)
+	cancel()
+	return before == nil && context.Cause(ctx) != nil && context.Cause(context.Background()) == nil
+}
