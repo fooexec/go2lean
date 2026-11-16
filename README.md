@@ -27,7 +27,7 @@ Lean finds the inputs; `go test` is the judge.
 > correctness. Tried on 35 open-source projects it had never seen
 > ([runs](docs/eval/fifth-run.md)); it translates 72% of the standard
 > library's functions completely ([audit](docs/eval/std-audit.md)). It has
-> found 54 defects confirmed in Go across 25 projects, 32 of them new
+> found 56 defects confirmed in Go across 25 projects, 33 of them new
 > ([findings](docs/findings.md)). See
 > [limitations](docs/limitations.md) and [validation](docs/validation.md)
 > for scope and evidence.

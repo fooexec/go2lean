@@ -25,6 +25,7 @@ reporting) rather than a public issue.
 | gofiber/fiber (v2) | `BalancerForward` with no servers panics (divide by zero) on the first request; fixed in v3 only | low | specs from advisories | draft below |
 | Masterminds/semver | `<=*`, `<=x`, `=<*` accept only `0.0.x`; `!=*` acts like `!= 0.0.0` | medium | [semver](../eval/semver.md) | draft below |
 | gobwas/glob | `*{abc,b}*c??` does not match `abcXc`; `[\-]` does not compile; `QuoteMeta` still leaves `,` (#78 closed) | medium | [glob](../eval/glob.md) | draft below |
+| gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | gin-contrib/cors | a regexp origin is matched unanchored: the package's own example pattern lets `https://google.com.evil.net` read with credentials; regexps lowercased; wildcard overlap | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | rs/cors | `OriginAllowed` returns true without an `Origin` under `AllowAll`/`"*"`, against the doc #231 wrote | low | advisory specs | draft below |
 | labstack/echo (v5) | `NewContext` without an `*Echo` (allowed by its doc), then `Reset`, panics | low | advisory specs | draft below |
@@ -780,6 +781,62 @@ if c.echo != nil {
 	c.logger = c.echo.Logger
 }
 ```
+
+Found with go2lean, a tool that checks Go code against a model of its
+semantics and replays each finding as a `go test`.
+
+---
+
+## gin-gonic/gin
+
+# Draft: security report for gin-gonic/gin (not posted)
+
+*The repository has no `SECURITY.md`. Use GitHub's private vulnerability
+reporting if it is enabled (Security tab, "Report a vulnerability"), or
+ask a maintainer for a private contact, rather than a public issue. Check
+first whether #4726 or #4731 (which make `cleanPath` reject a `//`
+prefix) has been merged, and whether it covers this case.*
+
+**Title:** Open redirect: with `RemoveExtraSlash`, `GET //evil.com` is redirected to `//evil.com/`
+
+**Body:**
+
+With `RemoveExtraSlash` on and the default `RedirectTrailingSlash`, a
+request whose path starts with `//` can make gin issue a scheme-relative
+redirect to a host the client chooses. At `0f09c3a`:
+
+```go
+func TestRemoveExtraSlashOpenRedirect(t *testing.T) {
+	r := gin.New()
+	r.RemoveExtraSlash = true
+	r.GET("/:lang/", func(c *gin.Context) { c.String(200, "ok") })
+	req, _ := http.ReadRequest(bufio.NewReader(strings.NewReader(
+		"GET //evil.com HTTP/1.1\r\nHost: app.example\r\n\r\n")))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	t.Log(w.Code, w.Header().Get("Location")) // 301 //evil.com/
+}
+```
+
+`handleHTTPRequest` looks the route up with the cleaned path
+(`cleanPath("//evil.com")` is `/evil.com`), which matches `/:lang` and
+reports that the trailing-slash version exists. `redirectTrailingSlash`
+then builds the target from the raw `req.URL.Path`, `//evil.com`, and
+appends `/`. A browser reads `//evil.com/` as a URL on another host.
+
+It needs a route whose first segment is a parameter with a trailing slash
+(`/:lang/`, `/:tenant/`), which is how a language or tenant prefix is
+often routed. A fix: build the redirect from the path that was looked up,
+or collapse repeated slashes in `redirectTrailingSlash`:
+
+```go
+if engine.RemoveExtraSlash {
+	c.Request.URL.Path = rPath
+}
+```
+
+Related: #4923 fixes another way to reach the same `//host` redirect, a
+`X-Forwarded-Prefix` that `sanitizePathChars` empties.
 
 Found with go2lean, a tool that checks Go code against a model of its
 semantics and replays each finding as a `go test`.
