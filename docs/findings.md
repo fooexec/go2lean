@@ -13,9 +13,9 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**49 defects in 23 projects** (as of 2026-11-16):
-- **27 new** (8 medium, 10 low, 9 minor; none high):
-  - 19 drafted, not yet filed;
+**53 defects in 25 projects** (as of 2026-11-16):
+- **31 new** (9 medium, 12 low, 10 minor; none high):
+  - 23 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
@@ -24,7 +24,7 @@ hand.
 - **8 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **6 high, 15 medium, 18 low, 10 minor**. The severity is
+By severity: **6 high, 16 medium, 20 low, 11 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -58,6 +58,7 @@ scores):
 | medium | gobwas/glob | `*{abc,b}*c??` does not match `abcXc` | wrong result | reading | draft | [glob](eval/glob.md) |
 | medium | magiconair/properties | every parse error leaks the lexer goroutine | leak | template | filed: magiconair/properties#101 | [seventh run](eval/seventh-run.md) |
 | medium | aymerick/raymond, mailgun/raymond | every template syntax error leaks the lexer goroutine | leak | reading, then template | not reportable: archived | [lexer leaks](eval/lexer-leaks.md) |
+| medium | gin-contrib/cors | a regexp origin (`/.../`) is matched unanchored: the package's own example lets `https://google.com.evil.net` read with credentials | security | reading (advisory guidance) | draft (private) | [advisory specs](eval/cve-specs.md) |
 | low | panjf2000/ants | a size above `MaxInt32` wraps; `Tune(1<<32-2)` gives -2 and `Submit` blocks forever | hang | agent spec | draft | twelfth run |
 | low | hashicorp/go-retryablehttp | `Request.WriteTo` panics on a request with no body | crash | agent spec | draft | [thirteenth run](eval/thirteenth-run.md) |
 | low | avast/retry-go | `MaxJitter(-1)` panics on the first retry | crash | reading | draft | thirteenth run |
@@ -68,6 +69,8 @@ scores):
 | low | gobwas/glob | `[\-]` does not compile | wrong result | agent spec (fuzzer) | draft | glob |
 | low | xrash/smetrics | `Ukkonen` divides by zero when a cost is 0 | crash | template | not drafted | [prove-blind](eval/prove-blind.md) |
 | low | casbin/casbin | `LRUCache.Put` on an existing key keeps the old value (no effect inside casbin) | wrong result | agent spec | not drafted | advisory specs |
+| low | gin-contrib/cors | regexp origins are lowercased: `\S` becomes `\s` | wrong result | reading (advisory guidance) | draft | advisory specs |
+| low | rs/cors | `OriginAllowed` returns true without an `Origin` header under `AllowAll`/`"*"`, against its doc (from the #231 fix) | contract | advisory guidance spec | draft | advisory specs |
 | minor | Masterminds/semver | `!=*` and `!=X` behave like `!= 0.0.0` | wrong result | agent spec (fuzzer) | draft | semver |
 | minor | cenkalti/backoff | `ExponentialBackOff` with `Multiplier` 1 shrinks an interval above 2^53 ns | wrong result | agent spec | not drafted (minor) | thirteenth run |
 | minor | gobwas/glob | a `}` outside a group compiles as a literal | contract | agent spec | draft (minor) | glob |
@@ -77,6 +80,7 @@ scores):
 | minor | eapache/go-resiliency | data race on `total` in the package's own test `TestShutdownSuccess` | race | template (`-tests`) | not drafted | [concurrency](eval/conc.md) |
 | minor | Masterminds/semver | a coerced version's `String` is over the 256-byte parse limit, so it cannot be read back | contract | spec from docs (fuzzer) | dropped (minor) | [ninth run](eval/ninth-run.md) |
 | minor | dustin/go-humanize | `BytesN(MaxUint64, 4)` gives `18.45 EB`, which `ParseBytes` rejects | wrong result | spec from docs | dropped (minor) | ninth run |
+| minor | gin-contrib/cors | a wildcard's prefix and suffix may overlap: `https://a*a.example.com` grants `https://a.example.com` | wrong result | reading (advisory guidance) | draft (minor) | advisory specs |
 
 ## Already reported upstream
 

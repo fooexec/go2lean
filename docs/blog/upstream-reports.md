@@ -25,6 +25,8 @@ reporting) rather than a public issue.
 | gofiber/fiber (v2) | `BalancerForward` with no servers panics (divide by zero) on the first request; fixed in v3 only | low | specs from advisories | draft below |
 | Masterminds/semver | `<=*`, `<=x`, `=<*` accept only `0.0.x`; `!=*` acts like `!= 0.0.0` | medium | [semver](../eval/semver.md) | draft below |
 | gobwas/glob | `*{abc,b}*c??` does not match `abcXc`; `[\-]` does not compile; `QuoteMeta` still leaves `,` (#78 closed) | medium | [glob](../eval/glob.md) | draft below |
+| gin-contrib/cors | a regexp origin is matched unanchored: the package's own example pattern lets `https://google.com.evil.net` read with credentials; regexps lowercased; wildcard overlap | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
+| rs/cors | `OriginAllowed` returns true without an `Origin` under `AllowAll`/`"*"`, against the doc #231 wrote | low | advisory specs | draft below |
 | magiconair/properties | goroutine leak on every parse error | medium | [seventh run](../eval/seventh-run.md) | filed: magiconair/properties#101 |
 | aymerick/raymond, mailgun/raymond | goroutine leak on every template parse error | medium | [lexer leaks](../eval/lexer-leaks.md) | not reportable: both archived |
 | Masterminds/semver, dustin/go-humanize | edge cases near size limits | minor | [ninth run](../eval/ninth-run.md) | dropped: too minor |
@@ -639,6 +641,109 @@ Smaller ones, if useful:
   `?` does not;
 - the lexer replaces an invalid UTF-8 error with a later one;
 - `Lexer.Offset` after `[` is the end of the class, not as documented.
+
+Found with go2lean, a tool that checks Go code against a model of its
+semantics and replays each finding as a `go test`.
+
+---
+
+## gin-contrib/cors
+
+# Draft: security report for gin-contrib/cors (not posted)
+
+*The repository has no `SECURITY.md`. Use GitHub's private vulnerability
+reporting if it is enabled (Security tab, "Report a vulnerability"), or ask
+a maintainer for a private contact, rather than a public issue.*
+
+**Title:** Regexp origins are matched unanchored: a pattern for `google.com` also allows `https://google.com.evil.net`, with credentials
+
+**Body:**
+
+An `AllowOrigins` entry written `/.../` (added in #159) is compiled and
+matched with `regexp.MatchString`, which finds the pattern anywhere in the
+origin (`validateOrigin`, config.go). Unless the user writes `^...$`, a
+pattern for a trusted domain also matches origins that only contain it.
+With the pattern from the package's own tests, at `b319528`:
+
+```go
+func TestRegexOriginUnanchored(t *testing.T) {
+	r := gin.New()
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{`/https?://(?:.+\.)?google\.com/g`},
+		AllowCredentials: true,
+	}))
+	r.GET("/", func(c *gin.Context) { c.String(200, "secret") })
+	for _, o := range []string{"https://mail.google.com", "https://google.com.evil.net", "https://notgoogle.com"} {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Header.Set("Origin", o)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		t.Logf("%-30s ACAO=%q ACAC=%q", o, w.Header().Get("Access-Control-Allow-Origin"), w.Header().Get("Access-Control-Allow-Credentials"))
+	}
+}
+```
+
+```
+https://mail.google.com        ACAO="https://mail.google.com" ACAC="true"
+https://google.com.evil.net    ACAO="https://google.com.evil.net" ACAC="true"
+https://notgoogle.com          ACAO="" ACAC=""
+```
+
+Anyone who owns `evil.net` can serve a page from `google.com.evil.net`
+and read credentialed responses cross-origin. The README does not
+mention regexp origins, so nothing tells users to anchor them, and the
+example in the tests is not anchored.
+
+Possible fix: compile each regexp entry once in `newCors`, anchored as
+`"^(?:" + pattern + ")$"`. An entry that is already anchored still
+compiles to the same language.
+
+Two smaller defects in the same code:
+- `newCors` lowercases every `AllowOrigins` entry, regexps included, so
+  `\S` becomes `\s` and `/https://\S+\.example\.com/` rejects
+  `https://a.example.com`. Regexp entries should keep their case.
+- `validateWildcardOrigin` checks only `HasPrefix(origin, prefix) &&
+  HasSuffix(origin, suffix)`, so the two may overlap:
+  `https://a*a.example.com` allows `https://a.example.com`. Adding
+  `len(origin) >= len(prefix)+len(suffix)` fixes it.
+
+Found with go2lean, a tool that checks Go code against a model of its
+semantics and replays each finding as a `go test`.
+
+---
+
+## rs/cors
+
+# Draft: issue for rs/cors (not posted)
+
+**Title:** `OriginAllowed` returns true for a request without an `Origin` header when all origins are allowed
+
+**Body:**
+
+Since #231 (fixing #230), the doc of `OriginAllowed` says: "A request
+without an Origin header has no origin to match, so this reports false.
+Use it where an Origin is expected, such as Gorilla WebSocket's
+CheckOrigin". That holds for a list of origins, but with `Default()`,
+`AllowAll()` or an `AllowedOrigins` entry `"*"`, it returns true. At
+`7ca5fe2`:
+
+```go
+r := httptest.NewRequest("GET", "/", nil) // no Origin
+cors.Default().OriginAllowed(r)                                          // true
+cors.AllowAll().OriginAllowed(r)                                         // true
+cors.New(cors.Options{AllowedOrigins: []string{"*"}}).OriginAllowed(r)   // true
+cors.New(cors.Options{AllowedOrigins: []string{"https://a.com"}}).OriginAllowed(r) // false
+```
+
+`OriginAllowed` passes the empty origin to `isOriginAllowed`, which
+returns true early when `allowedOriginsAll` is set. A fix:
+
+```go
+origin := r.Header.Get("Origin")
+if origin == "" {
+	return false
+}
+```
 
 Found with go2lean, a tool that checks Go code against a model of its
 semantics and replays each finding as a `go test`.
