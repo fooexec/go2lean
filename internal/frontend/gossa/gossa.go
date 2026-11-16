@@ -1763,27 +1763,6 @@ var modelledTime = map[string]bool{
 	"(time.Time).Equal": true, "(time.Time).Add": true, "(time.Time).Sub": true,
 	"(time.Time).IsZero": true, "(*time.Time).sec": true, "(*time.Time).nsec": true,
 	"(*time.Time).addSec": true, "(*time.Time).stripMono": true,
-	// Building and formatting a Time (#262): Date, Unix, In, Format and
-	// AppendFormat with their calendar helpers and the layout scanner.
-	// fasthttp's initializer formats the server date. A location other
-	// than UTC needs the zone loading (initLocal, tzset), which stays
-	// unmodelled.
-	"time.Date": true, "time.Unix": true, "time.unixTime": true, "time.norm": true,
-	"time.dateToAbsDays": true, "(time.Time).In": true, "(*time.Time).setLoc": true,
-	"(*time.Time).unixSec": true, "(time.Time).Nanosecond": true,
-	"(time.Time).Format": true, "(time.Time).AppendFormat": true,
-	"(time.Time).appendFormat": true, "(time.Time).appendFormatRFC3339": true,
-	"(time.Time).locabs": true, "(*time.Location).get": true, "(*time.Location).lookup": true,
-	"(*time.Location).lookupFirstZone": true, "(*time.Location).firstZoneUsed": true,
-	"(time.Month).String": true, "(time.Weekday).String": true,
-	"(time.absCentury).leap": true, "(time.absCentury).year": true,
-	"(time.absDays).date": true, "(time.absDays).split": true, "(time.absDays).weekday": true,
-	"(time.absDays).yearYday": true, "(time.absMonth).month": true,
-	"(time.absSeconds).clock": true, "(time.absSeconds).days": true,
-	"(time.absYday).janFeb": true, "(time.absYday).split": true, "(time.absYday).yday": true,
-	"time.appendInt": true, "time.appendNano": true, "time.digitsLen": true, "time.fmtInt": true,
-	"time.nextStdChunk": true, "time.separator": true, "time.startsWithLowerCase": true,
-	"time.stdFracSecond": true, "time.isDigit[string]": true,
 }
 
 // modelledNet are the functions of package net translated from source
@@ -3032,11 +3011,6 @@ func (t *fnState) val(x ssa.Value) (ir.Var, error) {
 		if key, zero, ok := t.prog.cellGlobal(fn); ok {
 			// Not cached: the block that first used it need not dominate
 			// the next use.
-			v := t.fresh()
-			t.emit(ir.Instr{Dst: v, Op: ir.GlobalAddr{Key: key, Zero: zero}})
-			return v, nil
-		}
-		if key, zero, ok := timeLocation(fn); ok {
 			v := t.fresh()
 			t.emit(ir.Instr{Dst: v, Op: ir.GlobalAddr{Key: key, Zero: zero}})
 			return v, nil
@@ -4290,16 +4264,6 @@ func (t *fnState) unop(x *ssa.UnOp) error {
 			return nil
 		}
 		if g, isGlobal := x.X.(*ssa.Global); isGlobal {
-			if loc, ok := timeLocAlias(g); ok {
-				// var UTC *Location = &utcLoc: the address of the location
-				// (timeLocation).
-				v, err := t.val(loc)
-				if err != nil {
-					return err
-				}
-				t.vars[x] = v
-				return nil
-			}
 			if g.Pkg != nil && g.Pkg.Pkg.Path() == "internal/bytealg" && g.Name() == "MaxLen" {
 				// Set by an init from the CPU's features (63 with AVX2);
 				// any value from 4 up picks an algorithm, not a result.

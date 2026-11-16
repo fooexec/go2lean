@@ -968,15 +968,6 @@ func SeqTestSyncMapStoreLoad() bool { return testSyncMapStoreLoad() }
 // go2lean:sequence testTimeAddSub
 func SeqTestTimeAddSub() bool { return testTimeAddSub() }
 
-// go2lean:sequence testTimeFormatLayouts
-func SeqTestTimeFormatLayouts() bool { return testTimeFormatLayouts() }
-
-// go2lean:sequence testTimeFormatNowLength
-func SeqTestTimeFormatNowLength() bool { return testTimeFormatNowLength() }
-
-// go2lean:sequence testTimeFormatRFC1123
-func SeqTestTimeFormatRFC1123() bool { return testTimeFormatRFC1123() }
-
 // go2lean:sequence testTimeNowMonotone
 func SeqTestTimeNowMonotone() bool { return testTimeNowMonotone() }
 
