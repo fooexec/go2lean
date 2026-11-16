@@ -182,6 +182,22 @@ partial def closure (registry : List (String × GoSSA.Prog)) (todo seen : List S
       | none => closure registry rest seen
       | some p => closure registry (rest ++ xrefs p) (pkg :: seen)
 
+/-- The models reachable from `pkg` through `xcall`s, each after the models
+it calls into (depth-first post-order, prepended to `out`): the order Go
+initializes packages, a package's imports before it. `closure`'s
+breadth-first order reversed is not one: a model `main` calls directly
+can come after one that calls it (fiber's `utils`, whose status table
+fiber's own initializer reads). -/
+partial def initOrder (registry : List (String × GoSSA.Prog)) (pkg : String)
+    (seen out : List String) : List String × List String :=
+  if seen.contains pkg then (seen, out) else
+  match registry.lookup pkg with
+  | none => (seen, out)
+  | some p =>
+    let (seen, out) := (xrefs p).reverse.foldl (init := (pkg :: seen, out))
+      fun (seen, out) q => initOrder registry q seen out
+    (seen, pkg :: out)
+
 /-- Merge the models a search of `main` needs into one program: `main`
 first, so its FuncIds and havoc sites keep their numbers (the property and
 the reports refer to them), then every model it reaches through `xcall`,
@@ -213,9 +229,9 @@ def link (registry : List (String × GoSSA.Prog)) (main : String) : Option GoSSA
     match registry.lookup pkg, bases.lookup pkg with
     | some p, some (_, hb) => p.schedSite.map (· + hb)
     | _, _ => none
-  -- The initializers: the models `main` reaches first, as Go initializes
-  -- a package's imports before it.
-  let inits := order.reverse.foldl (init := #[]) fun acc pkg =>
+  -- The initializers: a model's callees first, as Go initializes a
+  -- package's imports before it.
+  let inits := (initOrder registry main [] []).2.reverse.foldl (init := #[]) fun acc pkg =>
     match registry.lookup pkg, bases.lookup pkg with
     | some p, some (fb, _) => acc ++ p.inits.map (· + fb)
     | _, _ => acc

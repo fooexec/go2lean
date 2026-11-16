@@ -448,7 +448,10 @@ is in the slice too (go-runewidth's `init` calls `fillJoinerBits`, #184). A
 variable whose part of the slice the model cannot translate (grpc's
 `make([]byte, 131070)`, beyond the slice bound) is not such a cell, and
 the slice is kept without it, so the package's other cells are still
-built (#120). Havoc
+built (#120). The packages' slices run in Go's order, a package's
+imports first: a depth-first post-order of the calls between the models
+(`examples/initorder`; fiber's initializer reads its `utils` status
+table). Havoc
 the slice reads is the same in every trial; a slice that panics, gets
 stuck or runs out of fuel is skipped, its variables left at their zero
 values, and the hunt summary names it. Either makes an exhaustive

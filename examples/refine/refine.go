@@ -6,7 +6,7 @@ package refine
 import "github.com/fooexec/go2lean/testdata/refinedeep"
 
 // Digit returns the last decimal digit of x, which the dependency
-// computes five calls deep. It panics if the digit is out of range, which
+// computes seven calls deep. It panics if the digit is out of range, which
 // never happens in Go; in the model, until refinement, it can.
 func Digit(x uint8) int {
 	d := refinedeep.Level1(x)
