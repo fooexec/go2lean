@@ -171,6 +171,7 @@ exhausted initcells_registerboth_nopanic
 confirmed initcells_registerracy_nopanic
 exhausted_havoc initcells_registry_add_nopanic
 exhausted initcells_registry_addunlocked_nopanic
+exhausted initorder_text_nopanic
 proved initvars_add_nopanic
 exhausted initvars_apply_nopanic
 exhausted initvars_band_nohang
