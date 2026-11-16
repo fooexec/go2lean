@@ -407,3 +407,39 @@ func Count() int { return ast.Walk(&ast.Doc{}) }
 	}
 	t.Fatal("ast.Walk not translated")
 }
+
+// Blank parameters get distinct names in the ABI, so their inputs do not
+// share a key: avast/retry-go's RandomDelay(_ uint, _ error, ...) got
+// uint(nil) in its PoC.
+func TestBlankParamsDistinct(t *testing.T) {
+	dir := t.TempDir()
+	for name, src := range map[string]string{
+		"go.mod": "module example.com/m\n\ngo 1.22\n",
+		"m.go":   "package m\n\nfunc Pick(_ uint, _ error, n int) int { return n }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, _, err := Translate(dir, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range p.Funcs {
+		if f.Name != "Pick" {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, prm := range f.ABI.Params {
+			if seen[prm.Go] {
+				t.Fatalf("parameter name %q used twice: %+v", prm.Go, f.ABI.Params)
+			}
+			seen[prm.Go] = true
+		}
+		if len(seen) != 3 || !seen["n"] {
+			t.Fatalf("params %v", seen)
+		}
+		return
+	}
+	t.Fatal("Pick not translated")
+}
