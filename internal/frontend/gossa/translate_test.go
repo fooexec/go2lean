@@ -7,7 +7,7 @@ import (
 )
 
 // -deps translates a dependency up to four calls deep; Options.Translate
-// adds a function past that depth, and only that function (#85).
+// adds a function past that depth, with its callees two calls deep (#85).
 func TestTranslateForced(t *testing.T) {
 	const deep = "github.com/fooexec/go2lean/testdata/refinedeep"
 	funcs := func(opts Options) []string {
@@ -31,7 +31,7 @@ func TestTranslateForced(t *testing.T) {
 		t.Errorf("-deps: %v, want %v", got, want)
 	}
 	got = funcs(Options{Deps: true, Translate: []string{deep + ".Level5"}})
-	if want := []string{"Level1", "Level2", "Level3", "Level4", "Level5"}; !slices.Equal(got, want) {
+	if want := []string{"Level1", "Level2", "Level3", "Level4", "Level5", "Level6", "Level7"}; !slices.Equal(got, want) {
 		t.Errorf("-deps with Level5 forced: %v, want %v", got, want)
 	}
 }
