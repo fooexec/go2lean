@@ -10800,7 +10800,14 @@ func abiOf(f *ssa.Function, json *jsonTable) (*contract.ABI, error) {
 	}
 	pkg := funcPkg(f)
 	ab := &abiBuilder{pkg: pkg, abi: abi, index: map[*types.Named]int{}, fset: f.Prog.Fset, json: json, asserted: assertedTypes(f)}
-	for _, p := range f.Params {
+	for i, p := range f.Params {
+		// Blank parameters (func(_ uint, _ error, ...)) would share one key
+		// in the inputs: avast/retry-go's RandomDelay got uint(nil). Each
+		// gets its position instead.
+		name := p.Name()
+		if name == "_" || name == "" {
+			name = fmt.Sprintf("_%d", i)
+		}
 		if isTestingType(p.Type()) && (isTestEntry(f) || f.Parent() != nil) {
 			// The test's t: opaque in the model, the harness's own t in M3;
 			// a subtest's closure (t.Run, #48) gets its test's.
@@ -10811,9 +10818,9 @@ func abiOf(f *ssa.Function, json *jsonTable) (*contract.ABI, error) {
 		if isTestingType(p.Type()) {
 			return nil, fmt.Errorf("test helper: parameter %s has type %s", p.Name(), p.Type())
 		}
-		ap, err := ab.param(p.Name(), p.Type(), nil)
+		ap, err := ab.param(name, p.Type(), nil)
 		if err != nil {
-			return nil, fmt.Errorf("parameter %s has unsupported type %s: %w", p.Name(), p.Type(), err)
+			return nil, fmt.Errorf("parameter %s has unsupported type %s: %w", name, p.Type(), err)
 		}
 		abi.Params = append(abi.Params, ap)
 	}

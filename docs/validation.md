@@ -88,6 +88,10 @@ specs. With Claude Opus 5.5 it found pond's subpool hang (an open issue)
 and two unreported ants defects (`Invoke(nil)` dropped, sizes above
 MaxInt32 wrapped). It also fixed three agent problems: specs that do not
 build, dropped connections, an outdated prompt.
+A [thirteenth run](../docs/eval/thirteenth-run.md), the agent on three
+retry libraries, confirmed seven defects in Go, four unreported (among
+them go-retryablehttp's `WriteTo` panic on a request without a body and
+retry-go's `Unrecoverable` ignored with a custom `RetryIf`).
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover
