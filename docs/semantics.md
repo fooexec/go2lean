@@ -371,6 +371,7 @@ records its schedule.
 | `Lock`, `Unlock` through a `sync.Locker` | the writer side of a `*RWMutex`, else a `*Mutex` (by the boxed value's type) |
 | `time.Now`, `Since`, `Until` | translated from source over the model's clock (#59): one cell per run, read atomically, that only virtual time moves on (a sleep or a timer that ends); code runs in no time, so readings never go back and two with no sleep between them are equal, as Go's monotonic clock may give; the wall clock moves with it from a fixed start |
 | `Time` `Add`, `Sub`, `After`, `Before`, `Equal`, `Compare`, `IsZero` | translated from source, so they agree with the clock as Go's do |
+| `time.Date`, `Unix`, `Time.In`, `Format`, `AppendFormat` | translated from source (#262), with the calendar helpers and the layout scanner: in UTC they give what Go gives (fasthttp formats its server date). `utcLoc` and `localLoc` are cells, so `time.UTC` and the location comparisons are exact; the local zone is loaded by `initLocal`, which stays unmodelled, so a run that formats in `time.Local` takes an assumption |
 | `context.WithValue`, `ctx.Deadline`, `ctx.Value` | havoc |
 
 The end of a run, when no goroutine can move: all goroutines done, the main
