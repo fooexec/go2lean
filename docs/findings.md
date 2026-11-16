@@ -15,8 +15,8 @@ hand.
 
 **49 defects in 23 projects** (as of 2026-11-16):
 - **27 new** (8 medium, 10 low, 9 minor; none high):
-  - 11 drafted, not yet filed;
-  - 12 not drafted;
+  - 19 drafted, not yet filed;
+  - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
   - 1 not reportable (archived);
@@ -54,8 +54,8 @@ scores):
 | medium | panjf2000/ants | `PoolWithFunc.Invoke(nil)` returns nil, the task never runs | contract | agent spec | draft | [twelfth run](eval/twelfth-run.md) |
 | medium | avast/retry-go | with a custom `RetryIf`, `Unrecoverable` stops `Attempts(0)` but not `Attempts(n)` | contract | agent spec | draft | thirteenth run |
 | medium | casbin/casbin | `KeyMatch` ignores everything after a `*` in the middle of a pattern, over-granting | security (hardening) | agent spec | draft | [advisory specs](eval/cve-specs.md) |
-| medium | Masterminds/semver | `<=*` and `<=x` reject every version from 0.1.0 up | wrong result | agent spec | not drafted | [semver](eval/semver.md) |
-| medium | gobwas/glob | `*{abc,b}*c??` does not match `abcXc` | wrong result | reading | not drafted | [glob](eval/glob.md) |
+| medium | Masterminds/semver | `<=*` and `<=x` reject every version from 0.1.0 up | wrong result | agent spec | draft | [semver](eval/semver.md) |
+| medium | gobwas/glob | `*{abc,b}*c??` does not match `abcXc` | wrong result | reading | draft | [glob](eval/glob.md) |
 | medium | magiconair/properties | every parse error leaks the lexer goroutine | leak | template | filed: magiconair/properties#101 | [seventh run](eval/seventh-run.md) |
 | medium | aymerick/raymond, mailgun/raymond | every template syntax error leaks the lexer goroutine | leak | reading, then template | not reportable: archived | [lexer leaks](eval/lexer-leaks.md) |
 | low | panjf2000/ants | a size above `MaxInt32` wraps; `Tune(1<<32-2)` gives -2 and `Submit` blocks forever | hang | agent spec | draft | twelfth run |
@@ -65,15 +65,15 @@ scores):
 | low | grpc/grpc-go | `MaxConnectionAge` below 10 ns or negative crashes the server on its first connection | crash | template | draft | [grpc-go](eval/grpc.md) |
 | low | go-chi/chi | `Profiler` at the root redirects to `//pprof/`; a query string ends up in the path | wrong result | advisory spec | draft | advisory specs |
 | low | gofiber/fiber (v2) | `BalancerForward(nil)` builds, then its first request panics (divide by zero); fixed in v3 only | crash | advisory spec | draft | advisory specs |
-| low | gobwas/glob | `[\-]` does not compile | wrong result | agent spec (fuzzer) | not drafted | glob |
+| low | gobwas/glob | `[\-]` does not compile | wrong result | agent spec (fuzzer) | draft | glob |
 | low | xrash/smetrics | `Ukkonen` divides by zero when a cost is 0 | crash | template | not drafted | [prove-blind](eval/prove-blind.md) |
 | low | casbin/casbin | `LRUCache.Put` on an existing key keeps the old value (no effect inside casbin) | wrong result | agent spec | not drafted | advisory specs |
-| minor | Masterminds/semver | `!=*` and `!=X` behave like `!= 0.0.0` | wrong result | agent spec (fuzzer) | not drafted | semver |
+| minor | Masterminds/semver | `!=*` and `!=X` behave like `!= 0.0.0` | wrong result | agent spec (fuzzer) | draft | semver |
 | minor | cenkalti/backoff | `ExponentialBackOff` with `Multiplier` 1 shrinks an interval above 2^53 ns | wrong result | agent spec | not drafted (minor) | thirteenth run |
-| minor | gobwas/glob | a `}` outside a group compiles as a literal | contract | agent spec | not drafted (minor) | glob |
-| minor | gobwas/glob | a separator that is not a valid rune: `*` treats it as U+FFFD, `?` does not | wrong result | agent spec (fuzzer) | not drafted (minor) | glob |
-| minor | gobwas/glob | the lexer replaces an invalid UTF-8 error with a later one | wrong result | reading | not drafted (minor) | glob |
-| minor | gobwas/glob | `Lexer.Offset` after `[` is the end of the class, not as documented | contract | agent spec (fuzzer) | not drafted (minor) | glob |
+| minor | gobwas/glob | a `}` outside a group compiles as a literal | contract | agent spec | draft (minor) | glob |
+| minor | gobwas/glob | a separator that is not a valid rune: `*` treats it as U+FFFD, `?` does not | wrong result | agent spec (fuzzer) | draft (minor) | glob |
+| minor | gobwas/glob | the lexer replaces an invalid UTF-8 error with a later one | wrong result | reading | draft (minor) | glob |
+| minor | gobwas/glob | `Lexer.Offset` after `[` is the end of the class, not as documented | contract | agent spec (fuzzer) | draft (minor) | glob |
 | minor | eapache/go-resiliency | data race on `total` in the package's own test `TestShutdownSuccess` | race | template (`-tests`) | not drafted | [concurrency](eval/conc.md) |
 | minor | Masterminds/semver | a coerced version's `String` is over the 256-byte parse limit, so it cannot be read back | contract | spec from docs (fuzzer) | dropped (minor) | [ninth run](eval/ninth-run.md) |
 | minor | dustin/go-humanize | `BytesN(MaxUint64, 4)` gives `18.45 EB`, which `ParseBytes` rejects | wrong result | spec from docs | dropped (minor) | ninth run |
@@ -96,7 +96,7 @@ Found independently; the project's tracker already has it, not fixed.
 | low | go-playground/validator | `cidrv4` rejects an address with host bits that `cidr` accepts | wrong result | reading | #909 | ninth run |
 | low | go-playground/validator | `ipv4` accepts an IPv4-mapped IPv6 address | wrong result | reading | #1311 | ninth run |
 | low | Masterminds/semver | prerelease numbers above uint64 compared as text | wrong result | spec from docs (fuzzer) | PRs #315, #323, #326 | semver, ninth run |
-| low | gobwas/glob | `QuoteMeta` does not escape `,` | wrong result | agent spec (fuzzer) | #78 | glob |
+| low | gobwas/glob | `QuoteMeta` does not escape `,` | wrong result | agent spec (fuzzer) | #78 (closed 2026-10-26, still reproduces at `ff0540d`) | glob |
 | minor | dustin/go-humanize | `Ordinal(-1)` is `-1th` | wrong result | spec from docs | PRs #171, #179 | ninth run |
 
 ## Re-found, fixed upstream

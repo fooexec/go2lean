@@ -23,6 +23,8 @@ reporting) rather than a public issue.
 | casbin/casbin | `KeyMatch` over-grants a pattern with `*` in the middle | hardening | [specs from advisories](../eval/cve-specs.md) | draft below |
 | go-chi/chi | `Profiler` redirects to `//pprof/` at the root; query string in the path | low | specs from advisories | draft below |
 | gofiber/fiber (v2) | `BalancerForward` with no servers panics (divide by zero) on the first request; fixed in v3 only | low | specs from advisories | draft below |
+| Masterminds/semver | `<=*`, `<=x`, `=<*` accept only `0.0.x`; `!=*` acts like `!= 0.0.0` | medium | [semver](../eval/semver.md) | draft below |
+| gobwas/glob | `*{abc,b}*c??` does not match `abcXc`; `[\-]` does not compile; `QuoteMeta` still leaves `,` (#78 closed) | medium | [glob](../eval/glob.md) | draft below |
 | magiconair/properties | goroutine leak on every parse error | medium | [seventh run](../eval/seventh-run.md) | filed: magiconair/properties#101 |
 | aymerick/raymond, mailgun/raymond | goroutine leak on every template parse error | medium | [lexer leaks](../eval/lexer-leaks.md) | not reportable: both archived |
 | Masterminds/semver, dustin/go-humanize | edge cases near size limits | minor | [ninth run](../eval/ninth-run.md) | dropped: too minor |
@@ -536,6 +538,107 @@ if len(servers) == 0 {
 	panic("Servers cannot be empty")
 }
 ```
+
+Found with go2lean, a tool that checks Go code against a model of its
+semantics and replays each finding as a `go test`.
+
+---
+
+## Masterminds/semver
+
+# Draft: issue for Masterminds/semver (not posted)
+
+**Title:** `<=*` (and `<=x`, `=<*`) accepts only `0.0.x`, not every version
+
+**Body:**
+
+The README's "Wildcards In Comparisons" says the wildcard "works for all
+comparison operators", with `<= 2.x` equivalent to `< 3` and `*`
+equivalent to `>= 0.0.0`. By the same rule `<=*` allows every version.
+It accepts only `0.0.x`. At `dd2b995`:
+
+```go
+func TestLeWildcard(t *testing.T) {
+	for _, c := range []string{"<=*", "<=x", "=<*", "<=1.x"} {
+		cs, _ := semver.NewConstraint(c)
+		var out []string
+		for _, v := range []string{"0.0.0", "0.0.5", "0.1.0", "1.2.3", "2.0.0"} {
+			if cs.Check(semver.MustParse(v)) {
+				out = append(out, v)
+			}
+		}
+		t.Logf("%-6q accepts %v", c, out)
+	}
+}
+```
+
+```
+"<=*"  accepts [0.0.0 0.0.5]
+"<=x"  accepts [0.0.0 0.0.5]
+"=<*"  accepts [0.0.0 0.0.5]
+"<=1.x" accepts [0.0.0 0.0.5 0.1.0 1.2.3]
+```
+
+The wildcard major is parsed as `0.0.0` with the minor and patch dirty,
+and `constraintLessThanEqual` then compares the major and the minor, so
+only versions below `0.1.0` pass. `<=1.x` works because its major is not
+a wildcard. The caret fixes for #317 (`^*`) touch `constraintCaret` only.
+A fix: in `constraintLessThanEqual`, accept every version when the
+constraint's major is a wildcard, as `<= X.x` already does for the minor.
+
+A smaller one of the same kind: `!=*` and `!=X` behave like `!= 0.0.0`
+(they accept `1.2.3` and reject `0.0.0`), where "not any version" would
+reject everything.
+
+Found with go2lean, a tool that checks Go code against a model of its
+semantics and replays each finding as a `go test`.
+
+---
+
+## gobwas/glob
+
+# Draft: issue for gobwas/glob (not posted)
+
+**Title:** `*{abc,b}*c??` does not match `abcXc`; `[\-]` does not compile
+
+**Body:**
+
+Two defects in v1 at `ff0540d`, found while checking `Match` against the
+regexp a glob translates to:
+
+```go
+func TestRepro(t *testing.T) {
+	g := glob.MustCompile("*{abc,b}*c??")
+	t.Log(g.Match("abcXc"))                                        // false
+	t.Log(regexp.MustCompile(`^.*(?:abc|b).*c..$`).MatchString("abcXc")) // true
+	_, err := glob.Compile(`[\-]`)
+	t.Log(err) // glob: syntax error at 4: unexpected end of input
+}
+```
+
+1. **A wrong match.** `abcXc` is `b` + `cXc`: the first `*` takes `a`, the
+   alternative takes `b`, the second `*` takes nothing, then `c??` matches
+   `cXc`. When the second star finds its literal, `storeStar` cuts the
+   restart points back to the root's `starsFloor` and drops the first
+   star's. Resuming the first star with the shorter alternative would reach
+   the second star earlier, which the reset assumes cannot happen, so the
+   match fails.
+2. **An escaped `-` in a class does not compile.** The grammar says `\c`
+   matches `c` inside a class and that `-` is literal in a set, but
+   `fetchRange` peeks for `-` after reading the `\` and takes the `\` as
+   the low end of a range.
+
+Also: #78 (`QuoteMeta` and `,`) was closed on 2026-10-26, but at
+`ff0540d` `QuoteMeta("a,b")` is still `"a,b"`, so
+`"{" + QuoteMeta("a,b") + ",c}"` matches `a` and `c`, not `a,b`.
+
+Smaller ones, if useful:
+- a `}` outside a group compiles as a literal (`a}b`), though the grammar
+  excludes `}` from literals;
+- with a separator that is not a valid rune, `*` treats it as U+FFFD and
+  `?` does not;
+- the lexer replaces an invalid UTF-8 error with a later one;
+- `Lexer.Offset` after `[` is the end of the class, not as documented.
 
 Found with go2lean, a tool that checks Go code against a model of its
 semantics and replays each finding as a `go test`.
