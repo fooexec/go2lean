@@ -27,6 +27,8 @@ deliver, in [docs/limitations.md](../docs/limitations.md). There are no
 releases yet: the CLI, the workspace formats and the model's semantics
 still change from one pull request to the next.
 
+[Findings](findings.md) lists every defect the runs below confirmed in
+Go, once each, with its status upstream.
 A [first run on four unseen projects](../docs/eval/first-run.md)
 (go-humanize, golang-lru, cast, gjson), as a new user runs it with the
 default flags, gave real panics with PoCs in two of them. It also showed
@@ -89,7 +91,7 @@ and two unreported ants defects (`Invoke(nil)` dropped, sizes above
 MaxInt32 wrapped). It also fixed three agent problems: specs that do not
 build, dropped connections, an outdated prompt.
 A [thirteenth run](../docs/eval/thirteenth-run.md), the agent on three
-retry libraries, confirmed seven defects in Go, four unreported (among
+retry libraries, confirmed six defects in Go, four unreported (among
 them go-retryablehttp's `WriteTo` panic on a request without a body and
 retry-go's `Unrecoverable` ignored with a custom `RetryIf`).
 [Specs from security advisories](../docs/eval/cve-specs.md) turn a project's

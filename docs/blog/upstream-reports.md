@@ -1,6 +1,6 @@
 # Upstream reports: drafts
 
-*Not posted. Collected here to be filed together, and the [blog draft](2026-11-go2lean.md) published, once there are enough.*
+*Not posted. Collected here to be filed together, and the [blog draft](2026-11-go2lean.md) published, once there are enough. Every finding, reported or not, is listed in [findings](../findings.md).*
 
 Every defect below was found by go2lean and reproduced by hand with a
 plain `go test` outside the tool. Each draft is written as the issue body
