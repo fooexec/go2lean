@@ -1102,7 +1102,13 @@ func constMapEntries(mm *ssa.MakeMap) []*ssa.MapUpdate {
 // one by one, then loads it. Elements of other types are not folded: the
 // model compares strings by their bytes and floats by their bits, neither
 // as element by element (eqVal).
-func constComposite(v ssa.Value) (ir.Val, bool) {
+func constComposite(v ssa.Value) (ir.Val, bool) { return constCompositeZeroing(v, false) }
+
+// constCompositeZeroing is constComposite, and with zeroOthers a struct
+// may also have fields of other types (a string), left at their zero value
+// (a store to one fails): unique.Make interns by deep equality, which
+// compares strings by their bytes (uniqueGlobal).
+func constCompositeZeroing(v ssa.Value, zeroOthers bool) (ir.Val, bool) {
 	ld, ok := v.(*ssa.UnOp)
 	if !ok || ld.Op != token.MUL {
 		return nil, false
@@ -1112,6 +1118,7 @@ func constComposite(v ssa.Value) (ir.Val, bool) {
 		return nil, false
 	}
 	var elems []ir.Val
+	zeroOnly := map[int]bool{} // fields that must stay zero
 	switch u := ld.Type().Underlying().(type) {
 	case *types.Array:
 		if u.Len() > 256 || !plainKeyElem(u.Elem()) {
@@ -1122,9 +1129,15 @@ func constComposite(v ssa.Value) (ir.Val, bool) {
 	case *types.Struct:
 		for i := 0; i < u.NumFields(); i++ {
 			if !plainKeyElem(u.Field(i).Type()) {
+				if !zeroOthers {
+					return nil, false
+				}
+				zeroOnly[i] = true
+			}
+			z, ok := zeroVal(u.Field(i).Type())
+			if !ok {
 				return nil, false
 			}
-			z, _ := zeroVal(u.Field(i).Type())
 			elems = append(elems, z)
 		}
 	default:
@@ -1150,6 +1163,9 @@ func constComposite(v ssa.Value) (ir.Val, bool) {
 			i = int(n)
 		case *ssa.FieldAddr:
 			i = r.Field
+			if zeroOnly[i] {
+				return nil, false
+			}
 		default:
 			return nil, false
 		}
@@ -1675,6 +1691,10 @@ var stdBoundary = regexp.MustCompile(`^(runtime|internal/(abi|runtime|poll|sysca
 // modelled from their Go source under -deps, like any dependency, instead
 // of being unmodelled calls: their code only uses what the model covers.
 var modelledStdlib = map[string]bool{
+	// IP addresses and prefixes (#256): pure Go over uint128, with the
+	// zone and family in a unique.Handle (uniqueCall). net/url's IPv6
+	// literals and the client-IP middlewares of chi and echo use it.
+	"net/netip": true,
 	// The pure-Go layers under them: internal/bytealg's assembly
 	// primitives are lowered by bytealgCall, its Go functions translated.
 	"internal/bytealg":     true,
@@ -4186,6 +4206,15 @@ func (t *fnState) unop(x *ssa.UnOp) error {
 			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: s}})
 			return nil
 		}
+		if v, ok := uniqueGlobal(x); ok {
+			// var z4 = unique.Make(addrDetail{}): Make interns, so making
+			// the handle again at each load gives the one the initializer
+			// made (#256: net/netip's z4, z6noz).
+			k := t.fresh()
+			t.emit(ir.Instr{Dst: k, Op: ir.Const{V: v}})
+			t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("uniqueMake"), Args: []ir.Var{k}})
+			return nil
+		}
 		if zero, fields, ok := sentinelObject(x); ok {
 			// The pointer itself, where it is not boxed as the error: a
 			// fresh object holding the initializer's constants.
@@ -4875,6 +4904,9 @@ func (t *fnState) call(x *ssa.Call) error {
 		}
 		if callee.String() == "(*regexp.Regexp).NumSubexp" && len(x.Call.Args) == 1 {
 			return t.regexpNumSubexp(x)
+		}
+		if done, err := t.uniqueCall(x, callee); done || err != nil {
+			return err
 		}
 		if done, err := t.randBounded(x, callee); done || err != nil {
 			return err
@@ -9146,6 +9178,68 @@ func (t *fnState) randBounded(x *ssa.Call, callee *ssa.Function) (bool, error) {
 	t.emit(ir.Instr{Dst: raw, HavocSite: t.prog.newHavoc(width, fmt.Sprintf("%s: %s", t.f.Name(), callee.Name()), "unmodeled-call", "")})
 	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("urem"), Args: []ir.Var{raw, n}})
 	return true, nil
+}
+
+// uniqueCall lowers package unique (#256): Make interns its value (the
+// uniqueMake op: deeply equal values get the same handle, as Go's do), and
+// a handle's Value reads the interned value back. net/netip keeps each
+// address's family and zone in a unique.Handle and compares handles.
+func (t *fnState) uniqueCall(x *ssa.Call, callee *ssa.Function) (bool, error) {
+	fn := callee
+	if o := callee.Origin(); o != nil {
+		fn = o
+	}
+	if fn.Pkg == nil || fn.Pkg.Pkg.Path() != "unique" {
+		return false, nil
+	}
+	switch {
+	case fn.Name() == "Make" && fn.Signature.Recv() == nil && len(x.Call.Args) == 1:
+		v, err := t.val(x.Call.Args[0])
+		if err != nil {
+			return true, err
+		}
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Conc("uniqueMake"), Args: []ir.Var{v}})
+		return true, nil
+	case fn.Name() == "Value" && fn.Signature.Recv() != nil && len(x.Call.Args) == 1:
+		h, err := t.val(x.Call.Args[0])
+		if err != nil {
+			return true, err
+		}
+		p := t.fresh()
+		t.emit(ir.Instr{Dst: p, Op: ir.Field{I: 0}, Args: []ir.Var{h}})
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("loadPath"), Args: []ir.Var{p}})
+		return true, nil
+	}
+	return false, nil
+}
+
+// uniqueGlobal is the value v's package variable was initialized with
+// through unique.Make, when that value is a constant (a struct literal of
+// constants, or the zero value): a load of the variable is then
+// unique.Make of it again.
+func uniqueGlobal(v *ssa.UnOp) (ir.Val, bool) {
+	init, ok := loadedInit(v)
+	if !ok {
+		return nil, false
+	}
+	c, ok := init.(*ssa.Call)
+	if !ok || len(c.Call.Args) != 1 {
+		return nil, false
+	}
+	f := c.Call.StaticCallee()
+	if f == nil {
+		return nil, false
+	}
+	if o := f.Origin(); o != nil {
+		f = o
+	}
+	if f.Pkg == nil || f.Pkg.Pkg.Path() != "unique" || f.Name() != "Make" {
+		return nil, false
+	}
+	if k, ok := c.Call.Args[0].(*ssa.Const); ok && k.Value == nil {
+		return zeroVal(k.Type()) // unique.Make(addrDetail{})
+	}
+	return constCompositeZeroing(c.Call.Args[0], true)
 }
 
 // randDraw lowers the rest of math/rand's and math/rand/v2's draws to a

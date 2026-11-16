@@ -260,6 +260,12 @@ inductive ConcOp where
   directory of cells (key, pointer) lives in heap slot 0, which no pointer
   reads (`ptr 0` is nil). No args. -/
   | globalAddr (key : Nat) (zero : Val)
+  /-- `unique.Make(v)`: a handle (`structv [p]`) whose pointer `p` is the
+  same for values that are deeply equal (`eqDeep`), so handles compare as
+  Go's do; the table of (value, pointer) lives in the cell directory of
+  heap slot 0 under `uniqueKey`. net/netip keeps an address's zone and
+  family in one. -/
+  | uniqueMake
   /-- `context`: a context is a heap object (`ctxObj`). `ctxBackground`
   (no args) never ends; `ctxNew` `[parent]` is a cancellable child;
   `ctxDone` `[ctx]` is its done channel (nil, which blocks forever, for a
@@ -1115,6 +1121,10 @@ def sliceElems (heap : Heap Val) : Val → Option (List Val)
     | some (.arrA es) => some (es.extract off.toNat (off.toNat + len.toNat)).toList
     | _ => none
   | _ => none
+
+/-- The cell-directory key of `uniqueMake`'s table (no package variable's
+key, which are 32-bit hashes, reaches it). -/
+def uniqueKey : Nat := 2 ^ 40 + 7
 
 /-- Equality of arrays and structs whose strings live on the heap. -/
 def eqDeep (heap : Heap Val) : Val → Val → Option Bool
@@ -3734,6 +3744,32 @@ def denoteConc (heap : Heap Val) : ConcOp → List Val → Res (Val × Heap Val)
     | .ok heap => .ok (.unit, heap)
     | .panic k => .panic k
     | .outOfFuel => .outOfFuel
+  | .uniqueMake, [v] =>
+    let dir := match heap[0]? with | some (.arr es) => es | _ => []
+    let found := dir.findSome? fun e => match e with
+      | .tuple [.int _ k, p] => if k.toNat == uniqueKey then some p else none
+      | _ => none
+    let (tp, heap) : Val × Heap Val := match found with
+      | some p => (p, heap)
+      | none =>
+        let (p, heap) := heapAlloc heap (Val.arr [])
+        (p, heap.set! 0 (Val.arr (dir ++ [Val.tuple [Val.int 64 (BitVec.ofNat 64 uniqueKey), p]])))
+    match heapLoad heap tp with
+    | .ok (.arr es) =>
+      let hit := es.findSome? fun (e : Val) => match e with
+        | Val.tuple [w, p] => if eqDeep heap v w == some true then some p else none
+        | _ => none
+      match hit with
+      | some p => .ok (.structv [p], heap)
+      | none =>
+        -- A value the model cannot compare (eqDeep is none) gets its own
+        -- handle: equal to no other, which Go may disagree with.
+        let (p, heap) := heapAlloc heap v
+        match heapStore heap tp (Val.arr (es ++ [Val.tuple [v, p]])) with
+        | .ok heap => .ok (.structv [p], heap)
+        | .panic k => .panic k
+        | .outOfFuel => .outOfFuel
+    | _ => .panic .modelStuck
   | .globalAddr key zero, [] =>
     let dir := match heap[0]? with | some (.arr es) => es | _ => []
     let found := dir.findSome? fun e => match e with
