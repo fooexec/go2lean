@@ -52,7 +52,12 @@ three in one issue) wait for review.
 - **Most of the 44 spurious verdicts** (over the two rounds of each library)
   come from a few unmodelled callees: `math/rand` and `math/rand/v2`, which
   the backoffs' jitter draws from; `net/http.NewRequestWithContext`; some
-  `fmt.Sprintf` formats; `context.Cause` (#256).
+  `fmt.Sprintf` formats; `context.Cause` (#256). Since then, the random
+  draws are modelled in the ranges Go documents, and `context.Cause` as
+  `ctx.Err()`. Rerun on the agent's final specs, the three libraries give
+  3 spurious verdicts where they gave 8, with the same confirmed findings.
+  The 3 left are `NewRequestWithContext` and `fmt.Sprintf`'s `%s` of an
+  error and a `time.Duration`.
 
 ## What this says
 
