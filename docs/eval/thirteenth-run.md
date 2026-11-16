@@ -64,7 +64,7 @@ three in one issue) wait for review.
 The agent, with a strong model, keeps turning up real defects in
 influential libraries:
 - three runs on retry libraries, 12 to 14 minutes each;
-- seven defects confirmed in Go, four of them unreported.
+- six defects confirmed in Go, four of them unreported.
 
 The specs that found them are the ones a reviewer would ask for: the
 documented meaning of an option (`Unrecoverable`, `MaxJitter`), a header's

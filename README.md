@@ -26,7 +26,9 @@ Lean finds the inputs; `go test` is the judge.
 > **Scope.** A bounded, search-based bug finder—not a guarantee of
 > correctness. Tried on 35 open-source projects it had never seen
 > ([runs](docs/eval/fifth-run.md)); it translates 72% of the standard
-> library's functions completely ([audit](docs/eval/std-audit.md)). See
+> library's functions completely ([audit](docs/eval/std-audit.md)). It has
+> found 49 defects confirmed in Go across 23 projects, 27 of them new
+> ([findings](docs/findings.md)). See
 > [limitations](docs/limitations.md) and [validation](docs/validation.md)
 > for scope and evidence.
 
@@ -180,6 +182,7 @@ large arrays updated in place it also finds k016 at the default budget
 [rerun 6](docs/eval/conc-recent.md#rerun-of-the-fuel-cases-after-in-place-arrays-2026-11-05),
 [roadmap](https://github.com/fooexec/go2lean/issues/53)).
 
+[All findings](docs/findings.md) ·
 [Validation and regression cases](docs/validation.md) ·
 [semver evaluation](docs/eval/semver.md) · [glob evaluation](docs/eval/glob.md) ·
 [proofs on real code](docs/eval/prove-blind.md) ·

@@ -1,6 +1,6 @@
 # Upstream reports: drafts
 
-*Not posted. Collected here to be filed together, and the [blog draft](2026-11-go2lean.md) published, once there are enough.*
+*Not posted. Collected here to be filed together, and the [blog draft](2026-11-go2lean.md) published, once there are enough. Every finding, reported or not, is listed in [findings](../findings.md).*
 
 Every defect below was found by go2lean and reproduced by hand with a
 plain `go test` outside the tool. Each draft is written as the issue body
@@ -22,15 +22,17 @@ reporting) rather than a public issue.
 | grpc/grpc-go | `MaxConnectionAge` below 10 ns or negative panics on the first connection | low | [grpc-go](../eval/grpc.md) | draft below |
 | casbin/casbin | `KeyMatch` over-grants a pattern with `*` in the middle | hardening | [specs from advisories](../eval/cve-specs.md) | draft below |
 | go-chi/chi | `Profiler` redirects to `//pprof/` at the root; query string in the path | low | specs from advisories | draft below |
+| gofiber/fiber (v2) | `BalancerForward` with no servers panics (divide by zero) on the first request; fixed in v3 only | low | specs from advisories | draft below |
 | magiconair/properties | goroutine leak on every parse error | medium | [seventh run](../eval/seventh-run.md) | filed: magiconair/properties#101 |
 | aymerick/raymond, mailgun/raymond | goroutine leak on every template parse error | medium | [lexer leaks](../eval/lexer-leaks.md) | not reportable: both archived |
 | Masterminds/semver, dustin/go-humanize | edge cases near size limits | minor | [ninth run](../eval/ninth-run.md) | dropped: too minor |
 
 Found but already reported upstream (not drafted): alitto/pond's subpool
 hang (#152), go-retryablehttp's `Retry-After` overflow (PR #297), gocron's
-`WithLimitedRuns` overrun (PR #984), and the chi/echo advisory variants in
-[specs from advisories](../eval/cve-specs.md), all fixed in their latest
-releases.
+`WithLimitedRuns` overrun (PR #984), gin's `FileAttachment` space as `+`
+in `filename*` (open PR #4873), and the chi, echo and fiber advisory
+variants in [specs from advisories](../eval/cve-specs.md), all fixed in
+their latest releases.
 
 ---
 
@@ -488,6 +490,52 @@ severity, but `Location` should stay a same-site path. Building it from the
 path only fixes both, e.g.
 `strings.TrimRight(r.URL.EscapedPath(), "/") + "/pprof/"`, plus the query
 if wanted.
+
+Found with go2lean, a tool that checks Go code against a model of its
+semantics and replays each finding as a `go test`.
+
+---
+
+## gofiber/fiber
+
+# Draft: issue for gofiber/fiber, v2 branch (not posted)
+
+**Title:** v2: `proxy.BalancerForward` with an empty server list panics on the first request
+
+**Body:**
+
+On v2 (v2.52.16 and the `v2` branch at `9407e6e`),
+`proxy.BalancerForward(nil)` or `BalancerForward([]string{})` returns a
+handler without complaint. That handler's first request panics with
+`integer divide by zero` in `roundrobin.get`:
+
+```go
+if r.current >= len(r.pool) {
+	r.current %= len(r.pool) // len(r.pool) == 0
+}
+```
+
+```go
+func TestBalancerForwardEmpty(t *testing.T) {
+	app := fiber.New()
+	app.Use(proxy.BalancerForward(nil))
+	req := httptest.NewRequest("GET", "/", nil)
+	_, _ = app.Test(req) // panic: runtime error: integer divide by zero
+}
+```
+
+`proxy.Balancer` rejects empty `Servers` when it is built (`configDefault`
+panics with "Servers cannot be empty"). v3 gave `BalancerForward` the same
+check in `08a4fb35` (June 2026), but it was not backported. With an empty
+list coming from configuration (an environment variable left unset), a v2
+service builds fine and then crashes on its first request instead of at
+startup. Possible fix: the v3 check, at the top of `BalancerForward`:
+
+```go
+if len(servers) == 0 {
+	panic("Servers cannot be empty")
+}
+```
 
 Found with go2lean, a tool that checks Go code against a model of its
 semantics and replays each finding as a `go test`.
