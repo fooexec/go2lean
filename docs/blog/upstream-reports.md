@@ -27,6 +27,7 @@ reporting) rather than a public issue.
 | gobwas/glob | `*{abc,b}*c??` does not match `abcXc`; `[\-]` does not compile; `QuoteMeta` still leaves `,` (#78 closed) | medium | [glob](../eval/glob.md) | draft below |
 | gin-contrib/cors | a regexp origin is matched unanchored: the package's own example pattern lets `https://google.com.evil.net` read with credentials; regexps lowercased; wildcard overlap | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | rs/cors | `OriginAllowed` returns true without an `Origin` under `AllowAll`/`"*"`, against the doc #231 wrote | low | advisory specs | draft below |
+| labstack/echo (v5) | `NewContext` without an `*Echo` (allowed by its doc), then `Reset`, panics | low | advisory specs | draft below |
 | magiconair/properties | goroutine leak on every parse error | medium | [seventh run](../eval/seventh-run.md) | filed: magiconair/properties#101 |
 | aymerick/raymond, mailgun/raymond | goroutine leak on every template parse error | medium | [lexer leaks](../eval/lexer-leaks.md) | not reportable: both archived |
 | Masterminds/semver, dustin/go-humanize | edge cases near size limits | minor | [ninth run](../eval/ninth-run.md) | dropped: too minor |
@@ -742,6 +743,41 @@ returns true early when `allowedOriginsAll` is set. A fix:
 origin := r.Header.Get("Origin")
 if origin == "" {
 	return false
+}
+```
+
+Found with go2lean, a tool that checks Go code against a model of its
+semantics and replays each finding as a `go test`.
+
+---
+
+## labstack/echo
+
+# Draft: issue for labstack/echo, v5 (not posted)
+
+**Title:** v5: `Reset` panics on a context made by `NewContext` without an `*Echo`
+
+**Body:**
+
+The doc of `NewContext` says "request,response and e can be left to nil
+as Echo.ServeHTTP will call c.Reset(req,resp) anyway; these arguments
+are useful when creating context for tests". A context made without an
+`*Echo` then panics in `Reset`, which dereferences `c.echo`
+(`c.logger = c.echo.Logger`). At `f275a6b`:
+
+```go
+func TestNewContextReset(t *testing.T) {
+	c := echo.NewContext(httptest.NewRequest("GET", "/", nil), httptest.NewRecorder())
+	c.Reset(httptest.NewRequest("GET", "/x", nil), httptest.NewRecorder()) // nil pointer dereference
+}
+```
+
+`newContext` already falls back to `slog.Default()` when there is no
+`*Echo`; `Reset` could do the same:
+
+```go
+if c.echo != nil {
+	c.logger = c.echo.Logger
 }
 ```
 
