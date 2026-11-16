@@ -333,7 +333,11 @@ func guidanceSection(g string) string {
 	if strings.TrimSpace(g) == "" {
 		return ""
 	}
-	return "\n\nGuidance from the maintainers (bug classes and invariants to target first):\n" + g
+	return "\n\nGuidance from the maintainers (bug classes and invariants to target first):\n" + g +
+		"\n\nWhere this guidance states a property (a security property above all) and the package's " +
+		"own documentation describes behaviour that contradicts it, write the spec for the property, not " +
+		"for the documentation: a doc comment can describe the vulnerable behaviour itself (a header " +
+		"trusted whoever sent it, a check that never looks at the connection). Say so in the spec's comment."
 }
 
 func reportUserPrompt(pkgPath, pkgName, source, spec, verdicts string) string {

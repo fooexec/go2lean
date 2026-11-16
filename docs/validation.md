@@ -92,6 +92,9 @@ A [thirteenth run](../docs/eval/thirteenth-run.md), the agent on three
 retry libraries, confirmed seven defects in Go, four unreported (among
 them go-retryablehttp's `WriteTo` panic on a request without a body and
 retry-go's `Unrecoverable` ignored with a custom `RetryIf`).
+[Specs from security advisories](../docs/eval/cve-specs.md) turn a project's
+own CVE into a general property: the spec from one chi/echo advisory found
+the next, and casbin's `KeyMatch` over-grants a mid-pattern `*`.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover
