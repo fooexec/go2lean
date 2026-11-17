@@ -33,6 +33,7 @@ type Func struct {
 	// tries as values (a magic number guarding a branch).
 	Consts   []int64
 	Internal bool
+	Builtin  bool
 }
 
 // Model is a lowered module.

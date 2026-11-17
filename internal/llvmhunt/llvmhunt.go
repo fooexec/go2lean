@@ -125,6 +125,9 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 	}
 	skipped := 0
 	for _, fn := range model.Funcs {
+		if fn.Builtin {
+			continue
+		}
 		if fn.Internal && !opts.Internal {
 			skipped++
 			continue

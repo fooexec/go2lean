@@ -51,6 +51,9 @@ type Func struct {
 	// as the Go line leaves out unexported functions, since its callers'
 	// invariants are not in its parameters.
 	Internal bool
+	// Builtin is a model function go2lean supplies (C's malloc and free),
+	// never a search target.
+	Builtin bool
 	// Consts are the integer constants of the function, which the search
 	// tries as values (a magic number guarding a branch).
 	Consts []int64
@@ -86,6 +89,15 @@ type Options struct {
 	// is generated as that struct (#269). Used only where the function's
 	// parameter count is the IR's.
 	Types map[string][]any
+}
+
+// heapModels are the bodies of the model functions for C's heap, after
+// their names: the ops the direct calls lower to (see call).
+var heapModels = map[string]string{
+	"malloc":  "params := [0], nvals := 2, entry := 0,\n  blocks := #[{ params := [], instrs := #[.op 1 .goAlloc [0]], term := .ret 1 }]",
+	"calloc":  "params := [0, 1], nvals := 4, entry := 0,\n  blocks := #[{ params := [], instrs := #[.op 2 (.mul false false false) [0, 1], .op 3 .goAlloc [2]], term := .ret 3 }]",
+	"realloc": "params := [0, 1], nvals := 3, entry := 0,\n  blocks := #[{ params := [], instrs := #[.op 2 .realloc [0, 1]], term := .ret 2 }]",
+	"free":    "params := [0], nvals := 2, entry := 0,\n  blocks := #[{ params := [], instrs := #[.op 1 .cfree [0]], term := .ret 1 }]",
 }
 
 // maxCallees bounds the functions Options.Callees adds.
@@ -152,6 +164,17 @@ func Load(path string, opts Options) (*Model, error) {
 			defs = append(defs, f)
 		}
 	}
+	// C's heap functions the module declares get a model function each
+	// (heapModels, #269), so that a pointer to one, as cJSON's hooks table
+	// holds (global_hooks = { malloc, free, realloc }), resolves to it.
+	var synth []string
+	for f := m.FirstFunction(); !f.IsNil(); f = llvm.NextFunction(f) {
+		if _, ok := heapModels[f.Name()]; ok && f.IsDeclaration() {
+			if _, defined := l.fids[f.Name()]; !defined {
+				synth = append(synth, f.Name())
+			}
+		}
+	}
 	if opts.Callees {
 		// Breadth first, so the functions closest to the kept ones come
 		// first when the bound cuts.
@@ -170,6 +193,9 @@ func Load(path string, opts Options) (*Model, error) {
 			}
 		}
 	}
+	for k, name := range synth {
+		l.fids[name] = len(defs) + k
+	}
 	model := &Model{}
 	var b strings.Builder
 	var names []string
@@ -177,6 +203,12 @@ func Load(path string, opts Options) (*Model, error) {
 		text, fn := l.function(f, i)
 		model.Funcs = append(model.Funcs, fn)
 		b.WriteString(text)
+		names = append(names, fmt.Sprintf("f%d", i))
+	}
+	for k, name := range synth {
+		i := len(defs) + k
+		fmt.Fprintf(&b, "def f%d : Go2Lean.LLVM.Func := {\n  name := %q, %s }\n\n", i, name, heapModels[name])
+		model.Funcs = append(model.Funcs, Func{Name: name, Index: i, Builtin: true})
 		names = append(names, fmt.Sprintf("f%d", i))
 	}
 	tbl := make([]string, len(l.fnTable))
