@@ -76,6 +76,11 @@ type Options struct {
 	// standard library or TinyGo's runtime runs its code instead of being
 	// havoc.
 	Callees bool
+	// Types are the C types of each function's parameters, from the debug
+	// information (ParamTypes): a parameter that is a pointer to a struct
+	// is generated as that struct (#269). Used only where the function's
+	// parameter count is the IR's.
+	Types map[string][]any
 }
 
 // maxCallees bounds the functions Options.Callees adds.
@@ -760,6 +765,10 @@ func (l *lowerer) function(f llvm.Value, index int) (string, Func) {
 		case llvm.PointerTypeKind:
 			if l.opts.GoABI {
 				name = strings.TrimSuffix(name, ".data")
+			}
+			if ts := l.opts.Types[f.Name()]; len(ts) == len(ps) && ts[i] != nil {
+				fn.Gens = append(fn.Gens, Gen{K: "typed", Name: name, Ty: ts[i]})
+				continue
 			}
 			g := Gen{K: "buf", Name: name, EB: l.elemBytes(f, p), MaxLen: maxBuf}
 			if g.EB != 1 && g.EB != 2 && g.EB != 4 && g.EB != 8 {

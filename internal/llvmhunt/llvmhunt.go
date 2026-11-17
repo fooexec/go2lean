@@ -84,7 +84,16 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 	if err != nil {
 		return err
 	}
-	model, err := llvmfe.Load(bc, llvmfe.Options{})
+	// The parameters' C types, so that a pointer to a struct is generated
+	// as that struct (#269); without them the IR's generators stay.
+	var types map[string][]any
+	if filepath.Ext(src) == ".c" {
+		if types, err = llvmfe.ParamTypes(src, work); err != nil {
+			fmt.Fprintf(log, "  (no debug types: %s)\n", firstLine(err.Error()))
+			types = nil
+		}
+	}
+	model, err := llvmfe.Load(bc, llvmfe.Options{Types: types})
 	if err != nil {
 		return err
 	}
@@ -308,6 +317,14 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 				fmt.Fprintf(&b, "  %s %s_init[] = {%s};\n  memcpy(%s, %s_init, sizeof %s_init);\n", ctype, v, strings.Join(lits, ", "), v, v, v)
 			}
 			args = append(args, v)
+		case "typed":
+			var tv map[string]any
+			if err := json.Unmarshal([]byte(cx.Inputs[g.Name]), &tv); err != nil {
+				return nil, fmt.Errorf("typed input %s: %v", g.Name, err)
+			}
+			n := 0
+			fmt.Fprintf(&b, "  void *%s = %s;\n", v, cTVal(&b, tv, &n))
+			args = append(args, v)
 		default:
 			fmt.Fprintf(&b, "  long long %s = %s;\n", v, cInt(cx.Inputs[g.Name]))
 			args = append(args, v)
@@ -351,6 +368,87 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 
 // cInt is a decimal as a C long long literal (the minimum has no literal
 // of its own).
+// The typed inputs (#269) as C: each object a fresh calloc of the struct's
+// size, each member written at its offset, so the replay sees the same
+// objects as the model.
+
+// tvSize is the bytes a typed value takes where it is stored.
+func tvSize(v map[string]any) int {
+	switch v["k"] {
+	case "int", "zero":
+		return int(num(v["b"]))
+	case "struct":
+		return int(num(v["size"]))
+	default:
+		return 8
+	}
+}
+
+func num(x any) float64 {
+	switch y := x.(type) {
+	case float64:
+		return y
+	case string:
+		var f float64
+		fmt.Sscan(y, &f)
+		return f
+	}
+	return 0
+}
+
+// cTVal emits the objects a pointer-typed value needs and returns the C
+// expression of the pointer.
+func cTVal(b *strings.Builder, v map[string]any, n *int) string {
+	switch v["k"] {
+	case "ptr":
+		inner, _ := v["v"].(map[string]any)
+		name := fmt.Sprintf("o%d", *n)
+		*n++
+		size := tvSize(inner)
+		if size == 0 {
+			size = 1
+		}
+		fmt.Fprintf(b, "  unsigned char *%s = calloc(1, %d);\n", name, size)
+		cWrite(b, name, 0, inner, n)
+		return name
+	case "str":
+		bs, _ := v["v"].([]any)
+		name := fmt.Sprintf("o%d", *n)
+		*n++
+		lits := make([]string, 0, len(bs)+1)
+		for _, x := range bs {
+			lits = append(lits, fmt.Sprint(int(num(x))))
+		}
+		lits = append(lits, "0")
+		fmt.Fprintf(b, "  static const unsigned char %s_init[] = {%s};\n  char *%s = malloc(sizeof %s_init);\n  memcpy(%s, %s_init, sizeof %s_init);\n",
+			name, strings.Join(lits, ", "), name, name, name, name, name)
+		return name
+	default:
+		return "NULL"
+	}
+}
+
+// cWrite emits the writes of v at base+off.
+func cWrite(b *strings.Builder, base string, off int, v map[string]any, n *int) {
+	switch v["k"] {
+	case "int":
+		w := int(num(v["b"])) * 8
+		fmt.Fprintf(b, "  *(int%d_t *)(%s + %d) = (int%d_t)%s;\n", w, base, off, w, cInt(fmt.Sprint(v["v"])))
+	case "null":
+		fmt.Fprintf(b, "  *(void **)(%s + %d) = NULL;\n", base, off)
+	case "ptr", "str":
+		p := cTVal(b, v, n)
+		fmt.Fprintf(b, "  *(void **)(%s + %d) = %s;\n", base, off, p)
+	case "struct":
+		fs, _ := v["fields"].([]any)
+		for _, f := range fs {
+			fm, _ := f.(map[string]any)
+			fv, _ := fm["v"].(map[string]any)
+			cWrite(b, base, off+int(num(fm["off"])), fv, n)
+		}
+	}
+}
+
 func cInt(s string) string {
 	if s == "-9223372036854775808" {
 		return "(-9223372036854775807LL - 1)"

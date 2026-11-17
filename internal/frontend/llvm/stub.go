@@ -47,6 +47,7 @@ type Options struct {
 	Keep    func(name string) bool
 	GoABI   bool
 	Callees bool
+	Types   map[string][]any
 }
 
 func Load(path string, opts Options) (*Model, error)      { return nil, errNoLLVM }

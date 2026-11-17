@@ -9301,6 +9301,7 @@ func uniqueGlobal(v *ssa.UnOp) (ir.Val, bool) {
 //   - Uint32, Uint64, Uint: any value;
 //   - New, NewSource, NewPCG, NewChaCha8: a fresh generator (every draw
 //     above ignores its state), Seed: nothing.
+//
 // The draws are havoc of reason "random": the search picks them, and the
 // replay's own draws differ, as two runs of Go do.
 func (t *fnState) randDraw(x *ssa.Call, callee *ssa.Function, name string) (bool, error) {
