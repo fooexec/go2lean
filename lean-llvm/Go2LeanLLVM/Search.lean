@@ -316,6 +316,12 @@ def materialise (args : List Arg) (globals : List GlobalInit := []) : Option (Li
       let (m', p) ← allocTVal m v
       m := m'
       vals := vals.push (.ptr (.val p))
+    | .tree (.str bs) =>
+      let (m', p) ← (match m.alloc (bs.length + 1).toUInt64 with | .ok r => some r | _ => none)
+      m := m'
+      m ← (match m.store p (ByteArray.mk ((bs ++ [0]).map (fun (b : Nat) => b.toUInt8)).toArray) with
+        | .ok m => some m | _ => none)
+      vals := vals.push (.ptr (.val p))
     | .tree (.int b v) => vals := vals.push (.int (b * 8) (.val (BitVec.ofInt (b * 8) v)))
     | .tree _ => vals := vals.push (.ptr Veir.Data.LLVM.Ptr.null)
   return (vals.toList, #[.unit, .mem m] ++ gptrs)

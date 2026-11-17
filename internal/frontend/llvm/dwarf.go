@@ -60,7 +60,7 @@ func paramTypes(d *dwarf.Data) (map[string][]any, error) {
 		if name == "" || !e.Children {
 			continue
 		}
-		var params []any
+		var raw []dwarf.Type
 		for {
 			c, err := r.Next()
 			if err != nil {
@@ -77,15 +77,25 @@ func paramTypes(d *dwarf.Data) (map[string][]any, error) {
 			}
 			off, ok := c.Val(dwarf.AttrType).(dwarf.Offset)
 			if !ok {
-				params = append(params, nil)
+				raw = append(raw, nil)
 				continue
 			}
 			t, err := d.Type(off)
 			if err != nil {
-				params = append(params, nil)
+				raw = append(raw, nil)
 				continue
 			}
-			params = append(params, paramCTy(t))
+			raw = append(raw, t)
+		}
+		params := make([]any, len(raw))
+		for i, t := range raw {
+			if t == nil {
+				continue
+			}
+			// A char * followed by an integer is a buffer and its length
+			// (the IR's generators); without one it is a C string.
+			lengthNext := i+1 < len(raw) && raw[i+1] != nil && isInteger(raw[i+1])
+			params[i] = paramCTy(t, lengthNext)
 		}
 		out[name] = params
 	}
@@ -106,17 +116,47 @@ func strip(t dwarf.Type) dwarf.Type {
 	}
 }
 
-// paramCTy is a parameter's CTy when it is a pointer to a struct, else nil.
-func paramCTy(t dwarf.Type) any {
+// paramCTy is a parameter's CTy, or nil where the IR's generators stay:
+// a pointer to a struct is that struct; a char * with no length after it
+// is a NUL-terminated string; a pointer to a pointer is a slot holding a
+// null or a pointer to its target.
+func paramCTy(t dwarf.Type, lengthNext bool) any {
 	p, ok := strip(t).(*dwarf.PtrType)
 	if !ok {
 		return nil
 	}
-	s, ok := strip(p.Type).(*dwarf.StructType)
-	if !ok || s.Kind != "struct" || s.Incomplete {
+	switch target := strip(p.Type).(type) {
+	case *dwarf.StructType:
+		if target.Kind != "struct" || target.Incomplete {
+			return nil
+		}
+		return map[string]any{"k": "ptr", "t": cty(target, typeDepth)}
+	case *dwarf.PtrType:
+		return map[string]any{"k": "ptr", "t": cty(target, typeDepth)}
+	default:
+		if isChar(target) && !lengthNext {
+			return map[string]any{"k": "str"}
+		}
 		return nil
 	}
-	return map[string]any{"k": "ptr", "t": cty(s, typeDepth)}
+}
+
+func isChar(t dwarf.Type) bool {
+	switch x := strip(t).(type) {
+	case *dwarf.CharType, *dwarf.UcharType:
+		return true
+	case *dwarf.IntType, *dwarf.UintType:
+		return x.Size() == 1
+	}
+	return false
+}
+
+func isInteger(t dwarf.Type) bool {
+	switch strip(t).(type) {
+	case *dwarf.IntType, *dwarf.UintType, *dwarf.CharType, *dwarf.UcharType, *dwarf.BoolType, *dwarf.EnumType:
+		return true
+	}
+	return false
 }
 
 // cty is the CTy of t, with pointers to structs unrolled depth levels.
@@ -136,10 +176,7 @@ func cty(t dwarf.Type, depth int) map[string]any {
 		return zero(n)
 	case *dwarf.PtrType:
 		target := strip(x.Type)
-		if c, ok := target.(*dwarf.CharType); ok && c.Size() == 1 {
-			return map[string]any{"k": "str"}
-		}
-		if _, ok := target.(*dwarf.IntType); ok && target.Size() == 1 {
+		if isChar(target) {
 			return map[string]any{"k": "str"}
 		}
 		if s, ok := target.(*dwarf.StructType); ok && s.Kind == "struct" && !s.Incomplete && depth > 0 {

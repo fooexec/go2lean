@@ -21,6 +21,7 @@ func TestParamTypes(t *testing.T) {
 typedef struct item { struct item *next; int type; char *name; double num; } item;
 int count(item *it, int n) { return it ? it->type + n : n; }
 int plain(int *p, int n) { return p ? p[0] : n; }
+int str(const char *s, const char **end, const unsigned char *buf, unsigned long len) { return s[0] + (end != 0) + buf[0] + len; }
 `), 0o644)
 	ts, err := ParamTypes(src, dir)
 	if err != nil {
@@ -28,6 +29,10 @@ int plain(int *p, int n) { return p ? p[0] : n; }
 	}
 	if ts["plain"] == nil || ts["plain"][0] != nil || ts["plain"][1] != nil {
 		t.Errorf("plain: %v, want [nil nil]", ts["plain"])
+	}
+	sb, _ := json.Marshal(ts["str"])
+	if want := `[{"k":"str"},{"k":"ptr","t":{"k":"str"}},null,null]`; string(sb) != want {
+		t.Errorf("str: %s, want %s", sb, want)
 	}
 	c := ts["count"]
 	if len(c) != 2 || c[0] == nil || c[1] != nil {
