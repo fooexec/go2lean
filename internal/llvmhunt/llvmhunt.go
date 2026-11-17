@@ -39,6 +39,10 @@ type Options struct {
 	// (static in C); by default only the externally visible ones, the
 	// library's API, are searched.
 	Internal bool
+	// SpecsOnly searches only the spec functions (#270): the agent's
+	// spec file includes the library, whose own functions it does not
+	// mean to search.
+	SpecsOnly bool
 }
 
 // searchResult is the JSON line the search driver prints.
@@ -125,7 +129,7 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 	}
 	skipped := 0
 	for _, fn := range model.Funcs {
-		if fn.Builtin {
+		if fn.Builtin || opts.SpecsOnly && !fn.Spec {
 			continue
 		}
 		if fn.Internal && !opts.Internal && !fn.Spec {

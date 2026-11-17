@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fooexec/go2lean/internal/agent"
+	"github.com/fooexec/go2lean/internal/contract"
+	llvmfe "github.com/fooexec/go2lean/internal/frontend/llvm"
+	"github.com/fooexec/go2lean/internal/repo"
 )
 
 func cmdAgent(args []string) error {
@@ -42,7 +47,24 @@ func cmdAgent(args []string) error {
 		guidanceText = string(b)
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("agent: exactly one package pattern expected")
+		return fmt.Errorf("agent: exactly one package pattern (or C file) expected")
+	}
+	if strings.HasSuffix(fs.Arg(0), ".c") {
+		// The agent on C (#270): specs in C, searched on the LLVM line.
+		if !llvmfe.Available {
+			return errors.New("agent on C needs the LLVM frontend: rebuild with -tags llvm18 (or your LLVM version's tag)")
+		}
+		root, err := repo.Root()
+		if err != nil {
+			return err
+		}
+		llm, err := agent.New(*llmSpec, agent.ClaudeConfig{Model: *model, BaseURL: *baseURL, Thinking: *thinking})
+		if err != nil {
+			return err
+		}
+		return agent.RunC(context.Background(), root, contract.Workspace{Root: *ws.workspace}, fs.Arg(0), llm, agent.Options{
+			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText,
+		}, os.Stdout)
 	}
 	w, env, err := openWorkspace(ws)
 	if err != nil {
