@@ -107,7 +107,10 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 		}
 		res, err := search(leanDir, key, fn, opts)
 		if err != nil {
-			return err
+			// One function the search cannot run must not end the run over
+			// the others (a library has a hundred).
+			fmt.Fprintf(log, "    error: %s\n", firstLine(err.Error()))
+			continue
 		}
 		if !res.Found {
 			certificate := ""
@@ -148,10 +151,20 @@ func firstLine(s string) string {
 }
 
 func search(leanDir, key string, fn llvmfe.Func, opts Options) (*searchResult, error) {
+	// A function with no parameters (cJSON_GetErrorPtr) has no generators,
+	// and one without constants no extras: both are empty arrays for the
+	// search, not JSON null.
+	gens, consts := fn.Gens, fn.Consts
+	if gens == nil {
+		gens = []llvmfe.Gen{}
+	}
+	if consts == nil {
+		consts = []int64{}
+	}
 	spec := map[string]any{
-		"model": key, "func": fn.Index, "gens": fn.Gens,
+		"model": key, "func": fn.Index, "gens": gens,
 		"trials": opts.Trials, "seed": opts.Seed, "fuel": opts.Fuel,
-		"engine": opts.Engine, "exhaustLen": opts.ExhaustLen, "extra": fn.Consts,
+		"engine": opts.Engine, "exhaustLen": opts.ExhaustLen, "extra": consts,
 	}
 	if opts.Init >= 0 {
 		spec["init"] = opts.Init
