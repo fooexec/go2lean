@@ -34,6 +34,7 @@ type Func struct {
 	Consts   []int64
 	Internal bool
 	Builtin  bool
+	Spec     bool
 }
 
 // Model is a lowered module.

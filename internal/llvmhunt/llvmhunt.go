@@ -128,7 +128,7 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 		if fn.Builtin {
 			continue
 		}
-		if fn.Internal && !opts.Internal {
+		if fn.Internal && !opts.Internal && !fn.Spec {
 			skipped++
 			continue
 		}
@@ -202,6 +202,9 @@ func search(leanDir, key string, fn llvmfe.Func, opts Options) (*searchResult, e
 	}
 	if opts.Init >= 0 {
 		spec["init"] = opts.Init
+	}
+	if fn.Spec {
+		spec["spec"] = true
 	}
 	if len(opts.Strs) > 0 {
 		spec["strs"] = opts.Strs
@@ -321,7 +324,7 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 		return nil, err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "// go2lean PoC for %s: %s\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n", cx.ID, cx.Property)
+	fmt.Fprintf(&b, "// go2lean PoC for %s: %s\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n", cx.ID, cx.Property)
 	fmt.Fprintf(&b, "#define main go2lean_source_main\n#include %q\n#undef main\n\nint main(void) {\n", src)
 	var args []string
 	for i, g := range fn.Gens {
@@ -355,7 +358,12 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 			args = append(args, v)
 		}
 	}
-	fmt.Fprintf(&b, "  (void)%s(%s);\n  return 0;\n}\n", fn.Name, strings.Join(args, ", "))
+	if fn.Spec {
+		// A spec's 0 is its violation (#270): the run says so and aborts.
+		fmt.Fprintf(&b, "  if (!%s(%s)) {\n    fputs(\"%s\\n\", stderr);\n    abort();\n  }\n  return 0;\n}\n", fn.Name, strings.Join(args, ", "), specViolated)
+	} else {
+		fmt.Fprintf(&b, "  (void)%s(%s);\n  return 0;\n}\n", fn.Name, strings.Join(args, ", "))
+	}
 	harness := filepath.Join(dir, "poc.c")
 	if err := os.WriteFile(harness, []byte(b.String()), 0o644); err != nil {
 		return nil, err
@@ -377,6 +385,9 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 	}
 	v.Evidence = contract.Evidence{Cmd: bin, Exit: exit, StdoutTail: tail(stdout), StderrTail: tail(stderr)}
 	report := sanitizerReport(stderr)
+	if report == "" && fn.Spec && strings.Contains(stderr, specViolated) {
+		report = specViolated
+	}
 	switch {
 	case report != "":
 		v.Status = contract.VerdictConfirmed
@@ -390,6 +401,9 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 	}
 	return v, ws.WriteVerdict(v)
 }
+
+// specViolated is what a replayed spec prints when it returns 0.
+const specViolated = "go2lean: spec violated"
 
 // cInt is a decimal as a C long long literal (the minimum has no literal
 // of its own).

@@ -339,7 +339,7 @@ inductive Outcome where
   | outOfFuel
 
 def runOnce (p : Prog) (globals : List GlobalInit) (fid : FuncId) (args : List Arg) (seed fuel : Nat)
-    (init : Option FuncId := none) : Outcome × HState Val :=
+    (init : Option FuncId := none) (spec : Bool := false) : Outcome × HState Val :=
   match materialise args globals with
   | none => (.stuck, {})
   | some (vals, heap) =>
@@ -356,6 +356,8 @@ def runOnce (p : Prog) (globals : List GlobalInit) (fid : FuncId) (args : List A
     | none => (.stuck, {})
     | some s =>
     match runFunc p () h false fid vals s fuel with
+    -- A spec (#270) that returns 0: its property is violated.
+    | (.ok (.int _ (.val v)), s) => if spec && v.toNat == 0 then (.ub .explicit, s) else (.holds, s)
     | (.ok _, s) => (.holds, s)
     | (.panic k, s) => (if k.isStuck then .stuck else .ub k, s)
     | (.outOfFuel, s) => (.outOfFuel, s)
@@ -437,6 +439,8 @@ structure Spec where
   extra : List Int := []
   /-- String constants of the program (bytes), tried as byte buffers. -/
   strs : List (List Nat) := []
+  /-- A spec function (#270): a run that returns 0 is a violation. -/
+  spec : Bool := false
   /-- The package's initialisation function, run before each trial. -/
   init : Option FuncId := none
 
@@ -453,7 +457,7 @@ def search (p : Prog) (globals : List GlobalInit) (sp : Spec) : Json := Id.run d
     for t in [0:sp.trials] do
       let (args, g') := genArgs sp.gens g sp.extra sp.strs
       g := g'
-      match runOnce p globals sp.func args (sp.seed + t) sp.fuel sp.init with
+      match runOnce p globals sp.func args (sp.seed + t) sp.fuel sp.init sp.spec with
       | (.ub k, s) =>
         let j := report sp.gens args k s t sp.seed "random"
         if clean s then return j
@@ -475,7 +479,7 @@ def search (p : Prog) (globals : List GlobalInit) (sp : Spec) : Json := Id.run d
     let mut i := 0
     let mut clean' := true
     for args in enumArgs sp.exhaustLen sp.gens sp.extra sp.strs do
-      match runOnce p globals sp.func args 0 sp.fuel sp.init with
+      match runOnce p globals sp.func args 0 sp.fuel sp.init sp.spec with
       | (.ub k, s) =>
         let j := report sp.gens args k s i 0 "exhaustive"
         if clean s then return j
@@ -539,7 +543,8 @@ def specOfJson (j : Json) : Except String Spec := do
            extra := ((j.getObjValAs? (Array Int) "extra").toOption.getD #[]).toList,
            strs := ((j.getObjValAs? (Array String) "strs").toOption.getD #[]).toList.map
              fun s => s.toUTF8.toList.map (·.toNat),
-           init := (j.getObjValAs? Nat "init").toOption }
+           init := (j.getObjValAs? Nat "init").toOption,
+           spec := (j.getObjValAs? Bool "spec").toOption.getD false }
 
 /-- The driver: `go2lean-llvm-search <spec.json>` with the spec naming a
 model of the registry. -/

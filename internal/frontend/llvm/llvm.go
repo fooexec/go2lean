@@ -54,6 +54,11 @@ type Func struct {
 	// Builtin is a model function go2lean supplies (C's malloc and free),
 	// never a search target.
 	Builtin bool
+	// Spec is a spec function (#270): marked
+	// __attribute__((annotate("go2lean:spec"))), it returns an int that
+	// is non-zero when the property holds; a run where it returns 0 is a
+	// violation, as undefined behaviour is.
+	Spec bool
 	// Consts are the integer constants of the function, which the search
 	// tries as values (a magic number guarding a branch).
 	Consts []int64
@@ -89,6 +94,39 @@ type Options struct {
 	// is generated as that struct (#269). Used only where the function's
 	// parameter count is the IR's.
 	Types map[string][]any
+}
+
+// specFuncs are the functions llvm.global.annotations marks
+// "go2lean:spec" (clang's __attribute__((annotate(...)))): each entry is
+// { ptr @f, ptr @.str, ptr @file, i32 line, ptr args }.
+func specFuncs(m llvm.Module) map[string]bool {
+	out := map[string]bool{}
+	g := m.NamedGlobal("llvm.global.annotations")
+	if g.IsNil() {
+		return out
+	}
+	arr := g.Initializer()
+	if arr.IsNil() {
+		return out
+	}
+	for i := 0; i < arr.OperandsCount(); i++ {
+		e := arr.Operand(i)
+		if e.OperandsCount() < 2 {
+			continue
+		}
+		fn, str := e.Operand(0), e.Operand(1)
+		if fn.IsAFunction().IsNil() || str.IsAGlobalVariable().IsNil() {
+			continue
+		}
+		init := str.Initializer()
+		if init.IsNil() || !init.IsConstantString() {
+			continue
+		}
+		if a := strings.TrimRight(init.ConstGetAsString(), "\x00"); a == "go2lean:spec" || strings.HasPrefix(a, "go2lean:spec ") {
+			out[fn.Name()] = true
+		}
+	}
+	return out
 }
 
 // heapModels are the bodies of the model functions for C's heap, after
@@ -196,11 +234,13 @@ func Load(path string, opts Options) (*Model, error) {
 	for k, name := range synth {
 		l.fids[name] = len(defs) + k
 	}
+	specs := specFuncs(m)
 	model := &Model{}
 	var b strings.Builder
 	var names []string
 	for i, f := range defs {
 		text, fn := l.function(f, i)
+		fn.Spec = specs[f.Name()]
 		model.Funcs = append(model.Funcs, fn)
 		b.WriteString(text)
 		names = append(names, fmt.Sprintf("f%d", i))
