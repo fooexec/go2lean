@@ -443,6 +443,10 @@ read from the debug information of a `-g` build:
 - a `T **` is a slot holding a null or a pointer to a `T`;
 - any other pointer followed by an integer is a buffer and its length.
 
+`malloc`, `calloc`, `realloc` and `free` are modelled (unless the file
+defines them): a freed object holds no bytes, so a later access is a use
+after free, and a second `free` is a double free (`examples/llvm/heap.c`).
+
 A counterexample is replayed as a C program that builds the same objects,
 under AddressSanitizer and UndefinedBehaviorSanitizer. `scripts/llvm-regress.sh <ws>` runs every C
 example and compares each function's outcome with

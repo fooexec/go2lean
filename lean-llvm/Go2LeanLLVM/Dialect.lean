@@ -135,6 +135,14 @@ inductive Op where
   /-- Go's allocation (TinyGo's `runtime.alloc`): a fresh object of `size`
   bytes, zeroed. Args `[size]`. -/
   | goAlloc
+  /-- C's `free(p)` (#269): null is a no-op; otherwise `p` must be the
+  start of a live object, whose lifetime then ends: it holds no bytes, so
+  every later access through it is out of bounds (a use after free), and a
+  second `free` is undefined behaviour (a double free). -/
+  | cfree
+  /-- C's `realloc(p, size)`: a fresh object of `size` bytes holding the
+  old one's first bytes (zero past them), and the old one freed. -/
+  | realloc
   /-- A pointer to global variable `i` (its object is set up before the
   run; the pointer is in heap slot `2 + i`). -/
   | global (i : Nat)
@@ -158,6 +166,16 @@ inductive Op where
   /-- An instruction the frontend does not lower: the model is stuck. -/
   | unsupported (what : String)
   deriving Repr
+
+/-- End the lifetime of the object `p` starts (`free`): none when `p` is
+not the start of a live object (a double free, or a pointer into the
+middle of one). A freed object keeps its index with no bytes; the
+`globals` map records it, under a key no symbol has. -/
+def freeObj (m : Veir.MemoryState) (p : Veir.Data.Pointer) : Option Veir.MemoryState := do
+  let obj ← m.objects[p.object]?
+  let key := s!"#freed{p.object}"
+  if m.globals.contains key || p.address != obj.base then none
+  return { m with objects := m.objects.set! p.object ⟨obj.base, 0⟩, globals := m.globals.insert key p.object }
 
 /-- The memory state, from heap slot 1. -/
 def memOf (heap : Heap Val) : Option Veir.MemoryState :=
@@ -394,6 +412,42 @@ def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap V
           let m ← if size.toNat == 0 then pure m else m.store p (ByteArray.mk (Array.replicate size.toNat 0))
           return (m, p)) with
       | .ok (m, p) => .ok (.ptr (.val p), setMem heap m)
+      | .panic k => .panic k
+      | .outOfFuel => .outOfFuel
+    | none => .panic .modelStuck
+  | .cfree, [.ptr p] =>
+    match p with
+    | .poison => .panic .undefinedBehavior
+    | .val q =>
+      if q.object == 0 then .ok (.unit, heap) else
+      match memOf heap with
+      | some m =>
+        match freeObj m q with
+        | some m => .ok (.unit, setMem heap m)
+        | none => .panic .undefinedBehavior
+      | none => .panic .modelStuck
+  | .realloc, [.ptr p, .int _ (.val size)] =>
+    if size.toNat > maxAlloc then .panic .modelStuck else
+    match memOf heap with
+    | some m =>
+      match ofInterp .undefinedBehavior (do
+          let (m, q) ← m.alloc size.toNat.toUInt64
+          let m ← if size.toNat == 0 then pure m else m.store q (ByteArray.mk (Array.replicate size.toNat 0))
+          return (m, q)) with
+      | .ok (m', q) =>
+        match p with
+        | .val old =>
+          if old.object == 0 then .ok (.ptr (.val q), setMem heap m') else
+          match m'.objects[old.object]? with
+          | some obj =>
+            let n := min obj.size size.toNat
+            let bytes := (List.range n).foldl (fun bs i =>
+              bs.insert (q.address + i.toUInt64) (m'.byte (old.address + i.toUInt64))) m'.bytes
+            match freeObj { m' with bytes } old with
+            | some m'' => .ok (.ptr (.val q), setMem heap m'')
+            | none => .panic .undefinedBehavior
+          | none => .panic .undefinedBehavior
+        | .poison => .panic .undefinedBehavior
       | .panic k => .panic k
       | .outOfFuel => .outOfFuel
     | none => .panic .modelStuck

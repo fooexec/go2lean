@@ -1,3 +1,6 @@
+confirmed heap.uaf
+confirmed heap.dfree
+exhausted heap.grow
 confirmed oob.sum
 confirmed oob.avg
 exhausted oob.max_of

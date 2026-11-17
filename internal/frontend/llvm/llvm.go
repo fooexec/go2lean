@@ -1107,6 +1107,32 @@ func (t *fnState) call(in llvm.Value) {
 		t.emit(t.vars[in], ".goAlloc", t.val(in.Operand(0)))
 		return
 	}
+	// C's heap (#269), unless the module defines a function of the name:
+	// malloc and calloc are fresh zeroed objects (malloc's bytes are left
+	// zero, not uninitialised, so that a read of them is not undefined
+	// behaviour the replay cannot see); free ends an object's lifetime;
+	// realloc copies into a fresh object and frees the old one.
+	if _, defined := t.l.fids[name]; !defined {
+		switch name {
+		case "malloc":
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], ".goAlloc", t.val(in.Operand(0)))
+			return
+		case "calloc":
+			n := t.fresh()
+			t.emit(n, "(.mul false false false)", t.val(in.Operand(0)), t.val(in.Operand(1)))
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], ".goAlloc", n)
+			return
+		case "free":
+			t.emit(t.fresh(), ".cfree", t.val(in.Operand(0)))
+			return
+		case "realloc":
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], ".realloc", t.val(in.Operand(0)), t.val(in.Operand(1)))
+			return
+		}
+	}
 	d := t.fresh()
 	if ty.TypeKind() != llvm.VoidTypeKind {
 		t.vars[in] = d
