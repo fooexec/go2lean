@@ -183,6 +183,7 @@ large arrays updated in place it also finds k016 at the default budget
 [roadmap](https://github.com/fooexec/go2lean/issues/53)).
 
 [All findings](docs/findings.md) ·
+[Property catalog](docs/specs/README.md) ·
 [Validation and regression cases](docs/validation.md) ·
 [semver evaluation](docs/eval/semver.md) · [glob evaluation](docs/eval/glob.md) ·
 [proofs on real code](docs/eval/prove-blind.md) ·
