@@ -95,7 +95,7 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - 🚧 `init` functions and package state (stores an `init` makes on every path, since 2026-10-23); floats ✅ (#148)
 - 🚧 Concurrency (C1, C2, [concurrency.md](../docs/concurrency.md)): goroutines, channels, `select`, `sync`; deadlocks and leaks found and confirmed in 60 of GoKer's 68 blocking kernels (`context`, timers, `sync.Cond` included), with the model's schedule replayed in Go when its scheduler does not take it; data races found and confirmed under `-race` in 24 of its 35 non-blocking kernels; a certificate under every schedule for small configurations (C3)
 
-**LLVM line (C, LLVM IR, TinyGo → VeIR semantics)**: 7 / 11
+**LLVM line (C, LLVM IR, TinyGo → VeIR semantics)**: 8 / 11 (the plan for C, C++ and Rust: [docs/specs/llvm.md](specs/llvm.md), #268 to #273)
 - ✅ `lean-llvm/`: LLVM dialect over the same core with [VeIR](https://github.com/opencompl/veir)'s integer and memory semantics
 - ✅ C frontend (clang + mem2reg + go-llvm); random and exhaustive search; replay under ASan/UBSan
 - ✅ TinyGo IR (LLVM 22): Go's ABI, runtime panics, aggregates, function values, globals, callees from the standard library and runtime lowered from their IR
@@ -106,7 +106,7 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - 🚧 Inputs for interfaces and maps; `sync.Once`, `strconv`, `encoding/json` on the TinyGo line
 - ⬜ Specs in C; properties beyond "no undefined behaviour"
 - ⬜ Floats, `ptrtoint`/`inttoptr`, more intrinsics, `malloc`/`free`
-- ⬜ CI for the LLVM line (needs LLVM development files)
+- ✅ CI for the LLVM line: the `llvm` job runs its unit tests and `scripts/llvm-regress.sh` (the C examples against `testdata/regress/llvm.golden`) when the line or the core it is built on changes (#268)
 
 **Agent and scale**: 2 / 4
 - ✅ Resumable full passes over a module; parallel searches

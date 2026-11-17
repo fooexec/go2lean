@@ -436,7 +436,9 @@ go build -tags llvm18 -o go2lean ./cmd/go2lean
 Each function is searched for inputs with undefined behaviour, assuming a
 pointer parameter followed by an integer is a buffer and its length; a
 counterexample is replayed as a C program under AddressSanitizer and
-UndefinedBehaviorSanitizer. The first build of `lean-llvm/` fetches VeIR and
+UndefinedBehaviorSanitizer. `scripts/llvm-regress.sh <ws>` runs every C
+example and compares each function's outcome with
+`testdata/regress/llvm.golden`, as CI's `llvm` job does. The first build of `lean-llvm/` fetches VeIR and
 compiles the part of it the dialect imports (under two minutes); later runs
 reuse it. What is modelled so far is in
 [docs/design.md §4.4](../docs/design.md).

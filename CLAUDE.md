@@ -26,7 +26,9 @@ replays each candidate as a real `go test`. Keep the name go2lean.
   `testdata/regress/examples.golden` only for new or intended outcome
   changes), `scripts/sem-diff.sh <ws>` (the model against Go on Goose's
   semantics tests; `testdata/goosesem/expected.txt` lists the known
-  disagreements), and the `json-diff.sh` checks of the `models` job. The
+  disagreements), the `json-diff.sh` checks of the `models` job, and,
+  when the LLVM line or the core changes, `scripts/llvm-regress.sh <ws>`
+  (needs `llvm-18-dev`, `libclang-rt-18-dev`). The
   Lean proofs (`scripts/proofs.sh`, the `proofs` workflow) run on demand.
 - Do not post to other projects' trackers (issues, PRs, comments) without
   the user's consent.
