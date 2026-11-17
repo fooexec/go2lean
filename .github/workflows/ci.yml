@@ -194,7 +194,10 @@ jobs:
       - uses: ./.github/actions/setup
 
       - name: Install LLVM 18 development files and sanitizer runtime
-        run: sudo apt-get install -y -qq llvm-18-dev libclang-rt-18-dev clang-18
+        run: |
+          sudo apt-get install -y -qq llvm-18-dev libclang-rt-18-dev clang-18
+          # opt and clang without a version suffix, as go2lean llvm calls them.
+          echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
 
       - name: Cache the LLVM line's Lean build (VeIR)
         uses: actions/cache@v4
