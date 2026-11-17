@@ -46,6 +46,14 @@ type Func struct {
 	Index  int
 	Gens   []Gen
 	Issues []string
+	// Internal is a function only its own file can call (C's static,
+	// internal or private linkage): the search's default leaves it out,
+	// as the Go line leaves out unexported functions, since its callers'
+	// invariants are not in its parameters.
+	Internal bool
+	// Builtin is a model function go2lean supplies (C's malloc and free),
+	// never a search target.
+	Builtin bool
 	// Consts are the integer constants of the function, which the search
 	// tries as values (a magic number guarding a branch).
 	Consts []int64
@@ -76,6 +84,20 @@ type Options struct {
 	// standard library or TinyGo's runtime runs its code instead of being
 	// havoc.
 	Callees bool
+	// Types are the C types of each function's parameters, from the debug
+	// information (ParamTypes): a parameter that is a pointer to a struct
+	// is generated as that struct (#269). Used only where the function's
+	// parameter count is the IR's.
+	Types map[string][]any
+}
+
+// heapModels are the bodies of the model functions for C's heap, after
+// their names: the ops the direct calls lower to (see call).
+var heapModels = map[string]string{
+	"malloc":  "params := [0], nvals := 2, entry := 0,\n  blocks := #[{ params := [], instrs := #[.op 1 .goAlloc [0]], term := .ret 1 }]",
+	"calloc":  "params := [0, 1], nvals := 4, entry := 0,\n  blocks := #[{ params := [], instrs := #[.op 2 (.mul false false false) [0, 1], .op 3 .goAlloc [2]], term := .ret 3 }]",
+	"realloc": "params := [0, 1], nvals := 3, entry := 0,\n  blocks := #[{ params := [], instrs := #[.op 2 .realloc [0, 1]], term := .ret 2 }]",
+	"free":    "params := [0], nvals := 2, entry := 0,\n  blocks := #[{ params := [], instrs := #[.op 1 .cfree [0]], term := .ret 1 }]",
 }
 
 // maxCallees bounds the functions Options.Callees adds.
@@ -142,6 +164,17 @@ func Load(path string, opts Options) (*Model, error) {
 			defs = append(defs, f)
 		}
 	}
+	// C's heap functions the module declares get a model function each
+	// (heapModels, #269), so that a pointer to one, as cJSON's hooks table
+	// holds (global_hooks = { malloc, free, realloc }), resolves to it.
+	var synth []string
+	for f := m.FirstFunction(); !f.IsNil(); f = llvm.NextFunction(f) {
+		if _, ok := heapModels[f.Name()]; ok && f.IsDeclaration() {
+			if _, defined := l.fids[f.Name()]; !defined {
+				synth = append(synth, f.Name())
+			}
+		}
+	}
 	if opts.Callees {
 		// Breadth first, so the functions closest to the kept ones come
 		// first when the bound cuts.
@@ -160,6 +193,9 @@ func Load(path string, opts Options) (*Model, error) {
 			}
 		}
 	}
+	for k, name := range synth {
+		l.fids[name] = len(defs) + k
+	}
 	model := &Model{}
 	var b strings.Builder
 	var names []string
@@ -167,6 +203,12 @@ func Load(path string, opts Options) (*Model, error) {
 		text, fn := l.function(f, i)
 		model.Funcs = append(model.Funcs, fn)
 		b.WriteString(text)
+		names = append(names, fmt.Sprintf("f%d", i))
+	}
+	for k, name := range synth {
+		i := len(defs) + k
+		fmt.Fprintf(&b, "def f%d : Go2Lean.LLVM.Func := {\n  name := %q, %s }\n\n", i, name, heapModels[name])
+		model.Funcs = append(model.Funcs, Func{Name: name, Index: i, Builtin: true})
 		names = append(names, fmt.Sprintf("f%d", i))
 	}
 	tbl := make([]string, len(l.fnTable))
@@ -733,7 +775,7 @@ func (l *lowerer) elemBytes(f, p llvm.Value) int {
 
 func (l *lowerer) function(f llvm.Value, index int) (string, Func) {
 	t := &fnState{l: l, vars: map[llvm.Value]int{}, bbIndex: map[llvm.BasicBlock]int{}}
-	fn := Func{Name: f.Name(), Index: index}
+	fn := Func{Name: f.Name(), Index: index, Internal: f.Linkage() == llvm.InternalLinkage || f.Linkage() == llvm.PrivateLinkage}
 	var params []int
 	ps := f.Params()
 	for i, p := range ps {
@@ -760,6 +802,10 @@ func (l *lowerer) function(f llvm.Value, index int) (string, Func) {
 		case llvm.PointerTypeKind:
 			if l.opts.GoABI {
 				name = strings.TrimSuffix(name, ".data")
+			}
+			if ts := l.opts.Types[f.Name()]; len(ts) == len(ps) && ts[i] != nil {
+				fn.Gens = append(fn.Gens, Gen{K: "typed", Name: name, Ty: ts[i]})
+				continue
 			}
 			g := Gen{K: "buf", Name: name, EB: l.elemBytes(f, p), MaxLen: maxBuf}
 			if g.EB != 1 && g.EB != 2 && g.EB != 4 && g.EB != 8 {
@@ -1092,6 +1138,41 @@ func (t *fnState) call(in llvm.Value) {
 		t.vars[in] = t.fresh()
 		t.emit(t.vars[in], ".goAlloc", t.val(in.Operand(0)))
 		return
+	}
+	// C's heap (#269), unless the module defines a function of the name:
+	// malloc and calloc are fresh zeroed objects (malloc's bytes are left
+	// zero, not uninitialised, so that a read of them is not undefined
+	// behaviour the replay cannot see); free ends an object's lifetime;
+	// realloc copies into a fresh object and frees the old one.
+	if _, defined := t.l.fids[name]; !defined {
+		switch name {
+		case "malloc":
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], ".goAlloc", t.val(in.Operand(0)))
+			return
+		case "calloc":
+			n := t.fresh()
+			t.emit(n, "(.mul false false false)", t.val(in.Operand(0)), t.val(in.Operand(1)))
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], ".goAlloc", n)
+			return
+		case "free":
+			t.emit(t.fresh(), ".cfree", t.val(in.Operand(0)))
+			return
+		case "realloc":
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], ".realloc", t.val(in.Operand(0)), t.val(in.Operand(1)))
+			return
+		case "strlen", "strcmp", "strncmp", "memcmp", "strchr", "strcpy", "tolower", "toupper":
+			// string.h and ctype.h, byte by byte over the model's memory.
+			args := make([]int, in.OperandsCount()-1)
+			for k := range args {
+				args[k] = t.val(in.Operand(k))
+			}
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], fmt.Sprintf("(.cstr %q)", name), args...)
+			return
+		}
 	}
 	d := t.fresh()
 	if ty.TypeKind() != llvm.VoidTypeKind {

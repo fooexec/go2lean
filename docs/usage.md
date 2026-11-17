@@ -433,10 +433,28 @@ go build -tags llvm18 -o go2lean ./cmd/go2lean
   max_of   no UB in 2000 trials; exhaustive: no UB on all 40 inputs
 ```
 
-Each function is searched for inputs with undefined behaviour, assuming a
-pointer parameter followed by an integer is a buffer and its length; a
-counterexample is replayed as a C program under AddressSanitizer and
-UndefinedBehaviorSanitizer. The first build of `lean-llvm/` fetches VeIR and
+Each externally visible function is searched for inputs with undefined
+behaviour (`-internal` adds the `static` ones, whose callers' invariants
+are not in their parameters). Parameters are generated from their C types,
+read from the debug information of a `-g` build:
+- a pointer to a struct is that struct, member by member, its pointer
+  members null or a further object, to depth 2;
+- a `char *` with no length after it is a NUL-terminated string;
+- a `T **` is a slot holding a null or a pointer to a `T`;
+- any other pointer followed by an integer is a buffer and its length.
+
+`malloc`, `calloc`, `realloc` and `free` are modelled (unless the file
+defines them): a freed object holds no bytes, so a later access is a use
+after free, and a second `free` is a double free (`examples/llvm/heap.c`),
+also when they are reached through a table of function pointers
+(`hooks.c`). `strlen`, `strcmp`, `strncmp`, `memcmp`, `strchr`, `strcpy`,
+`tolower` and `toupper` run byte by byte over the model's memory, so a
+string without its terminator is read out of bounds (`cstr.c`).
+
+A counterexample is replayed as a C program that builds the same objects,
+under AddressSanitizer and UndefinedBehaviorSanitizer. `scripts/llvm-regress.sh <ws>` runs every C
+example and compares each function's outcome with
+`testdata/regress/llvm.golden`, as CI's `llvm` job does. The first build of `lean-llvm/` fetches VeIR and
 compiles the part of it the dialect imports (under two minutes); later runs
 reuse it. What is modelled so far is in
 [docs/design.md §4.4](../docs/design.md).

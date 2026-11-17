@@ -16,6 +16,32 @@ namespace Go2Lean.LLVM.Search
 
 open Go2Lean.SSA Go2Lean.LLVM Lean
 
+/-- The C type of an object a pointer parameter points to, from the debug
+information (#269): a struct is its size and members at their offsets; a
+member pointer points to another typed object, unrolled to a fixed depth
+(past it, `null`); `zero` is a member the search leaves at zero bytes
+(floats, unions, bit-fields, function pointers). -/
+inductive CTy where
+  | int (bytes : Nat)
+  /-- A NUL-terminated string (`char *`). -/
+  | str
+  | ptr (t : CTy)
+  | null
+  | struct (size : Nat) (fields : List (Nat × CTy))
+  | zero (bytes : Nat)
+  deriving Repr, Inhabited
+
+/-- A drawn typed object: the value of a `CTy`. -/
+inductive TVal where
+  | int (bytes : Nat) (v : Int)
+  | str (bytes : List Nat)
+  | null
+  /-- A pointer to a fresh object holding `v`. -/
+  | ptr (v : TVal)
+  | struct (size : Nat) (fields : List (Nat × TVal))
+  | zero (bytes : Nat)
+  deriving Repr, Inhabited
+
 /-- How to generate one parameter. Mirrors the frontend's ABI. -/
 inductive Gen where
   | int (name : String) (w : Nat)
@@ -36,10 +62,13 @@ inductive Gen where
   /-- A buffer whose elements are zero (they hold pointers, or have a size
   that is not an integer width). -/
   | zbuf (name : String) (elemBytes : Nat) (maxLen : Nat)
+  /-- A value of a C type from the debug information (a pointer to a
+  struct, built member by member). -/
+  | typed (name : String) (t : CTy)
   deriving Repr, Inhabited
 
 def Gen.name : Gen → String
-  | .int n _ | .buf n _ _ | .len n _ _ | .null n | .obj n _ _ | .agg n _ | .zbuf n _ _ => n
+  | .int n _ | .buf n _ _ | .len n _ _ | .null n | .obj n _ _ | .agg n _ | .zbuf n _ _ | .typed n _ => n
 
 /-- A generated argument before it is placed in memory. -/
 inductive Arg where
@@ -50,6 +79,7 @@ inductive Arg where
   | val (v : Val)
   /-- `n` zero elements of `elemBytes` bytes. -/
   | zbuf (elemBytes n : Nat)
+  | tree (v : TVal)
   deriving Repr, Inhabited
 
 /-- Interesting values of a `w`-bit integer. -/
@@ -73,6 +103,58 @@ def randInt (g : StdGen) (w : Nat) (extra : List Int := []) : Int × StdGen :=
   else
     let (v, g) := randNat g 0 (2 ^ w - 1)
     ((BitVec.ofNat w v).toInt, g)
+
+/-- Draw a value of a C type: a pointer is null a third of the time, a
+string one of the program's string constants half the time. -/
+partial def genTVal (g : StdGen) (extra : List Int) (strs : List (List Nat)) : CTy → TVal × StdGen
+  | .int b =>
+    let (v, g) := randInt g (b * 8) extra
+    (.int b v, g)
+  | .str =>
+    let (k, g) := randNat g 0 1
+    if k == 0 && !strs.isEmpty then
+      let (i, g) := randNat g 0 (strs.length - 1)
+      (.str strs[i]!, g)
+    else
+      let (n, g) := randNat g 0 4
+      let (bs, g) := (List.range n).foldl (fun (acc, g) _ =>
+        let (b, g) := randNat g 1 127; (acc ++ [b], g)) ([], g)
+      (.str bs, g)
+  | .null => (.null, g)
+  | .zero b => (.zero b, g)
+  | .ptr t =>
+    let (k, g) := randNat g 0 2
+    if k == 0 then (.null, g) else
+    let (v, g) := genTVal g extra strs t
+    (.ptr v, g)
+  | .struct size fs =>
+    let (vs, g) := fs.foldl (fun (acc, g) (off, t) =>
+      let (v, g) := genTVal g extra strs t; (acc ++ [(off, v)], g)) ([], g)
+    (.struct size vs, g)
+
+/-- The smallest values of a C type, for the exhaustive engine: a null
+pointer, and a pointer to an object of zeros and null pointers. -/
+partial def CTy.zeroVal : CTy → TVal
+  | .int b => .int b 0
+  | .str => .str []
+  | .null | .ptr _ => .null
+  | .zero b => .zero b
+  | .struct size fs => .struct size (fs.map fun (off, t) => (off, t.zeroVal))
+
+def CTy.choices : CTy → List TVal
+  | .ptr t => [.null, .ptr t.zeroVal]
+  | t => [t.zeroVal]
+
+/-- A typed value as JSON, for the counterexample (the C harness rebuilds
+it). -/
+partial def TVal.toJson : TVal → Json
+  | .int b v => Json.mkObj [("k", "int"), ("b", b), ("v", toString v)]
+  | .str bs => Json.mkObj [("k", "str"), ("v", Json.arr (bs.map fun (b : Nat) => (b : Json)).toArray)]
+  | .null => Json.mkObj [("k", "null")]
+  | .ptr v => Json.mkObj [("k", "ptr"), ("v", v.toJson)]
+  | .struct size fs => Json.mkObj [("k", "struct"), ("size", size),
+      ("fields", Json.arr (fs.map fun (off, v) => Json.mkObj [("off", off), ("v", v.toJson)]).toArray)]
+  | .zero b => Json.mkObj [("k", "zero"), ("b", b)]
 
 /-- Random arguments: buffers first (their lengths feed `len`). -/
 def genArgs (gens : List Gen) (g : StdGen) (extra : List Int := []) (strs : List (List Nat) := []) :
@@ -125,6 +207,9 @@ def genArgs (gens : List Gen) (g : StdGen) (extra : List Int := []) (strs : List
           g := g'; bs := bs.push b
         else bs := bs.push 0
       out := out.push (.obj bs.toList)
+    | .typed _ t =>
+      let (v, g') := genTVal g extra strs t
+      g := g'; out := out.push (.tree v)
   -- Each length is its buffer's element count.
   let fixed := (gens.zip out.toList).map fun (gen, a) =>
     match gen with
@@ -152,6 +237,46 @@ def initGlobals (globals : List GlobalInit) : Option (Veir.MemoryState × Array 
       let q : Veir.Data.LLVM.Ptr := .val ⟨t.object, UInt64.ofInt (t.address.toNat + addend)⟩
       m ← (match m.storeByte64 ⟨p.object, p.address + off.toUInt64⟩ q.toByte with | .ok m => some m | _ => none)
   return (m, ptrs.map fun p => .ptr (.val p))
+
+/-- The bytes a typed value takes where it is stored: a pointer, a
+string's pointer included, is 8. -/
+def TVal.size : TVal → Nat
+  | .int b _ | .zero b => b
+  | .str _ | .null | .ptr _ => 8
+  | .struct size _ => size
+
+mutual
+/-- Write a typed value at `addr` (the object is zero already). -/
+partial def writeTVal (m : Veir.MemoryState) (addr : Veir.Data.Pointer) : TVal → Option Veir.MemoryState
+  | .int b v =>
+    match m.llvmStore addr (.int (b * 8) (.val (BitVec.ofInt (b * 8) v))) with
+    | .ok m => some m | _ => none
+  | .zero _ => some m
+  | .null =>
+    match m.storeByte64 addr (Veir.Data.LLVM.Ptr.null).toByte with
+    | .ok m => some m | _ => none
+  | .ptr v => do
+    let (m, q) ← allocTVal m v
+    let q' : Veir.Data.LLVM.Ptr := .val q
+    match m.storeByte64 addr q'.toByte with | .ok m => some m | _ => none
+  | .str bs => do
+    let (m, q) ← (match m.alloc (bs.length + 1).toUInt64 with | .ok r => some r | _ => none)
+    let m ← (match m.store q (ByteArray.mk ((bs ++ [0]).map (fun (b : Nat) => b.toUInt8)).toArray) with | .ok m => some m | _ => none)
+    let q' : Veir.Data.LLVM.Ptr := .val q
+    match m.storeByte64 addr q'.toByte with | .ok m => some m | _ => none
+  | .struct _ fs => fs.foldlM (fun m (off, v) =>
+      writeTVal m ⟨addr.object, addr.address + off.toUInt64⟩ v) m
+
+/-- A fresh zeroed object holding a typed value; its address. -/
+partial def allocTVal (m : Veir.MemoryState) (v : TVal) : Option (Veir.MemoryState × Veir.Data.Pointer) := do
+  let n := v.size
+  let (m, p) ← (match m.alloc n.toUInt64 with | .ok r => some r | _ => none)
+  let m ← if n > 0 then
+      (match m.store p (ByteArray.mk (Array.replicate n 0)) with | .ok m => some m | _ => none)
+    else some m
+  let m ← writeTVal m p v
+  return (m, p)
+end
 
 /-- Place the arguments: buffers become fresh objects in memory, after the
 globals. -/
@@ -186,6 +311,19 @@ def materialise (args : List Arg) (globals : List GlobalInit := []) : Option (Li
       if !bs.isEmpty then
         m ← (match m.store p (ByteArray.mk (bs.map (·.toUInt8)).toArray) with | .ok m => some m | _ => none)
       vals := vals.push (.ptr (.val p))
+    | .tree .null => vals := vals.push (.ptr Veir.Data.LLVM.Ptr.null)
+    | .tree (.ptr v) =>
+      let (m', p) ← allocTVal m v
+      m := m'
+      vals := vals.push (.ptr (.val p))
+    | .tree (.str bs) =>
+      let (m', p) ← (match m.alloc (bs.length + 1).toUInt64 with | .ok r => some r | _ => none)
+      m := m'
+      m ← (match m.store p (ByteArray.mk ((bs ++ [0]).map (fun (b : Nat) => b.toUInt8)).toArray) with
+        | .ok m => some m | _ => none)
+      vals := vals.push (.ptr (.val p))
+    | .tree (.int b v) => vals := vals.push (.int (b * 8) (.val (BitVec.ofInt (b * 8) v)))
+    | .tree _ => vals := vals.push (.ptr Veir.Data.LLVM.Ptr.null)
   return (vals.toList, #[.unit, .mem m] ++ gptrs)
 
 /-- Havoc values for unmodelled calls: `w`-bit integers from the seed. -/
@@ -230,6 +368,7 @@ def argJson (gen : Gen) (a : Arg) : List (String × Json) × List (String × Jso
   | _, .obj bs => ([], [(gen.name, Json.arr (bs.map (Json.str ∘ toString)).toArray)])
   | _, .val v => ([(gen.name, Json.str v.str)], [])
   | _, .zbuf _ n => ([], [(gen.name, Json.arr (List.replicate n (Json.str "0")).toArray)])
+  | _, .tree v => ([(gen.name, Json.str v.toJson.compress)], [])
 
 def report (gens : List Gen) (args : List Arg) (k : PanicKind) (s : HState Val)
     (trial seed : Nat) (engine : String) : Json :=
@@ -269,6 +408,7 @@ def genChoices (exLen : Nat) (extra : List Int := []) (strs : List (List Nat) :=
   | .obj _ size _ => [.obj (List.replicate size 0)]
   | .agg _ t => [.val t.zero]
   | .zbuf _ eb maxLen => (List.range (min exLen maxLen + 1)).map (.zbuf eb)
+  | .typed _ t => t.choices.map .tree
 
 def domainSize (exLen : Nat) (gens : List Gen) (extra : List Int := []) (strs : List (List Nat) := []) : Nat :=
   gens.foldl (fun acc g => acc * (genChoices exLen extra strs g).length) 1
@@ -362,6 +502,19 @@ partial def tyOfJson (j : Json) : Except String Ty := do
   | "agg" => return .agg (← (← j.getObjValAs? (Array Json) "fields").toList.mapM tyOfJson)
   | k => throw s!"unknown type {k}"
 
+partial def ctyOfJson (j : Json) : Except String CTy := do
+  match ← j.getObjValAs? String "k" with
+  | "int" => return .int (← j.getObjValAs? Nat "b")
+  | "str" => return .str
+  | "null" => return .null
+  | "zero" => return .zero (← j.getObjValAs? Nat "b")
+  | "ptr" => return .ptr (← ctyOfJson (← j.getObjVal? "t"))
+  | "struct" =>
+    let fs ← (← j.getObjValAs? (Array Json) "fields").toList.mapM fun f => do
+      return ((← f.getObjValAs? Nat "off"), (← ctyOfJson (← f.getObjVal? "t")))
+    return .struct (← j.getObjValAs? Nat "size") fs
+  | k => throw s!"unknown C type {k}"
+
 /-- Decode a generator; the shape mirrors the frontend's ABI. -/
 def genOfJson (j : Json) : Except String Gen := do
   let name ← j.getObjValAs? String "name"
@@ -373,6 +526,7 @@ def genOfJson (j : Json) : Except String Gen := do
   | "obj" => return .obj name (← j.getObjValAs? Nat "eb") ((j.getObjValAs? Bool "random").toOption.getD false)
   | "zbuf" => return .zbuf name (← j.getObjValAs? Nat "eb") (← j.getObjValAs? Nat "maxLen")
   | "agg" => return .agg name (← tyOfJson (← j.getObjVal? "ty"))
+  | "typed" => return .typed name (← ctyOfJson (← j.getObjVal? "ty"))
   | k => throw s!"unknown generator {k}"
 
 def specOfJson (j : Json) : Except String Spec := do

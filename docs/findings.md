@@ -13,18 +13,18 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**54 defects in 25 projects** (as of 2026-11-16):
-- **32 new** (9 medium, 13 low, 10 minor; none high):
-  - 24 drafted, not yet filed;
+**56 defects in 25 projects** (as of 2026-11-16):
+- **33 new** (10 medium, 13 low, 10 minor; none high):
+  - 25 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
   - 1 not reportable (archived);
-- **14 already reported upstream** and not fixed;
+- **15 already reported upstream** and not fixed;
 - **8 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **6 high, 16 medium, 21 low, 11 minor**. The severity is
+By severity: **6 high, 18 medium, 21 low, 11 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -59,6 +59,7 @@ scores):
 | medium | magiconair/properties | every parse error leaks the lexer goroutine | leak | template | filed: magiconair/properties#101 | [seventh run](eval/seventh-run.md) |
 | medium | aymerick/raymond, mailgun/raymond | every template syntax error leaks the lexer goroutine | leak | reading, then template | not reportable: archived | [lexer leaks](eval/lexer-leaks.md) |
 | medium | gin-contrib/cors | a regexp origin (`/.../`) is matched unanchored: the package's own example lets `https://google.com.evil.net` read with credentials | security | reading (advisory guidance) | draft (private) | [advisory specs](eval/cve-specs.md) |
+| medium | gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` (lookup on the cleaned path, redirect from the raw one) | security | advisory guidance spec | draft (private) | [advisory specs](eval/cve-specs.md) |
 | low | panjf2000/ants | a size above `MaxInt32` wraps; `Tune(1<<32-2)` gives -2 and `Submit` blocks forever | hang | agent spec | draft | twelfth run |
 | low | hashicorp/go-retryablehttp | `Request.WriteTo` panics on a request with no body | crash | agent spec | draft | [thirteenth run](eval/thirteenth-run.md) |
 | low | avast/retry-go | `MaxJitter(-1)` panics on the first retry | crash | reading | draft | thirteenth run |
@@ -96,6 +97,7 @@ Found independently; the project's tracker already has it, not fixed.
 | medium | alitto/pond | subpool: `TrySubmit` succeeds, the task never runs, `StopAndWait` hangs | hang | agent spec | #152 | twelfth run |
 | medium | hashicorp/go-retryablehttp | a large `Retry-After` overflows: the client retries with no wait | wrong result | agent spec | PR #297 | thirteenth run |
 | medium | Knetic/govaluate | an expression ending in `\` panics in the lexer (repository archived) | crash | template | #162 | [sixth run](eval/sixth-run.md) |
+| medium | gin-gonic/gin | `X-Forwarded-Prefix: @` sanitizes to nothing, so a trailing-slash redirect goes to `//evil.com/` | security | advisory guidance spec | PR #4923 | advisory specs |
 | low | gin-gonic/gin | `/user/groups/x` is served by `/user/:name/*action`, against its docs | contract | spec from docs | PR #4914 | ninth run |
 | low | gin-gonic/gin | `FileAttachment` writes a space as `+` in `filename*` | wrong result | reading (advisory follow-up) | PR #4873 | advisory specs |
 | low | go-playground/validator | `cidrv4` rejects an address with host bits that `cidr` accepts | wrong result | reading | #909 | ninth run |

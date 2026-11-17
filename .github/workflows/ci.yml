@@ -18,7 +18,8 @@ defaults:
   run:
     shell: bash   # -eo pipefail
 
-# Two jobs in parallel, about 10 minutes; a change to documentation only
+# Two jobs in parallel, about 10 minutes, and a third for the LLVM line
+# when it or the core it is built on changes; a change to documentation only
 # (docs/, .claude/, *.md) runs neither, and skipped jobs count as passed.
 # The Lean proofs and the proof judge's checks run on demand only
 # (proofs.yml). Each job sets up through .github/actions/setup.
@@ -28,6 +29,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.c.outputs.code }}
+      llvm: ${{ steps.c.outputs.llvm }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,10 +41,19 @@ jobs:
         run: |
           if [ "$EVENT" = workflow_dispatch ] || ! files=$(git diff --name-only "$BASE" HEAD); then
             echo code=true
-          elif grep -qvE '^(docs/|\.claude/)|\.md$' <<< "$files"; then
-            echo code=true
+            echo llvm=true
           else
-            echo code=false
+            if grep -qvE '^(docs/|\.claude/)|\.md$' <<< "$files"; then
+              echo code=true
+            else
+              echo code=false
+            fi
+            # The LLVM line, and the shared core and IR it is built on.
+            if grep -qE '^(internal/frontend/llvm/|internal/llvmhunt/|internal/ir/|lean-llvm/|lean/Go2Lean/(SSA|Search)|examples/llvm/|testdata/regress/llvm|scripts/llvm-regress\.sh|cmd/go2lean/llvm|\.github/workflows/ci\.yml|go\.mod)' <<< "$files"; then
+              echo llvm=true
+            else
+              echo llvm=false
+            fi
           fi | tee -a "$GITHUB_OUTPUT"
 
   check:
@@ -168,4 +179,43 @@ jobs:
             ${{ runner.temp }}/stringcmp-diff/*.log
             ${{ runner.temp }}/sem-diff/*.log
             ${{ runner.temp }}/sem-diff/outcomes.txt
+          if-no-files-found: ignore
+
+  # The LLVM line (C, LLVM IR): its unit tests and the C examples against
+  # testdata/regress/llvm.golden, when the line or the core it is built on
+  # changes (#268).
+  llvm:
+    needs: changes
+    if: needs.changes.outputs.llvm == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: Install LLVM 18 development files and sanitizer runtime
+        run: |
+          sudo apt-get install -y -qq llvm-18-dev libclang-rt-18-dev clang-18
+          # opt and clang without a version suffix, as go2lean llvm calls them.
+          echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
+
+      - name: Cache the LLVM line's Lean build (VeIR)
+        uses: actions/cache@v4
+        with:
+          path: lean-llvm/.lake
+          key: lean-llvm-${{ hashFiles('lean/lean-toolchain', 'lean-llvm/lake-manifest.json') }}-${{ hashFiles('lean-llvm/**/*.lean', 'lean/Go2Lean/SSA/**/*.lean') }}
+          restore-keys: lean-llvm-${{ hashFiles('lean/lean-toolchain', 'lean-llvm/lake-manifest.json') }}-
+
+      - name: Unit tests (llvm18 tag)
+        run: go test -tags llvm18 ./internal/frontend/llvm ./internal/llvmhunt ./cmd/go2lean
+
+      - name: C examples against testdata/regress/llvm.golden
+        run: scripts/llvm-regress.sh "$RUNNER_TEMP/llvm-regress"
+
+      - name: Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-logs
+          path: ${{ runner.temp }}/llvm-regress/*.log
           if-no-files-found: ignore

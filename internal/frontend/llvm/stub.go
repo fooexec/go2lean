@@ -31,7 +31,9 @@ type Func struct {
 	Issues []string
 	// Consts are the integer constants of the function, which the search
 	// tries as values (a magic number guarding a branch).
-	Consts []int64
+	Consts   []int64
+	Internal bool
+	Builtin  bool
 }
 
 // Model is a lowered module.
@@ -47,6 +49,7 @@ type Options struct {
 	Keep    func(name string) bool
 	GoABI   bool
 	Callees bool
+	Types   map[string][]any
 }
 
 func Load(path string, opts Options) (*Model, error)      { return nil, errNoLLVM }
