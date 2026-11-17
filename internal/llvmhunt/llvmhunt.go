@@ -106,6 +106,16 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 		return err
 	}
 	fmt.Fprintf(log, "compiled %s -> %s (%d functions)\n", src, key, len(model.Funcs))
+	// lean-llvm's own dependencies first: building the models project from
+	// a fresh checkout reads lean-llvm's manifest, which names VeIR's
+	// ExArray and lean-ctrees by their path inside VeIR's checkout, before
+	// lake has fetched VeIR ("ExArray: package directory not found").
+	llvmRoot := filepath.Join(root, "lean-llvm")
+	if _, err := os.Stat(filepath.Join(llvmRoot, ".lake", "packages", "VeIR", "ExArray")); err != nil {
+		if out, err := lake(llvmRoot, "build"); err != nil {
+			return fmt.Errorf("lake build (lean-llvm): %v\n%s", err, out)
+		}
+	}
 	if out, err := lake(leanDir, "build", "go2lean-llvm-search"); err != nil {
 		return fmt.Errorf("lake build: %v\n%s", err, out)
 	}
