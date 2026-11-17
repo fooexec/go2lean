@@ -46,6 +46,11 @@ type Func struct {
 	Index  int
 	Gens   []Gen
 	Issues []string
+	// Internal is a function only its own file can call (C's static,
+	// internal or private linkage): the search's default leaves it out,
+	// as the Go line leaves out unexported functions, since its callers'
+	// invariants are not in its parameters.
+	Internal bool
 	// Consts are the integer constants of the function, which the search
 	// tries as values (a magic number guarding a branch).
 	Consts []int64
@@ -738,7 +743,7 @@ func (l *lowerer) elemBytes(f, p llvm.Value) int {
 
 func (l *lowerer) function(f llvm.Value, index int) (string, Func) {
 	t := &fnState{l: l, vars: map[llvm.Value]int{}, bbIndex: map[llvm.BasicBlock]int{}}
-	fn := Func{Name: f.Name(), Index: index}
+	fn := Func{Name: f.Name(), Index: index, Internal: f.Linkage() == llvm.InternalLinkage || f.Linkage() == llvm.PrivateLinkage}
 	var params []int
 	ps := f.Params()
 	for i, p := range ps {

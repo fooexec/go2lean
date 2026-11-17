@@ -35,6 +35,10 @@ type Options struct {
 	Init int
 	// Strs are string constants of the program, tried as byte buffers.
 	Strs []string
+	// Internal also searches the functions only their own file can call
+	// (static in C); by default only the externally visible ones, the
+	// library's API, are searched.
+	Internal bool
 }
 
 // searchResult is the JSON line the search driver prints.
@@ -119,7 +123,12 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 	if out, err := lake(leanDir, "build", "go2lean-llvm-search"); err != nil {
 		return fmt.Errorf("lake build: %v\n%s", err, out)
 	}
+	skipped := 0
 	for _, fn := range model.Funcs {
+		if fn.Internal && !opts.Internal {
+			skipped++
+			continue
+		}
 		fmt.Fprintf(log, "  %s\n", fn.Name)
 		for _, is := range fn.Issues {
 			fmt.Fprintf(log, "      - %s\n", is)
@@ -160,6 +169,9 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 			return err
 		}
 		fmt.Fprintf(log, "    -> %s %s\n", v.Status, firstLine(v.Evidence.PanicMsg))
+	}
+	if skipped > 0 {
+		fmt.Fprintf(log, "  %d static functions not searched (-internal searches them)\n", skipped)
 	}
 	return nil
 }
