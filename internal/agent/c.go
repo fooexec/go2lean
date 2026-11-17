@@ -46,6 +46,13 @@ violation (a 0, or undefined behaviour inside the library). Rules:
   string.h functions strlen, strcmp, strncmp, memcmp, strchr, strcpy; other
   libc calls are not modelled and their results are unknown, so avoid them in
   the spec (in particular printf, sprintf, strtod, floats).
+- The search draws integers mostly from small values (0 to 16), from the
+  constants in the code, and from boundary values; other values are rare. So
+  index a table of input pieces with a small integer and keep each table to
+  at most 16 entries (use several parameters for several choices), and build
+  the input valid by construction (a small grammar: pick a value kind, then
+  its parts) rather than concatenating random pieces that rarely form a valid
+  input. An input the code rejects early tests nothing.
 - Keep each spec small and deterministic. Free what you allocate. Check the
   library's documented preconditions in the spec (return 1 early when an input
   is outside them) instead of reporting them as violations.
