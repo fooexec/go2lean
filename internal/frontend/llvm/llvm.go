@@ -1163,6 +1163,15 @@ func (t *fnState) call(in llvm.Value) {
 			t.vars[in] = t.fresh()
 			t.emit(t.vars[in], ".realloc", t.val(in.Operand(0)), t.val(in.Operand(1)))
 			return
+		case "strlen", "strcmp", "strncmp", "memcmp", "strchr", "strcpy", "tolower", "toupper":
+			// string.h and ctype.h, byte by byte over the model's memory.
+			args := make([]int, in.OperandsCount()-1)
+			for k := range args {
+				args[k] = t.val(in.Operand(k))
+			}
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], fmt.Sprintf("(.cstr %q)", name), args...)
+			return
 		}
 	}
 	d := t.fresh()

@@ -143,6 +143,11 @@ inductive Op where
   /-- C's `realloc(p, size)`: a fresh object of `size` bytes holding the
   old one's first bytes (zero past them), and the old one freed. -/
   | realloc
+  /-- A C string function (#269), by name: `strlen`, `strcmp`, `strncmp`,
+  `memcmp`, `strchr`, `strcpy`, `tolower`, `toupper`. Each reads the bytes
+  one by one, so a string without its terminator is read out of bounds,
+  undefined behaviour as in C. -/
+  | cstr (name : String)
   /-- A pointer to global variable `i` (its object is set up before the
   run; the pointer is in heap slot `2 + i`). -/
   | global (i : Nat)
@@ -249,6 +254,100 @@ def checkAccess (m : Veir.MemoryState) (p : LPtr) (size : Nat) : Res Veir.Data.P
     match m.getObject? p with
     | some obj => if size == 0 || obj.holds p.address size then .ok p else .panic .indexOutOfRange
     | none => .panic .modelStuck
+
+/-- `Res` as a monad, for the C string functions: a panic or running out
+of fuel ends the computation. -/
+local instance : Monad Res where
+  pure a := .ok a
+  bind r f := match r with
+    | .ok a => f a
+    | .panic k => .panic k
+    | .outOfFuel => .outOfFuel
+
+/-- How many bytes a C string function scans before the model gives up. -/
+def maxCStr : Nat := 1 <<< 16
+
+/-- Byte `i` of the object `p` points into: out of bounds or poison is
+undefined behaviour. -/
+def cByte (m : Veir.MemoryState) (p : Veir.Data.Pointer) (i : Nat) : Res Nat :=
+  match checkAccess m (.val ⟨p.object, p.address + i.toUInt64⟩) 1 with
+  | .ok q =>
+    let b := m.byte q.address
+    if b.poison != 0 then .panic .undefinedBehavior else .ok b.value.toNat
+  | .panic k => .panic k
+  | .outOfFuel => .outOfFuel
+
+/-- The index of the first byte at or after `i` that `stop` accepts. -/
+def cScan (m : Veir.MemoryState) (p : Veir.Data.Pointer) (stop : Nat → Bool) : Nat → Nat → Res Nat
+  | 0, _ => .panic .modelStuck
+  | fuel + 1, i =>
+    match cByte m p i with
+    | .ok b => if stop b then .ok i else cScan m p stop fuel (i + 1)
+    | .panic k => .panic k
+    | .outOfFuel => .outOfFuel
+
+/-- `strncmp`/`memcmp`'s loop: the sign of the first difference in `n`
+bytes; `nul` stops at a common terminator. -/
+def cCmp (m : Veir.MemoryState) (a b : Veir.Data.Pointer) (nul : Bool) : Nat → Nat → Res Int
+  | 0, _ => .ok 0
+  | n + 1, i =>
+    match cByte m a i, cByte m b i with
+    | .ok x, .ok y =>
+      if x != y then .ok (if x < y then -1 else 1)
+      else if nul && x == 0 then .ok 0
+      else cCmp m a b nul n (i + 1)
+    | .panic k, _ | _, .panic k => .panic k
+    | _, _ => .outOfFuel
+
+def intV (w : Nat) (v : Int) : Val := .int w (.val (BitVec.ofInt w v))
+
+/-- The C string functions of `Op.cstr`. -/
+def evalCStr (heap : Heap Val) (name : String) (args : List Val) : Res (Val × Heap Val) :=
+  match memOf heap with
+  | none => .panic .modelStuck
+  | some m =>
+  let ptrOf : Val → Res Veir.Data.Pointer := fun
+    | .ptr (.val p) => if p.object == 0 then .panic .nilDereference else .ok p
+    | .ptr .poison => .panic .undefinedBehavior
+    | _ => .panic .modelStuck
+  match name, args with
+  | "strlen", [s] => do
+    let p ← ptrOf s
+    let n ← cScan m p (· == 0) maxCStr 0
+    return (intV 64 n, heap)
+  | "strcmp", [a, b] => do
+    let (p, q) := (← ptrOf a, ← ptrOf b)
+    return (intV 32 (← cCmp m p q true maxCStr 0), heap)
+  | "strncmp", [a, b, .int _ (.val n)] => do
+    if n.toNat == 0 then return (intV 32 0, heap)
+    let (p, q) := (← ptrOf a, ← ptrOf b)
+    return (intV 32 (← cCmp m p q true (min n.toNat maxCStr) 0), heap)
+  | "memcmp", [a, b, .int _ (.val n)] => do
+    if n.toNat == 0 then return (intV 32 0, heap)
+    let (p, q) := (← ptrOf a, ← ptrOf b)
+    return (intV 32 (← cCmp m p q false (min n.toNat maxCStr) 0), heap)
+  | "strchr", [s, .int _ (.val c)] => do
+    let p ← ptrOf s
+    let ch := c.toNat % 256
+    let i ← cScan m p (fun b => b == ch || b == 0) maxCStr 0
+    let b ← cByte m p i
+    if b == ch then return (.ptr (.val ⟨p.object, p.address + i.toUInt64⟩), heap)
+    else return (.ptr Veir.Data.LLVM.Ptr.null, heap)
+  | "strcpy", [d, s] => do
+    let (p, q) := (← ptrOf d, ← ptrOf s)
+    let n ← cScan m q (· == 0) maxCStr 0
+    let _ ← checkAccess m (.val p) (n + 1)
+    match ofInterp .indexOutOfRange (m.memcpy p q (n + 1)) with
+    | .ok m => return (d, setMem heap m)
+    | .panic k => .panic k
+    | .outOfFuel => .outOfFuel
+  | "tolower", [.int w (.val c)] =>
+    let x := c.toInt
+    .ok (intV w (if 65 ≤ x && x ≤ 90 then x + 32 else x), heap)
+  | "toupper", [.int w (.val c)] =>
+    let x := c.toInt
+    .ok (intV w (if 97 ≤ x && x ≤ 122 then x - 32 else x), heap)
+  | _, _ => .panic .modelStuck
 
 def loadIntAt (heap : Heap Val) (w : Nat) (p : LPtr) : Res (Val × Heap Val) :=
   match memOf heap with
@@ -415,6 +514,7 @@ def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap V
       | .panic k => .panic k
       | .outOfFuel => .outOfFuel
     | none => .panic .modelStuck
+  | .cstr name, args => evalCStr heap name args
   | .cfree, [.ptr p] =>
     match p with
     | .poison => .panic .undefinedBehavior

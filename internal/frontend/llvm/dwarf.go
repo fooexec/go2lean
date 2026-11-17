@@ -61,6 +61,7 @@ func paramTypes(d *dwarf.Data) (map[string][]any, error) {
 			continue
 		}
 		var raw []dwarf.Type
+		var pnames []string
 		for {
 			c, err := r.Next()
 			if err != nil {
@@ -75,6 +76,8 @@ func paramTypes(d *dwarf.Data) (map[string][]any, error) {
 				}
 				continue
 			}
+			pname, _ := c.Val(dwarf.AttrName).(string)
+			pnames = append(pnames, pname)
 			off, ok := c.Val(dwarf.AttrType).(dwarf.Offset)
 			if !ok {
 				raw = append(raw, nil)
@@ -92,9 +95,11 @@ func paramTypes(d *dwarf.Data) (map[string][]any, error) {
 			if t == nil {
 				continue
 			}
-			// A char * followed by an integer is a buffer and its length
-			// (the IR's generators); without one it is a C string.
-			lengthNext := i+1 < len(raw) && raw[i+1] != nil && isInteger(raw[i+1])
+			// A char * followed by an integer named as a length is a buffer
+			// and its length (the IR's generators); otherwise it is a C
+			// string. cJSON_AddBoolToObject(object, name, cJSON_bool
+			// boolean): boolean is no length of name.
+			lengthNext := i+1 < len(raw) && raw[i+1] != nil && isInteger(raw[i+1]) && lengthName(pnames[i+1])
 			params[i] = paramCTy(t, lengthNext)
 		}
 		out[name] = params
@@ -147,6 +152,21 @@ func isChar(t dwarf.Type) bool {
 		return true
 	case *dwarf.IntType, *dwarf.UintType:
 		return x.Size() == 1
+	}
+	return false
+}
+
+// lengthName says whether a parameter's name reads as a length or a
+// count (len, length, size, count, n, num, and names ending in them).
+func lengthName(name string) bool {
+	n := strings.ToLower(name)
+	if n == "n" || n == "num" {
+		return true
+	}
+	for _, w := range []string{"len", "length", "size", "count", "num", "cap"} {
+		if n == w || strings.HasSuffix(n, "_"+w) || strings.HasSuffix(n, w) && len(n) > len(w) && !strings.HasSuffix(n, "re"+w) {
+			return true
+		}
 	}
 	return false
 }

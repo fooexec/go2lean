@@ -445,7 +445,11 @@ read from the debug information of a `-g` build:
 
 `malloc`, `calloc`, `realloc` and `free` are modelled (unless the file
 defines them): a freed object holds no bytes, so a later access is a use
-after free, and a second `free` is a double free (`examples/llvm/heap.c`).
+after free, and a second `free` is a double free (`examples/llvm/heap.c`),
+also when they are reached through a table of function pointers
+(`hooks.c`). `strlen`, `strcmp`, `strncmp`, `memcmp`, `strchr`, `strcpy`,
+`tolower` and `toupper` run byte by byte over the model's memory, so a
+string without its terminator is read out of bounds (`cstr.c`).
 
 A counterexample is replayed as a C program that builds the same objects,
 under AddressSanitizer and UndefinedBehaviorSanitizer. `scripts/llvm-regress.sh <ws>` runs every C

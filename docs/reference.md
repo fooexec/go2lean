@@ -106,7 +106,8 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - 🚧 Inputs for interfaces and maps; `sync.Once`, `strconv`, `encoding/json` on the TinyGo line
 - ⬜ Specs in C; properties beyond "no undefined behaviour"
 - ✅ `malloc`, `calloc`, `realloc`, `free` (use after free, double free; #269); parameters from their C types (DWARF)
-- ⬜ Floats, `ptrtoint`/`inttoptr`, more intrinsics, `string.h`
+- ✅ The `string.h` and `ctype.h` functions parsers call most (`strlen`, `strcmp`, `strncmp`, `memcmp`, `strchr`, `strcpy`, `tolower`, `toupper`)
+- ⬜ Floats, `ptrtoint`/`inttoptr`, more intrinsics, `sprintf`, the rest of libc
 - ✅ CI for the LLVM line: the `llvm` job runs its unit tests and `scripts/llvm-regress.sh` (the C examples against `testdata/regress/llvm.golden`) when the line or the core it is built on changes (#268)
 
 **Agent and scale**: 2 / 4

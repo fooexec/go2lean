@@ -1,3 +1,6 @@
+confirmed cstr.unterminated
+confirmed cstr.copy
+exhausted cstr.lookup
 confirmed heap.uaf
 confirmed heap.dfree
 exhausted heap.grow

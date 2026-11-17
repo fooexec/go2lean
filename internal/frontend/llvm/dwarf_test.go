@@ -22,6 +22,7 @@ typedef struct item { struct item *next; int type; char *name; double num; } ite
 int count(item *it, int n) { return it ? it->type + n : n; }
 int plain(int *p, int n) { return p ? p[0] : n; }
 int str(const char *s, const char **end, const unsigned char *buf, unsigned long len) { return s[0] + (end != 0) + buf[0] + len; }
+int named(const char *name, int boolean, const char *value, unsigned long buffer_length) { return name[0] + boolean + value[0] + buffer_length; }
 `), 0o644)
 	ts, err := ParamTypes(src, dir)
 	if err != nil {
@@ -33,6 +34,10 @@ int str(const char *s, const char **end, const unsigned char *buf, unsigned long
 	sb, _ := json.Marshal(ts["str"])
 	if want := `[{"k":"str"},{"k":"ptr","t":{"k":"str"}},null,null]`; string(sb) != want {
 		t.Errorf("str: %s, want %s", sb, want)
+	}
+	nb, _ := json.Marshal(ts["named"])
+	if want := `[{"k":"str"},null,null,null]`; string(nb) != want {
+		t.Errorf("named: %s, want %s (boolean is no length; buffer_length is)", nb, want)
 	}
 	c := ts["count"]
 	if len(c) != 2 || c[0] == nil || c[1] != nil {
