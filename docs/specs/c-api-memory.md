@@ -64,6 +64,6 @@ result (`NULL` on failure, the new string), the spec also checks it.
 
 - cJSON CVE-2023-50472 (`cJSON_SetValuestring`, v1.7.16), the only
   guidance given.
-- The specs written from it also re-found CVE-2024-31755 and
+- The specs written from it re-found CVE-2024-31755 and
   CVE-2023-50471, and the known, unfixed use after free of cJSON#1081. See
   [the cJSON report](../eval/cjson.md).

@@ -14,7 +14,7 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**64 defects in 27 projects** (as of 2026-11-18):
+**65 defects in 27 projects** (as of 2026-11-18):
 - **37 new** (1 high, 10 medium, 16 low, 10 minor):
   - 29 drafted, not yet filed;
   - 4 not drafted;
@@ -22,10 +22,10 @@ hand.
   - 2 dropped as too minor;
   - 1 not reportable (archived);
 - **16 already reported upstream** and not fixed;
-- **11 re-found from security advisories** or a known issue, all fixed
+- **12 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **7 high, 18 medium, 28 low, 11 minor**. The severity is
+By severity: **7 high, 19 medium, 28 low, 11 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -128,6 +128,7 @@ nothing to report.
 | medium | golang/go | `regexp/syntax`: `(?:[aA]0\|A)` matches `a` (found by glob's own fuzz target during the run) | fuzzer | golang/go#59007, Go 1.26 | glob |
 | low | gofiber/fiber (v2) | CORS `New` panics on a list with spaces after a comma | advisory spec | v2.52.3 | advisory specs |
 | low | gofiber/fiber (v2) | CORS entry after `", "` mis-parsed | advisory spec | v2.52.16 | advisory specs |
+| medium | DaveGamble/cJSON | `cJSON_ParseWithLength` reads one byte past its buffer in `parse_string` (CVE-2023-53154), from CVE-2019-11834's spec | advisory spec (C) | v1.7.18 | [cJSON](eval/cjson.md) |
 | low | DaveGamble/cJSON | `SetValuestring(item, NULL)` passes NULL to `strlen` (CVE-2024-31755), from CVE-2023-50472's spec | advisory spec (C) | v1.7.18 | [cJSON](eval/cjson.md) |
 | low | DaveGamble/cJSON | `InsertItemInArray(a, i, NULL)` dereferences NULL (CVE-2023-50471) | advisory spec (C) | v1.7.17 | cJSON |
 | low | DaveGamble/cJSON | `SetValuestring` calls `strcpy` on overlapping strings (#881) | advisory spec (C) | v1.7.19 | cJSON |

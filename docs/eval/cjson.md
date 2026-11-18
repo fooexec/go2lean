@@ -89,10 +89,11 @@ HEAD (`6d9f244`, after v1.7.19), with `go2lean llvm -specs-only`.
 | `detach_delete` | exhausted | exhausted | exhausted | exhausted | detach and delete by index, key and NULL (1,728 inputs) |
 
 What this shows:
-- **One advisory found three CVEs.** The spec written for CVE-2023-50472
-  also passes NULL as the string, CVE-2024-31755, found by others a year
-  later in v1.7.17. A second spec covered CVE-2023-50471, the advisory's
-  sibling.
+- **One advisory led to two other CVEs.** The advisory's own crash needs
+  an item whose string is NULL, which no spec built. But the spec written
+  for it passes NULL as the new string: CVE-2024-31755, found by others a
+  year later in v1.7.17. A second spec covered CVE-2023-50471, the
+  advisory's sibling.
 - **Each spec holds from its fix on.** On v1.7.18 and later the NULL specs
   are exhausted: no input of their domains crashes.
 - **An open defect, re-found.** On HEAD the use after free in
@@ -102,6 +103,25 @@ What this shows:
   contract of `AddItemToObjectCS`. The other expects a result that
   v1.7.19 changed on purpose. Both are told apart by reading the
   documentation and each version's change, not by the tool.
+
+**A second chain, on the parser.** The guidance was CVE-2019-11834 only
+(an out-of-bounds read on a NUL in a string literal, fixed in 1.7.11), as
+the property of [parser-bounds.md](../specs/parser-bounds.md). The agent
+ran on v1.7.17 and wrote nine specs over `cJSON_Parse`,
+`cJSON_ParseWithLength`, `cJSON_ParseWithLengthOpts`, `cJSON_ParseWithOpts`
+and `cJSON_Minify`.
+
+| spec | v1.7.17 | v1.7.18 | HEAD |
+|---|---|---|---|
+| `parse_grammar_truncated`, `_opts` | confirmed: heap over-read in `parse_string` (`cJSON.c:786`), one byte past a buffer of exactly `len` bytes | held | held |
+| `parse_nul_in_string` | exhausted (38,416 inputs) | exhausted | exhausted |
+| `minify_pieces` | exhausted (20,736) | exhausted | exhausted |
+| five more (raw bytes, C strings, options) | held or exhausted | held or exhausted | held or exhausted |
+
+The over-read is CVE-2023-53154, fixed in v1.7.18. As with the first
+chain, the spec for an old advisory found a later one. The specs that
+found it build a value from a small grammar and cut it at every length;
+the raw-byte specs never reached that check.
 
 **Floats were what made the second CVE reachable.** On the first run on
 v1.7.16, `insert_null_item` held, with 420 of 2,000 trials stuck. It

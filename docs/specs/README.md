@@ -63,6 +63,7 @@ Every property file has these sections:
 |---|---|
 | [go.md](go.md) | Go: goroutine leaks, deadlocks, channel misuse, data races, nil and index panics |
 | [llvm.md](llvm.md) | C, C++, Rust and other languages compiled to LLVM: the binding, and their own properties |
+| [parser-bounds.md](parser-bounds.md) | C, C++, `unsafe` Rust: a parser reads only the bytes it was given |
 | [c-api-memory.md](c-api-memory.md) | C, C++, `unsafe` Rust: a library's API is memory safe on what the API itself produces |
 
 ## Runs
@@ -85,7 +86,8 @@ specs.
 | static-files | labstack/echo | v4.15.3, v4.16.5 | re-found the successor advisory; latest held |
 | static-files | beego/beego | `939cfde` | **guard filter bypassed with case-insensitive routing** |
 | authz-match | casbin/casbin | HEAD | `KeyMatch` over-grants a mid-pattern `*` |
-| c-api-memory | DaveGamble/cJSON | v1.7.16 to HEAD | from CVE-2023-50472 alone: re-found it, CVE-2024-31755 and CVE-2023-50471, each held from its fix on; the open use after free of #1081 |
+| c-api-memory | DaveGamble/cJSON | v1.7.16 to HEAD | from CVE-2023-50472 alone: re-found CVE-2024-31755 and CVE-2023-50471, each held from its fix on; the open use after free of #1081 |
+| parser-bounds | DaveGamble/cJSON | v1.7.17 to HEAD | from CVE-2019-11834 alone: re-found CVE-2023-53154 on v1.7.17; v1.7.18 and HEAD held, 7 of 9 specs exhausted |
 
 The new defects are listed with all others in [findings](../findings.md),
 and their reports wait in [upstream reports](../blog/upstream-reports.md).
