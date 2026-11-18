@@ -97,6 +97,10 @@ retry-go's `Unrecoverable` ignored with a custom `RetryIf`).
 [Specs from security advisories](../docs/eval/cve-specs.md) turn a project's
 own CVE into a general property: the spec from one chi/echo advisory found
 the next, and casbin's `KeyMatch` over-grants a mid-pattern `*`.
+The [LLVM line on cJSON](../docs/eval/cjson.md) runs a C library through
+its API (65 of 79 functions exhausted, no forged input left), and the
+agent's specs in C exhaust a parse-print round trip over 248,832 inputs
+and find a planted printer bug.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover

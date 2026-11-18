@@ -111,6 +111,9 @@ inductive Op where
   | select
   | trunc (w : Nat)
   | zext (w : Nat)
+  /-- `ptrtoint` to a `w`-bit integer: the pointer's address (null is 0, a
+  poison pointer gives poison). -/
+  | ptrtoint (w : Nat)
   | sext (w : Nat)
   /-- `alloca` of `bytes` bytes. -/
   | alloca (bytes : Nat)
@@ -439,6 +442,10 @@ def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap V
     | .val b => .ok (if b == 1#1 then x else y, heap)
   | .trunc w', [.int w a] =>
     if h : w > w' then .ok (.int w' (Veir.Data.LLVM.Int.trunc a w' false false h), heap) else .panic .modelStuck
+  | .ptrtoint w, [.ptr p] =>
+    match p with
+    | .val q => .ok (.int w (.val (BitVec.ofNat w q.address.toNat)), heap)
+    | .poison => .ok (.int w .poison, heap)
   | .zext w', [.int w a] =>
     if h : w < w' then .ok (.int w' (Veir.Data.LLVM.Int.zext a w' false h), heap) else .panic .modelStuck
   | .sext w', [.int w a] =>
