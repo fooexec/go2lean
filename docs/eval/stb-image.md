@@ -88,7 +88,7 @@ local and OSS-Fuzz (`tests/local_fuzz/image.c`, `tests/ossfuzz.sh`):
 
 The model runs the portable code, so it reached it.
 
-**Severity: low.** The overflow is undefined behaviour on a crafted file:
+**Severity: minor.** The overflow is undefined behaviour on a crafted file:
 - what compilers emit today wraps, and the damage is wrong pixel values;
 - it is not a memory error;
 - an optimiser may assume it does not happen, so the result is not
@@ -126,5 +126,5 @@ fixed upstream.
 darker than the white matte allows, the value is negative (-462.458 here),
 and converting it is undefined behaviour in C. The 16-bit branch has the
 same code. The file is not otherwise malformed; it only has pixel values
-that do not come from a white matte. **Severity: low**, as for the IDCT:
+that do not come from a white matte. **Severity: minor**, as for the IDCT:
 undefined behaviour giving wrong pixels, not a memory error.

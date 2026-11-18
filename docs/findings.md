@@ -15,7 +15,7 @@ method. The drafts for the unreported defects are in
 hand.
 
 **69 defects in 29 projects** (as of 2026-11-18):
-- **40 new** (1 high, 10 medium, 19 low, 10 minor):
+- **40 new** (1 high, 10 medium, 17 low, 12 minor):
   - 32 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
@@ -25,7 +25,7 @@ hand.
 - **13 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **7 high, 20 medium, 31 low, 11 minor**. The severity is
+By severity: **7 high, 20 medium, 29 low, 13 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -35,7 +35,9 @@ scores):
 - **low**: it takes an unusual configuration or an edge input, or a
   misconfiguration crashes at the first request instead of at start-up;
 - **minor**: precision, wording, documentation, or the project's own
-  tests.
+  tests; also undefined behaviour with no memory error (a signed overflow,
+  an out-of-range float conversion), which is not the memory-safety class
+  go2lean now looks for.
 
 "How found" is one of:
 - **template**: a property the tool generates from the signature
@@ -63,8 +65,6 @@ scores):
 | medium | gin-contrib/cors | a regexp origin (`/.../`) is matched unanchored: the package's own example lets `https://google.com.evil.net` read with credentials | security | reading (advisory guidance) | draft (private) | [advisory specs](eval/cve-specs.md) |
 | medium | gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` (lookup on the cleaned path, redirect from the raw one) | security | advisory guidance spec | draft (private) | [advisory specs](eval/cve-specs.md) |
 | low | valyala/fasthttp | `URI.Path()` is not idempotent: a doubly-encoded dot segment `%252e%252e` normalizes to `/%2e%2e/...`, which re-parses to a `..` traversal; a proxy that re-decodes the path escapes the root | security (path traversal) | spec from docs (path-normalization) | draft | [fasthttp](eval/fasthttp.md) |
-| low | nothings/stb | `stb_image.h`: a PSD with alpha whose colours are darker than a white matte converts a negative float to `unsigned char` in the matte removal, undefined behaviour (also on `dev`) | UB | advisory spec (C, libFuzzer) | draft | [stb_image](eval/stb-image.md) |
-| low | nothings/stb | `stb_image.h`: a crafted JPEG overflows `int` in the scalar IDCT (`stbi__idct_block`), undefined behaviour; missed by the project's fuzzers, which run the SSE2 IDCT | UB | advisory spec (C) | draft | [stb_image](eval/stb-image.md) |
 | low | panjf2000/ants | a size above `MaxInt32` wraps; `Tune(1<<32-2)` gives -2 and `Submit` blocks forever | hang | agent spec | draft | twelfth run |
 | low | hashicorp/go-retryablehttp | `Request.WriteTo` panics on a request with no body | crash | agent spec | draft | [thirteenth run](eval/thirteenth-run.md) |
 | low | avast/retry-go | `MaxJitter(-1)` panics on the first retry | crash | reading | draft | thirteenth run |
@@ -91,6 +91,8 @@ scores):
 | minor | Masterminds/semver | a coerced version's `String` is over the 256-byte parse limit, so it cannot be read back | contract | spec from docs (fuzzer) | dropped (minor) | [ninth run](eval/ninth-run.md) |
 | minor | dustin/go-humanize | `BytesN(MaxUint64, 4)` gives `18.45 EB`, which `ParseBytes` rejects | wrong result | spec from docs | dropped (minor) | ninth run |
 | minor | gin-contrib/cors | a wildcard's prefix and suffix may overlap: `https://a*a.example.com` grants `https://a.example.com` | wrong result | reading (advisory guidance) | draft (minor) | advisory specs |
+| minor | nothings/stb | `stb_image.h`: a PSD with alpha whose colours are darker than a white matte converts a negative float to `unsigned char` in the matte removal, undefined behaviour (also on `dev`) | UB | advisory spec (C, libFuzzer) | draft | [stb_image](eval/stb-image.md) |
+| minor | nothings/stb | `stb_image.h`: a crafted JPEG overflows `int` in the scalar IDCT (`stbi__idct_block`), undefined behaviour; missed by the project's fuzzers, which run the SSE2 IDCT | UB | advisory spec (C) | draft | [stb_image](eval/stb-image.md) |
 
 ## Already reported upstream
 
