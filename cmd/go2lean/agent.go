@@ -63,7 +63,7 @@ func cmdAgent(args []string) error {
 			return err
 		}
 		return agent.RunC(context.Background(), root, contract.Workspace{Root: *ws.workspace}, fs.Arg(0), llm, agent.Options{
-			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText,
+			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, FuzzTime: *fuzzTime,
 		}, os.Stdout)
 	}
 	w, env, err := openWorkspace(ws)

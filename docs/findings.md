@@ -14,9 +14,9 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**65 defects in 27 projects** (as of 2026-11-18):
-- **37 new** (1 high, 10 medium, 16 low, 10 minor):
-  - 29 drafted, not yet filed;
+**66 defects in 28 projects** (as of 2026-11-18):
+- **38 new** (1 high, 10 medium, 17 low, 10 minor):
+  - 30 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
@@ -25,7 +25,7 @@ hand.
 - **12 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **7 high, 19 medium, 28 low, 11 minor**. The severity is
+By severity: **7 high, 19 medium, 29 low, 11 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -62,6 +62,7 @@ scores):
 | medium | aymerick/raymond, mailgun/raymond | every template syntax error leaks the lexer goroutine | leak | reading, then template | not reportable: archived | [lexer leaks](eval/lexer-leaks.md) |
 | medium | gin-contrib/cors | a regexp origin (`/.../`) is matched unanchored: the package's own example lets `https://google.com.evil.net` read with credentials | security | reading (advisory guidance) | draft (private) | [advisory specs](eval/cve-specs.md) |
 | medium | gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` (lookup on the cleaned path, redirect from the raw one) | security | advisory guidance spec | draft (private) | [advisory specs](eval/cve-specs.md) |
+| low | nothings/stb | `stb_image.h`: a crafted JPEG overflows `int` in the scalar IDCT (`stbi__idct_block`), undefined behaviour; missed by the project's fuzzers, which run the SSE2 IDCT | UB | advisory spec (C) | draft | [stb_image](eval/stb-image.md) |
 | low | panjf2000/ants | a size above `MaxInt32` wraps; `Tune(1<<32-2)` gives -2 and `Submit` blocks forever | hang | agent spec | draft | twelfth run |
 | low | hashicorp/go-retryablehttp | `Request.WriteTo` panics on a request with no body | crash | agent spec | draft | [thirteenth run](eval/thirteenth-run.md) |
 | low | avast/retry-go | `MaxJitter(-1)` panics on the first retry | crash | reading | draft | thirteenth run |
