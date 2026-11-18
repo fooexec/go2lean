@@ -14,9 +14,9 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**68 defects in 28 projects** (as of 2026-11-18):
-- **39 new** (1 high, 10 medium, 18 low, 10 minor):
-  - 31 drafted, not yet filed;
+**69 defects in 29 projects** (as of 2026-11-18):
+- **40 new** (1 high, 10 medium, 19 low, 10 minor):
+  - 32 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
@@ -25,7 +25,7 @@ hand.
 - **13 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **7 high, 20 medium, 30 low, 11 minor**. The severity is
+By severity: **7 high, 20 medium, 31 low, 11 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -62,6 +62,7 @@ scores):
 | medium | aymerick/raymond, mailgun/raymond | every template syntax error leaks the lexer goroutine | leak | reading, then template | not reportable: archived | [lexer leaks](eval/lexer-leaks.md) |
 | medium | gin-contrib/cors | a regexp origin (`/.../`) is matched unanchored: the package's own example lets `https://google.com.evil.net` read with credentials | security | reading (advisory guidance) | draft (private) | [advisory specs](eval/cve-specs.md) |
 | medium | gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` (lookup on the cleaned path, redirect from the raw one) | security | advisory guidance spec | draft (private) | [advisory specs](eval/cve-specs.md) |
+| low | valyala/fasthttp | `URI.Path()` is not idempotent: a doubly-encoded dot segment `%252e%252e` normalizes to `/%2e%2e/...`, which re-parses to a `..` traversal; a proxy that re-decodes the path escapes the root | security (path traversal) | spec from docs (path-normalization) | draft | [fasthttp](eval/fasthttp.md) |
 | low | nothings/stb | `stb_image.h`: a PSD with alpha whose colours are darker than a white matte converts a negative float to `unsigned char` in the matte removal, undefined behaviour (also on `dev`) | UB | advisory spec (C, libFuzzer) | draft | [stb_image](eval/stb-image.md) |
 | low | nothings/stb | `stb_image.h`: a crafted JPEG overflows `int` in the scalar IDCT (`stbi__idct_block`), undefined behaviour; missed by the project's fuzzers, which run the SSE2 IDCT | UB | advisory spec (C) | draft | [stb_image](eval/stb-image.md) |
 | low | panjf2000/ants | a size above `MaxInt32` wraps; `Tune(1<<32-2)` gives -2 and `Submit` blocks forever | hang | agent spec | draft | twelfth run |
