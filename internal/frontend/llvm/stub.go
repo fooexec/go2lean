@@ -43,7 +43,10 @@ type Model struct {
 	Lean  string
 }
 
-func Compile(src, dir string) (string, error) { return "", errNoLLVM }
+func Compile(src, dir string, flags ...string) (string, error) { return "", errNoLLVM }
+
+// CompileAll needs the LLVM frontend.
+func CompileAll(srcs []string, dir string, flags ...string) (string, error) { return "", errNoLLVM }
 
 // Options say what to lower and how parameters are passed.
 type Options struct {

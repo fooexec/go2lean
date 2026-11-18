@@ -14,18 +14,18 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**65 defects in 27 projects** (as of 2026-11-18):
-- **37 new** (1 high, 10 medium, 16 low, 10 minor):
-  - 29 drafted, not yet filed;
+**68 defects in 28 projects** (as of 2026-11-18):
+- **39 new** (1 high, 10 medium, 18 low, 10 minor):
+  - 31 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
   - 1 not reportable (archived);
 - **16 already reported upstream** and not fixed;
-- **12 re-found from security advisories** or a known issue, all fixed
+- **13 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **7 high, 19 medium, 28 low, 11 minor**. The severity is
+By severity: **7 high, 20 medium, 30 low, 11 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -62,6 +62,8 @@ scores):
 | medium | aymerick/raymond, mailgun/raymond | every template syntax error leaks the lexer goroutine | leak | reading, then template | not reportable: archived | [lexer leaks](eval/lexer-leaks.md) |
 | medium | gin-contrib/cors | a regexp origin (`/.../`) is matched unanchored: the package's own example lets `https://google.com.evil.net` read with credentials | security | reading (advisory guidance) | draft (private) | [advisory specs](eval/cve-specs.md) |
 | medium | gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` (lookup on the cleaned path, redirect from the raw one) | security | advisory guidance spec | draft (private) | [advisory specs](eval/cve-specs.md) |
+| low | nothings/stb | `stb_image.h`: a PSD with alpha whose colours are darker than a white matte converts a negative float to `unsigned char` in the matte removal, undefined behaviour (also on `dev`) | UB | advisory spec (C, libFuzzer) | draft | [stb_image](eval/stb-image.md) |
+| low | nothings/stb | `stb_image.h`: a crafted JPEG overflows `int` in the scalar IDCT (`stbi__idct_block`), undefined behaviour; missed by the project's fuzzers, which run the SSE2 IDCT | UB | advisory spec (C) | draft | [stb_image](eval/stb-image.md) |
 | low | panjf2000/ants | a size above `MaxInt32` wraps; `Tune(1<<32-2)` gives -2 and `Submit` blocks forever | hang | agent spec | draft | twelfth run |
 | low | hashicorp/go-retryablehttp | `Request.WriteTo` panics on a request with no body | crash | agent spec | draft | [thirteenth run](eval/thirteenth-run.md) |
 | low | avast/retry-go | `MaxJitter(-1)` panics on the first retry | crash | reading | draft | thirteenth run |
@@ -129,6 +131,7 @@ nothing to report.
 | low | gofiber/fiber (v2) | CORS `New` panics on a list with spaces after a comma | advisory spec | v2.52.3 | advisory specs |
 | low | gofiber/fiber (v2) | CORS entry after `", "` mis-parsed | advisory spec | v2.52.16 | advisory specs |
 | medium | DaveGamble/cJSON | `cJSON_ParseWithLength` reads one byte past its buffer in `parse_string` (CVE-2023-53154), from CVE-2019-11834's spec | advisory spec (C) | v1.7.18 | [cJSON](eval/cjson.md) |
+| medium | nothings/stb | `stb_image.h` GIF: an LZW code chain reads `prefix[4098]` of a 4097-entry array, from stb#1225's spec, found by libFuzzer | advisory spec (C, libFuzzer) | `dev` `389145f` (not yet on `master`) | [stb_image](eval/stb-image.md) |
 | low | DaveGamble/cJSON | `SetValuestring(item, NULL)` passes NULL to `strlen` (CVE-2024-31755), from CVE-2023-50472's spec | advisory spec (C) | v1.7.18 | [cJSON](eval/cjson.md) |
 | low | DaveGamble/cJSON | `InsertItemInArray(a, i, NULL)` dereferences NULL (CVE-2023-50471) | advisory spec (C) | v1.7.17 | cJSON |
 | low | DaveGamble/cJSON | `SetValuestring` calls `strcpy` on overlapping strings (#881) | advisory spec (C) | v1.7.19 | cJSON |

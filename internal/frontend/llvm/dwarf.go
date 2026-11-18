@@ -25,9 +25,10 @@ const typeDepth = 2
 // function, the C type of each parameter as the search reads it (CTy as
 // JSON), or nil where the parameter is not a pointer to a struct (the
 // IR-based generators stay).
-func ParamTypes(src, dir string) (map[string][]any, error) {
+func ParamTypes(src, dir string, flags ...string) (map[string][]any, error) {
 	obj := filepath.Join(dir, strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))+".dbg.o")
-	if out, err := exec.Command("clang", "-g", "-O0", "-c", src, "-o", obj).CombinedOutput(); err != nil {
+	args := append([]string{"-g", "-O0", "-c"}, flags...)
+	if out, err := exec.Command("clang", append(args, src, "-o", obj)...).CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("clang -g: %v\n%s", err, out)
 	}
 	f, err := elf.Open(obj)

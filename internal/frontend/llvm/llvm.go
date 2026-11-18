@@ -159,7 +159,10 @@ var panics = map[string]string{
 // Compile turns a C file into the bitcode the frontend reads: clang at -O0
 // without optnone, then mem2reg, so values are SSA registers and memory is
 // what the source addresses. A .ll or .bc file is used as it is.
-func Compile(src, dir string) (string, error) {
+//
+// flags go to clang: -fwrapv (signed arithmetic wraps, so the IR has no
+// nsw and its overflow is no undefined behaviour) for the memory mode.
+func Compile(src, dir string, flags ...string) (string, error) {
 	switch filepath.Ext(src) {
 	case ".ll", ".bc":
 		return src, nil
@@ -175,11 +178,42 @@ func Compile(src, dir string) (string, error) {
 		}
 		return nil
 	}
-	if err := run("clang", "-O0", "-Xclang", "-disable-O0-optnone", "-g0", "-emit-llvm", "-c", src, "-o", base+".O0.bc"); err != nil {
+	args := append([]string{"-O0", "-Xclang", "-disable-O0-optnone", "-g0", "-emit-llvm", "-c"}, flags...)
+	if err := run("clang", append(args, src, "-o", base+".O0.bc")...); err != nil {
 		return "", err
 	}
 	if err := run("opt", "-passes=mem2reg", base+".O0.bc", "-o", base+".bc"); err != nil {
 		return "", err
+	}
+	return base + ".bc", nil
+}
+
+// CompileAll compiles several C files with the same flags and links them
+// into one module (a library of many files, with the spec file first), so
+// a call from one file into another runs the callee's code. Each file's
+// static functions stay its own (llvm-link renames clashing ones).
+func CompileAll(srcs []string, dir string, flags ...string) (string, error) {
+	if len(srcs) == 1 {
+		return Compile(srcs[0], dir, flags...)
+	}
+	var parts []string
+	for i, src := range srcs {
+		if filepath.Ext(src) != ".c" {
+			return "", fmt.Errorf("%s: want a .c file", src)
+		}
+		out := filepath.Join(dir, fmt.Sprintf("part%03d_%s.O0.bc", i, strings.TrimSuffix(filepath.Base(src), ".c")))
+		args := append([]string{"-O0", "-Xclang", "-disable-O0-optnone", "-g0", "-emit-llvm", "-c"}, flags...)
+		if b, err := exec.Command("clang", append(args, src, "-o", out)...).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("clang %s: %v\n%s", src, err, b)
+		}
+		parts = append(parts, out)
+	}
+	base := filepath.Join(dir, strings.TrimSuffix(filepath.Base(srcs[0]), ".c"))
+	if b, err := exec.Command("llvm-link", append(parts, "-o", base+".linked.bc")...).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("llvm-link: %v\n%s", err, b)
+	}
+	if b, err := exec.Command("opt", "-passes=mem2reg", base+".linked.bc", "-o", base+".bc").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("opt: %v\n%s", err, b)
 	}
 	return base + ".bc", nil
 }

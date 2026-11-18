@@ -45,9 +45,79 @@ type Options struct {
 	// mean to search.
 	SpecsOnly bool
 	// Fuzz runs libFuzzer for this long on each function the model
-	// search did not settle (#270): it held without exhausting its
-	// domain, or the search failed. 0 does not fuzz.
+	// search found no confirmed violation in (#270): it held, its domain
+	// was exhausted (which covers small inputs only), its violation did
+	// not reproduce, or the search failed. 0 does not fuzz.
 	Fuzz time.Duration
+	// Memory looks for memory errors only (CVE-class: out-of-bounds
+	// reads and writes, use after free, double free): signed arithmetic
+	// wraps (-fwrapv) in the model, the replay and the fuzzer, and they
+	// run AddressSanitizer and the bounds checks, not the rest of UBSan,
+	// so undefined behaviour without a memory error neither stops a
+	// search nor counts as a finding.
+	Memory bool
+	// Lib are more C files of the library, linked with the source: the
+	// model holds all of them, and the replay and the fuzzer link them
+	// (each its own translation unit). The source is then a spec file
+	// that includes the library's headers.
+	Lib []string
+	// CFlags go to every compilation (-I, -D).
+	CFlags []string
+}
+
+// libObjects compiles the library's files once per sanitizer set and
+// returns the objects to link.
+func (o Options) libObjects(work string, fuzzer bool) ([]string, error) {
+	if len(o.Lib) == 0 {
+		return nil, nil
+	}
+	tag := "replay"
+	san := o.sanitizers(false)
+	if fuzzer {
+		tag = "fuzz"
+		san = o.sanitizers(true)
+		san[0] = strings.Replace(san[0], "fuzzer,", "fuzzer-no-link,", 1)
+	}
+	dir := filepath.Join(work, "obj-"+tag)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	var objs []string
+	for i, src := range o.Lib {
+		obj := filepath.Join(dir, fmt.Sprintf("%03d_%s.o", i, strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))))
+		if _, err := os.Stat(obj); err != nil {
+			args := append(append(append([]string{"-g", "-O1", "-fno-omit-frame-pointer", "-w", "-c"}, san...), o.CFlags...), src, "-o", obj)
+			if out, err := exec.Command("clang", args...).CombinedOutput(); err != nil {
+				return nil, fmt.Errorf("clang %s: %v\n%s", src, err, firstLine(string(out)))
+			}
+		}
+		objs = append(objs, obj)
+	}
+	return objs, nil
+}
+
+// sanitizers are the clang flags of the replay and the fuzzer.
+func (o Options) sanitizers(fuzzer bool) []string {
+	s := "address,undefined"
+	if o.Memory {
+		s = "address,bounds"
+	}
+	if fuzzer {
+		s = "fuzzer," + s
+	}
+	flags := []string{"-fsanitize=" + s, "-fno-sanitize-recover=all"}
+	if o.Memory {
+		flags = append(flags, "-fwrapv")
+	}
+	return flags
+}
+
+func (o Options) compileFlags() []string {
+	flags := append([]string{}, o.CFlags...)
+	if o.Memory {
+		flags = append(flags, "-fwrapv")
+	}
+	return flags
 }
 
 // searchResult is the JSON line the search driver prints.
@@ -93,7 +163,7 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return err
 	}
-	bc, err := llvmfe.Compile(src, work)
+	bc, err := llvmfe.CompileAll(append([]string{src}, opts.Lib...), work, opts.compileFlags()...)
 	if err != nil {
 		return err
 	}
@@ -101,9 +171,24 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 	// as that struct (#269); without them the IR's generators stay.
 	var types map[string][]any
 	if filepath.Ext(src) == ".c" {
-		if types, err = llvmfe.ParamTypes(src, work); err != nil {
+		if types, err = llvmfe.ParamTypes(src, work, opts.CFlags...); err != nil {
 			fmt.Fprintf(log, "  (no debug types: %s)\n", firstLine(err.Error()))
 			types = nil
+		}
+		// The library's own functions, from each of its files.
+		for _, lib := range opts.Lib {
+			ts, err := llvmfe.ParamTypes(lib, work, opts.CFlags...)
+			if err != nil {
+				continue
+			}
+			if types == nil {
+				types = map[string][]any{}
+			}
+			for k, v := range ts {
+				if _, ok := types[k]; !ok {
+					types[k] = v
+				}
+			}
 		}
 	}
 	model, err := llvmfe.Load(bc, llvmfe.Options{Types: types})
@@ -170,12 +255,11 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 			for _, site := range sites {
 				fmt.Fprintf(log, "      stuck %d× at %s\n", res.StuckSites[site], site)
 			}
-			// An exhausted domain is settled; anything less goes to the
-			// fuzzer.
-			if !res.Exhausted || res.Stuck > 0 || len(res.Assumptions) > 0 {
-				if err := fuzzLog(ws, src, key, fn, opts, log); err != nil {
-					return err
-				}
+			// The exhaustive engine covers small buffers (up to
+			// ExhaustLen) and a few values of each integer, not the whole
+			// input space: the fuzzer goes on where it stops.
+			if err := fuzzLog(ws, src, key, fn, opts, log); err != nil {
+				return err
 			}
 			continue
 		}
@@ -204,11 +288,11 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 		if len(res.Havoc) > 0 {
 			fmt.Fprintf(log, "      rests on: %d value(s) of unmodelled calls\n", len(res.Havoc))
 		}
-		v, err := replay(ws, src, fn, cx)
+		v, err := replay(ws, src, fn, cx, opts)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(log, "    -> %s %s\n", v.Status, firstLine(v.Evidence.PanicMsg))
+		fmt.Fprintf(log, "    -> %s %s%s\n", v.Status, memTag(v), firstLine(v.Evidence.PanicMsg))
 		if v.Diagnosis != nil && v.Diagnosis.Reason == SpecUB {
 			fmt.Fprintf(log, "      %s: undefined behaviour in the spec itself, not in the code it checks\n", SpecUB)
 		}
@@ -231,7 +315,7 @@ func fuzzLog(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Option
 	if opts.Fuzz <= 0 {
 		return nil
 	}
-	r, err := fuzz(ws, src, key, fn, opts.Fuzz, opts.Seed)
+	r, err := fuzz(ws, src, key, fn, opts)
 	if err != nil {
 		return err
 	}
@@ -242,9 +326,20 @@ func fuzzLog(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Option
 		fmt.Fprintf(log, "    libfuzzer: no crash in %s runs (%s)\n", r.Execs, opts.Fuzz)
 	default:
 		fmt.Fprintf(log, "    libfuzzer: crash after %s runs, input %s\n", r.Execs, r.Verdict.Evidence.Cmd)
-		fmt.Fprintf(log, "    -> %s %s\n", r.Verdict.Status, firstLine(r.Verdict.Evidence.PanicMsg))
+		fmt.Fprintf(log, "    -> %s %s%s\n", r.Verdict.Status, memTag(r.Verdict), firstLine(r.Verdict.Evidence.PanicMsg))
 	}
 	return nil
+}
+
+// memTag labels a confirmed verdict with its memory error class.
+func memTag(v *contract.Verdict) string {
+	if v.Status != contract.VerdictConfirmed {
+		return ""
+	}
+	if c := v.Observed["mem_class"]; c != "" {
+		return "[" + c + "] "
+	}
+	return ""
 }
 
 func firstLine(s string) string {
@@ -386,7 +481,7 @@ func lake(dir string, args ...string) (string, error) {
 // replay builds the counterexample as a C program that includes the source
 // and calls the function on the same inputs, with buffers from malloc of
 // exactly their size, under ASan and UBSan.
-func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Counterexample) (*contract.Verdict, error) {
+func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Counterexample, opts Options) (*contract.Verdict, error) {
 	dir := ws.PocDir(cx.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -440,7 +535,12 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 	}
 	bin := filepath.Join(dir, "poc")
 	v := &contract.Verdict{Counterexample: cx.ID, PocDir: dir}
-	build := exec.Command("clang", "-g", "-O0", "-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-fno-omit-frame-pointer", "-w", harness, "-o", bin)
+	libObjs, err := opts.libObjects(filepath.Join(ws.Root, "llvm"), false)
+	if err != nil {
+		return nil, err
+	}
+	buildArgs := append(append(append([]string{"-g", "-O0"}, opts.sanitizers(false)...), opts.CFlags...), "-fno-omit-frame-pointer", "-w", harness)
+	build := exec.Command("clang", append(append(buildArgs, libObjs...), "-o", bin, "-lm")...)
 	if out, err := build.CombinedOutput(); err != nil {
 		v.Status = contract.VerdictInconclusive
 		v.Evidence = contract.Evidence{Cmd: strings.Join(build.Args, " "), Exit: -1, StderrTail: tail(string(out))}
@@ -457,6 +557,9 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 	report := sanitizerReport(stderr)
 	if report == "" && fn.Spec && strings.Contains(stderr, specViolated) {
 		report = specViolated
+	}
+	if c := MemClass(stderr); c != "" {
+		v.Observed = map[string]string{"mem_class": c}
 	}
 	switch {
 	case report != "" && fn.Spec && report != specViolated && ubFrame(stderr) == fn.Name:
@@ -476,6 +579,64 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 		v.Diagnosis = &contract.Diagnosis{Reason: "crash_without_sanitizer_report"}
 	}
 	return v, ws.WriteVerdict(v)
+}
+
+var (
+	asanKind   = regexp.MustCompile(`ERROR: AddressSanitizer: ([a-z-]+)`)
+	asanAccess = regexp.MustCompile(`(?m)^(READ|WRITE) of size (\d+)`)
+)
+
+// MemClass names the memory error a sanitizer report shows, most severe
+// first in Severity: a write out of bounds, a use after free or double
+// free, a read out of bounds, an index out of an array's bounds inside an
+// object, a null dereference; "" for a report that is no memory error
+// (signed overflow and the rest of UBSan).
+func MemClass(stderr string) string {
+	if m := asanKind.FindStringSubmatch(stderr); m != nil {
+		kind := m[1]
+		if kind == "attempting" { // "attempting double-free", "attempting free on address ..."
+			kind = "bad-free"
+			if strings.Contains(stderr, "double-free") {
+				kind = "double-free"
+			}
+			return kind
+		}
+		if kind == "SEGV" {
+			if strings.Contains(stderr, "address 0x000000000") || strings.Contains(stderr, "zero page") {
+				return "null dereference"
+			}
+			return "SEGV"
+		}
+		if a := asanAccess.FindStringSubmatch(stderr); a != nil {
+			return kind + " " + a[1] + " " + a[2]
+		}
+		return kind
+	}
+	if strings.Contains(stderr, "runtime error: index ") && strings.Contains(stderr, "out of bounds") {
+		return "index out of bounds"
+	}
+	if strings.Contains(stderr, "runtime error: member access within null pointer") ||
+		strings.Contains(stderr, "runtime error: load of null pointer") || strings.Contains(stderr, "runtime error: store to null pointer") {
+		return "null dereference"
+	}
+	return ""
+}
+
+// Severity ranks a MemClass: 4 a write out of bounds, 3 a use after free
+// or double free, 2 a read out of bounds, 1 the rest of the memory
+// errors, 0 none.
+func Severity(class string) int {
+	switch {
+	case class == "":
+		return 0
+	case strings.Contains(class, "WRITE"):
+		return 4
+	case strings.Contains(class, "use-after-free") || strings.Contains(class, "double-free") || strings.Contains(class, "bad-free"):
+		return 3
+	case strings.Contains(class, "READ") || class == "index out of bounds":
+		return 2
+	}
+	return 1
 }
 
 // SpecUB is the diagnosis of undefined behaviour in a spec's own body.

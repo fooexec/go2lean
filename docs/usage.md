@@ -481,6 +481,25 @@ as a counterexample with its verdict:
     -> confirmed fuzz.c:15:12: runtime error: index -4 out of bounds
 ```
 
+`-memory` looks for memory errors only: out-of-bounds reads and writes,
+use after free, double free. Signed arithmetic wraps (`-fwrapv`) in the
+model, the replay and the fuzzer, and they run AddressSanitizer and the
+bounds checks without the rest of UBSan. So an overflow without a memory
+error neither stops a search nor counts as a finding. Each confirmed
+finding is tagged with its class, most severe first: a write out of
+bounds, a use after free or double free, a read out of bounds. The agent
+on a C file uses this mode by default.
+
+A library of several files is checked through a spec file that includes
+its headers:
+
+```bash
+go2lean llvm -memory -specs-only -fuzz 60s -lib 'src/*.c' -cflags -Iinclude specs.c
+```
+
+The model links all the files (`llvm-link`); the replay and the fuzzer
+link them as separate translation units (`examples/llvm/multi/`).
+
 The model's search is the one that can exhaust a domain. The fuzzer runs
 the real program, so it reaches what the model does not run (here
 `strtol`) and values the search rarely draws (`examples/llvm/fuzz.c`).

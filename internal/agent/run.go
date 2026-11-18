@@ -39,6 +39,8 @@ type Options struct {
 	// that long (internal/fuzzexport) after the pipeline ran; the report
 	// round sees what it found.
 	FuzzTime time.Duration
+	// Memory (C only) searches and replays for memory errors only.
+	Memory bool
 }
 
 // Run drives the agent on one package: propose specs, repair until they

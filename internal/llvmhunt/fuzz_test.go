@@ -27,6 +27,7 @@ func TestFuzzHarness(t *testing.T) {
 		"int32_t a0 = (int32_t)g2l_take(4);",
 		"double a1 = (double)(int16_t)g2l_take(2);",
 		"char *a2 = g2l_str();",
+		"size_t a3_n = g2l_len(1, 4096);",
 		"uint8_t *a3 = malloc(a3_n ? a3_n * 1 : 1);",
 		"long long a4 = (long long)a3_n;",
 		"if (!spec_f(a0, a1, a2, a3, a4))",
@@ -81,5 +82,26 @@ func TestUBFrame(t *testing.T) {
 	}
 	if got := ubFrame("go2lean: spec violated\n"); got != "" {
 		t.Errorf("no report: frame %q", got)
+	}
+}
+
+func TestMemClass(t *testing.T) {
+	for _, c := range []struct {
+		stderr, class string
+		sev           int
+	}{
+		{"==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x5\nWRITE of size 4 at 0x5 thread T0\n", "heap-buffer-overflow WRITE 4", 4},
+		{"==1==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x5\nREAD of size 1 at 0x5 thread T0\n", "heap-buffer-overflow READ 1", 2},
+		{"==1==ERROR: AddressSanitizer: heap-use-after-free on address 0x5\nREAD of size 1\n", "heap-use-after-free READ 1", 3},
+		{"==1==ERROR: AddressSanitizer: attempting double-free on 0x5\n", "double-free", 3},
+		{"x.c:3:1: runtime error: index 4098 out of bounds for type 'unsigned short[4097]'\n", "index out of bounds", 2},
+		{"x.c:3:1: runtime error: signed integer overflow: 1 + 2147483647\n", "", 0},
+	} {
+		if got := MemClass(c.stderr); got != c.class {
+			t.Errorf("MemClass(%q) = %q, want %q", c.stderr, got, c.class)
+		}
+		if got := Severity(MemClass(c.stderr)); got != c.sev {
+			t.Errorf("Severity(%q) = %d, want %d", c.class, got, c.sev)
+		}
 	}
 }

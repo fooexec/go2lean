@@ -105,6 +105,7 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - ✅ Package `init` functions and string constants as inputs in the TinyGo line
 - 🚧 Inputs for interfaces and maps; `sync.Once`, `strconv`, `encoding/json` on the TinyGo line
 - ✅ Specs in C: a function marked `annotate("go2lean:spec")` whose 0 is a violation, replayed with its own abort (#270)
+- ✅ Memory mode (`-memory`): memory errors only, signed arithmetic wrapping; libraries of several files (`-lib`, `-cflags`)
 - ✅ libFuzzer on what the model search does not settle (`-fuzz`; held but not exhausted, stuck, resting on unmodelled calls, not reproduced; #270)
 - ✅ `malloc`, `calloc`, `realloc`, `free` (use after free, double free; #269); parameters from their C types (DWARF)
 - ✅ The `string.h` and `ctype.h` functions parsers call most (`strlen`, `strcmp`, `strncmp`, `memcmp`, `strchr`, `strcpy`, `tolower`, `toupper`)
