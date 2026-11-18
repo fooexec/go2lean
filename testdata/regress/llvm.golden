@@ -4,6 +4,9 @@ exhausted align.dims
 confirmed cstr.unterminated
 confirmed cstr.copy
 exhausted cstr.lookup
+confirmed ctype.collect_bad
+exhausted ctype.collect_ok
+exhausted ctype.first_lower
 confirmed float.scaled
 exhausted float.scaled_ok
 confirmed float.bucket
