@@ -67,3 +67,19 @@ func TestFuzzHarnessCompiles(t *testing.T) {
 		t.Fatalf("clang: %v\n%s", err, out)
 	}
 }
+
+// The frame a sanitizer report starts in tells a spec's own undefined
+// behaviour from the library's.
+func TestUBFrame(t *testing.T) {
+	ubsan := "specs.c:68:50: runtime error: signed integer overflow: 2 * -2147483648\n    #0 0x55d in spec_pnm specs.c:68:50\n    #1 0x55e in main poc.c:9\n"
+	if got := ubFrame(ubsan); got != "spec_pnm" {
+		t.Errorf("UBSan: frame %q, want spec_pnm", got)
+	}
+	asan := "==2==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x50\nREAD of size 1\n    #0 0x56 in stbi__pnm_load stb_image.c:7300\n    #1 0x57 in spec_pnm specs.c:70\n"
+	if got := ubFrame(asan); got != "stbi__pnm_load" {
+		t.Errorf("ASan: frame %q, want stbi__pnm_load", got)
+	}
+	if got := ubFrame("go2lean: spec violated\n"); got != "" {
+		t.Errorf("no report: frame %q", got)
+	}
+}

@@ -52,3 +52,11 @@ func TestRunCRepair(t *testing.T) {
 		t.Errorf("%d responses left", len(llm.resps))
 	}
 }
+
+func TestSpecErrors(t *testing.T) {
+	log := "  spec_a\n    -> inconclusive specs.c:3: runtime error: signed integer overflow\n      ub_in_spec: undefined behaviour in the spec itself, not in the code it checks\n  spec_b\n    -> confirmed ==2==ERROR: AddressSanitizer: heap-buffer-overflow\n  spec_c\n    no UB in 2000 trials (0 stuck, 0 out of fuel)\n"
+	got := specErrors(log)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "spec_a: inconclusive") {
+		t.Errorf("specErrors = %q, want spec_a only", got)
+	}
+}

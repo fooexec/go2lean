@@ -215,6 +215,10 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, d time.Duratio
 		report = specViolated
 	}
 	switch {
+	case report != "" && fn.Spec && report != specViolated && ubFrame(rerr) == fn.Name:
+		v.Status = contract.VerdictInconclusive
+		v.Evidence.PanicMsg = report
+		v.Diagnosis = &contract.Diagnosis{Reason: SpecUB}
 	case report != "":
 		v.Status = contract.VerdictConfirmed
 		v.Evidence.PanicMsg = report

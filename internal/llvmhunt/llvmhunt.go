@@ -209,6 +209,9 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 			return err
 		}
 		fmt.Fprintf(log, "    -> %s %s\n", v.Status, firstLine(v.Evidence.PanicMsg))
+		if v.Diagnosis != nil && v.Diagnosis.Reason == SpecUB {
+			fmt.Fprintf(log, "      %s: undefined behaviour in the spec itself, not in the code it checks\n", SpecUB)
+		}
 		// The model's violation did not hold in the real program (it
 		// rested on unmodelled code): the fuzzer looks on the real one.
 		if v.Status != contract.VerdictConfirmed {
@@ -456,6 +459,12 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 		report = specViolated
 	}
 	switch {
+	case report != "" && fn.Spec && report != specViolated && ubFrame(stderr) == fn.Name:
+		// The undefined behaviour is in the spec's own body (its
+		// arithmetic on its parameters), not in the code it checks.
+		v.Status = contract.VerdictInconclusive
+		v.Evidence.PanicMsg = report
+		v.Diagnosis = &contract.Diagnosis{Reason: SpecUB}
 	case report != "":
 		v.Status = contract.VerdictConfirmed
 		v.Evidence.PanicMsg = report
@@ -467,6 +476,27 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 		v.Diagnosis = &contract.Diagnosis{Reason: "crash_without_sanitizer_report"}
 	}
 	return v, ws.WriteVerdict(v)
+}
+
+// SpecUB is the diagnosis of undefined behaviour in a spec's own body.
+const SpecUB = "ub_in_spec"
+
+var frame0 = regexp.MustCompile(`(?m)^\s*#0 0x[0-9a-f]+ in (\S+)`)
+
+// ubFrame is the function the sanitizer's report starts in (frame #0
+// after the error line), or "".
+func ubFrame(stderr string) string {
+	i := strings.Index(stderr, "runtime error:")
+	if j := strings.Index(stderr, "ERROR: AddressSanitizer"); i < 0 || j >= 0 && j < i {
+		i = j
+	}
+	if i < 0 {
+		return ""
+	}
+	if m := frame0.FindStringSubmatch(stderr[i:]); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // specViolated is what a replayed spec prints when it returns 0.

@@ -516,7 +516,11 @@ go2lean agent -guidance docs/specs/cors.md -workspace out lib.c
 ```
 
 It writes `go2lean_specs.c` next to `lib.c`, prepending `#include "lib.c"`
-so the specs see its static functions and types. It repairs the file until
+so the specs see its static functions and types. A violation whose
+undefined behaviour is in a spec's own body (its arithmetic on its
+parameters) is the spec's error, `ub_in_spec`, not a finding; the agent
+gets those reports and one round to fix the specs. `-fuzztime` also runs
+libFuzzer on the specs the model search did not settle. It repairs the file until
 clang accepts it, searches only the specs (`go2lean llvm -specs-only`), and
 writes its report to `out/agent/<key>/report.md`. It needs a build with the
 LLVM tag. `scripts/llvm-regress.sh <ws>` runs every C
