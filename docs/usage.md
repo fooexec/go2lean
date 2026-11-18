@@ -445,6 +445,12 @@ read from the debug information of a `-g` build:
   length after it is an out parameter: one object of its type, never null;
 - any other pointer followed by an integer is a buffer and its length.
 
+glibc's `ctype` classifiers (`isdigit`, `isalpha`, `isspace`, `tolower`
+and the rest, through `__ctype_b_loc` / `__ctype_tolower_loc` /
+`__ctype_toupper_loc`) are modelled as the real C-locale tables, so a
+parser that uses them runs in the model instead of getting stuck
+(`examples/llvm/ctype.c`).
+
 `malloc`, `calloc`, `realloc` and `free` are modelled (unless the file
 defines them): a freed object holds no bytes, so a later access is a use
 after free, and a second `free` is a double free (`examples/llvm/heap.c`),

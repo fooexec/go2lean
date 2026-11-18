@@ -10,6 +10,7 @@
 package llvm
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -342,6 +343,9 @@ type lowerer struct {
 	// -1 when its initializer is not modelled.
 	globals   []*globalInit
 	globalIdx map[string]int
+	// ctypeIdx maps a glibc ctype locator (__ctype_b_loc, ...) to the
+	// synthetic global cell that points into its table.
+	ctypeIdx map[string]int
 	// partial are the globals whose initial value is modelled only in part.
 	partial []string
 	// fnTable pairs the heap slot of each modelled function's object with
@@ -620,6 +624,117 @@ func typeName(t llvm.Type) string {
 		return "double"
 	}
 	return fmt.Sprintf("type kind %d", t.TypeKind())
+}
+
+// ctypeMask is the glibc classification of byte c in the C locale, the
+// value isalpha/isdigit/isspace and their kin read from the ctype table.
+func ctypeMask(c int) uint16 {
+	const (
+		cUpper = 0x0100
+		cLower = 0x0200
+		cAlpha = 0x0400
+		cDigit = 0x0800
+		cXdig  = 0x1000
+		cSpace = 0x2000
+		cPrint = 0x4000
+		cGraph = 0x8000
+		cBlank = 0x0001
+		cCntrl = 0x0002
+		cPunct = 0x0004
+		cAlnum = 0x0008
+	)
+	if c < 0 || c > 127 {
+		return 0
+	}
+	var m uint16
+	up := c >= 'A' && c <= 'Z'
+	lo := c >= 'a' && c <= 'z'
+	dig := c >= '0' && c <= '9'
+	xd := dig || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+	if up {
+		m |= cUpper
+	}
+	if lo {
+		m |= cLower
+	}
+	if up || lo {
+		m |= cAlpha | cAlnum
+	}
+	if dig {
+		m |= cDigit | cAlnum
+	}
+	if xd {
+		m |= cXdig
+	}
+	switch c {
+	case ' ':
+		m |= cSpace | cBlank
+	case '\t':
+		m |= cSpace | cBlank | cCntrl
+	case '\n', '\v', '\f', '\r':
+		m |= cSpace | cCntrl
+	}
+	if c < 32 || c == 127 {
+		m |= cCntrl
+	}
+	if c >= 33 && c <= 126 && !up && !lo && !dig {
+		m |= cPunct
+	}
+	if c >= 32 && c <= 126 {
+		m |= cPrint
+	}
+	if c >= 33 && c <= 126 {
+		m |= cGraph
+	}
+	return m
+}
+
+// ctypeLoc synthesises the table and the cell for a glibc ctype locator
+// (the table covers char indices -128..255; the cell holds a pointer to
+// its element 0, as glibc does) and returns the cell's global index.
+func (l *lowerer) ctypeLoc(name string) int {
+	if l.ctypeIdx == nil {
+		l.ctypeIdx = map[string]int{}
+	}
+	if i, ok := l.ctypeIdx[name]; ok {
+		return i
+	}
+	elem := 4
+	if name == "__ctype_b_loc" {
+		elem = 2
+	}
+	tbl := &globalInit{size: 384 * elem}
+	tbl.bytes = make([]byte, tbl.size)
+	for k := 0; k < 384; k++ {
+		c := k - 128
+		if name == "__ctype_b_loc" {
+			var m uint16
+			if c >= 0 {
+				m = ctypeMask(c)
+			}
+			binary.LittleEndian.PutUint16(tbl.bytes[k*2:], m)
+		} else {
+			v := int32(c)
+			if c >= 0 && c <= 255 {
+				if name == "__ctype_tolower_loc" {
+					if c >= 'A' && c <= 'Z' {
+						v = int32(c + 32)
+					}
+				} else if c >= 'a' && c <= 'z' {
+					v = int32(c - 32)
+				}
+			}
+			binary.LittleEndian.PutUint32(tbl.bytes[k*4:], uint32(v))
+		}
+	}
+	ti := len(l.globals)
+	l.globals = append(l.globals, tbl)
+	cell := &globalInit{size: 8, bytes: make([]byte, 8)}
+	cell.relocs = append(cell.relocs, [3]int64{0, int64(ti), int64(128 * elem)})
+	ci := len(l.globals)
+	l.globals = append(l.globals, cell)
+	l.ctypeIdx[name] = ci
+	return ci
 }
 
 // global is the index of global variable v, adding it (and the globals its
@@ -1339,6 +1454,13 @@ func (t *fnState) call(in llvm.Value) {
 		case "realloc":
 			t.vars[in] = t.fresh()
 			t.emit(t.vars[in], ".realloc", t.val(in.Operand(0)), t.val(in.Operand(1)))
+			return
+		case "__ctype_b_loc", "__ctype_tolower_loc", "__ctype_toupper_loc":
+			// glibc's ctype tables (isdigit, isspace, tolower, ...): the
+			// call returns a pointer to a cell holding a pointer into the
+			// table, which the model holds as a synthetic global (#271).
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], fmt.Sprintf("(.global %d)", t.l.ctypeLoc(name)))
 			return
 		case "strlen", "strcmp", "strncmp", "memcmp", "strchr", "strcpy", "tolower", "toupper":
 			// string.h and ctype.h, byte by byte over the model's memory.
