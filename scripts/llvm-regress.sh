@@ -15,7 +15,10 @@ rm -rf "$WS"; mkdir -p "$WS"
 go build -tags llvm18 -o "$WS/g2l" ./cmd/go2lean
 for src in examples/llvm/*.c; do
   name=$(basename "$src" .c)
-  "$WS/g2l" llvm -workspace "$WS/ws-$name" "$src" > "$WS/$name.log" 2>&1 || {
+  # An example may ask for flags on its first line (the fuzzer's budget).
+  flags=$(sed -n '1s|^// go2lean-llvm-flags: ||p' "$src")
+  # shellcheck disable=SC2086
+  "$WS/g2l" llvm $flags -workspace "$WS/ws-$name" "$src" > "$WS/$name.log" 2>&1 || {
     echo "llvm-regress: go2lean llvm failed on $src; log: $WS/$name.log"
     tail -20 "$WS/$name.log"
     exit 1
@@ -40,6 +43,10 @@ for log in sorted(glob.glob(os.path.join(ws, "*.log"))):
         m = re.match(r"^    -> (\S+)", line)
         if m and fn is not None:
             seen = m.group(1)
+            continue
+        m = re.match(r"^    libfuzzer: no crash", line)
+        if m and fn is not None and seen in (None, "held"):
+            seen = "fuzzed"
             continue
         if line.startswith("    no UB in ") and fn is not None and seen is None:
             seen = "exhausted" if "exhaustive: no UB on all" in line else "held"

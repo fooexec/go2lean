@@ -43,6 +43,10 @@ type Options struct {
 	// spec file includes the library, whose own functions it does not
 	// mean to search.
 	SpecsOnly bool
+	// Fuzz runs libFuzzer for this long on each function the model
+	// search did not settle (#270): it held without exhausting its
+	// domain, or the search failed. 0 does not fuzz.
+	Fuzz time.Duration
 }
 
 // searchResult is the JSON line the search driver prints.
@@ -145,6 +149,9 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 			// One function the search cannot run must not end the run over
 			// the others (a library has a hundred).
 			fmt.Fprintf(log, "    error: %s\n", firstLine(err.Error()))
+			if err := fuzzLog(ws, src, key, fn, opts, log); err != nil {
+				return err
+			}
 			continue
 		}
 		if !res.Found {
@@ -153,6 +160,13 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 				certificate = fmt.Sprintf("; exhaustive: no UB on all %.0f inputs", res.Domain)
 			}
 			fmt.Fprintf(log, "    no UB in %d trials (%d stuck, %d out of fuel)%s\n", res.Trials, res.Stuck, res.OutOfFuel, certificate)
+			// An exhausted domain is settled; anything less goes to the
+			// fuzzer.
+			if !res.Exhausted || res.Stuck > 0 || len(res.Assumptions) > 0 {
+				if err := fuzzLog(ws, src, key, fn, opts, log); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		cx := &contract.Counterexample{
@@ -185,9 +199,37 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 			return err
 		}
 		fmt.Fprintf(log, "    -> %s %s\n", v.Status, firstLine(v.Evidence.PanicMsg))
+		// The model's violation did not hold in the real program (it
+		// rested on unmodelled code): the fuzzer looks on the real one.
+		if v.Status != contract.VerdictConfirmed {
+			if err := fuzzLog(ws, src, key, fn, opts, log); err != nil {
+				return err
+			}
+		}
 	}
 	if skipped > 0 {
 		fmt.Fprintf(log, "  %d static functions not searched (-internal searches them)\n", skipped)
+	}
+	return nil
+}
+
+// fuzzLog fuzzes fn when opts asks for it and logs the outcome.
+func fuzzLog(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options, log io.Writer) error {
+	if opts.Fuzz <= 0 {
+		return nil
+	}
+	r, err := fuzz(ws, src, key, fn, opts.Fuzz, opts.Seed)
+	if err != nil {
+		return err
+	}
+	switch {
+	case r.Skipped != "":
+		fmt.Fprintf(log, "    libfuzzer: not fuzzed (%s)\n", r.Skipped)
+	case r.Verdict == nil:
+		fmt.Fprintf(log, "    libfuzzer: no crash in %s runs (%s)\n", r.Execs, opts.Fuzz)
+	default:
+		fmt.Fprintf(log, "    libfuzzer: crash after %s runs, input %s\n", r.Execs, r.Verdict.Evidence.Cmd)
+		fmt.Fprintf(log, "    -> %s %s\n", r.Verdict.Status, firstLine(r.Verdict.Evidence.PanicMsg))
 	}
 	return nil
 }
@@ -340,6 +382,9 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 	fmt.Fprintf(&b, "// go2lean PoC for %s: %s\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n", cx.ID, cx.Property)
 	fmt.Fprintf(&b, "#define main go2lean_source_main\n#include %q\n#undef main\n\nint main(void) {\n", src)
 	var args []string
+	// The objects of all typed parameters are numbered together, so two
+	// pointer parameters do not both declare o0.
+	objs := 0
 	for i, g := range fn.Gens {
 		v := fmt.Sprintf("a%d", i)
 		switch g.K {
@@ -363,8 +408,7 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 			if err := json.Unmarshal([]byte(cx.Inputs[g.Name]), &tv); err != nil {
 				return nil, fmt.Errorf("typed input %s: %v", g.Name, err)
 			}
-			n := 0
-			fmt.Fprintf(&b, "  void *%s = %s;\n", v, cTVal(&b, tv, &n))
+			fmt.Fprintf(&b, "  void *%s = %s;\n", v, cTVal(&b, tv, &objs))
 			args = append(args, v)
 		default:
 			fmt.Fprintf(&b, "  long long %s = %s;\n", v, cInt(cx.Inputs[g.Name]))

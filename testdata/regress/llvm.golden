@@ -6,6 +6,8 @@ exhausted float.scaled_ok
 confirmed float.bucket
 exhausted float.spec_number
 confirmed float.spec_halve
+confirmed fuzz.weight_of
+fuzzed fuzz.weight_of_ok
 confirmed heap.uaf
 confirmed heap.dfree
 exhausted heap.grow

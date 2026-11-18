@@ -501,6 +501,12 @@ def search (p : Prog) (globals : List GlobalInit) (sp : Spec) : Json := Id.run d
         if fallback.isNone then fallback := some j
         clean' := false
       | (.holds, s) =>
+        -- A run that read the result of an unmodelled call held for the
+        -- values guessed, not for every value: no exhaustion.
+        if !s.log.isEmpty then
+          clean' := false
+          if assumed.size < 32 && !assumed.contains "values of unmodelled calls" then
+            assumed := assumed.push "values of unmodelled calls"
         for a in s.assumed do
           if !assumed.contains a && assumed.size < 32 then assumed := assumed.push a
       | _ => clean' := false

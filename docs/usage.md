@@ -454,6 +454,32 @@ string without its terminator is read out of bounds (`cstr.c`).
 A counterexample is replayed as a C program that builds the same objects,
 under AddressSanitizer and UndefinedBehaviorSanitizer.
 
+`-fuzz 60s` adds libFuzzer. It runs on each function the model search did
+not settle:
+- it held without exhausting its domain;
+- trials were stuck, or it read results of unmodelled calls;
+- its violation did not reproduce in the real program.
+
+A target decodes the parameters from the fuzzer's bytes and calls the
+function under ASan and UBSan; it is written to
+`out/fuzz/<key>/<function>/`. A crash input is run once more and recorded
+as a counterexample with its verdict:
+
+```
+  weight_of
+    random: model index_out_of_range ...
+      rests on: 1 value(s) of unmodelled calls
+    -> spurious
+    libfuzzer: crash after 19772 runs, input .../fuzz/m_fuzz/weight_of/testdata/crash-...
+    -> confirmed fuzz.c:15:12: runtime error: index -4 out of bounds
+```
+
+The model's search is the one that can exhaust a domain. The fuzzer runs
+the real program, so it reaches what the model does not run (here
+`strtol`) and values the search rarely draws (`examples/llvm/fuzz.c`).
+Parameters a target cannot decode yet (a pointer to a struct) are listed
+as not fuzzed.
+
 ### Specs in C
 
 A spec is a C function that returns an `int`, non-zero when its property
