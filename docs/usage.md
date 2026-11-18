@@ -452,7 +452,41 @@ also when they are reached through a table of function pointers
 string without its terminator is read out of bounds (`cstr.c`).
 
 A counterexample is replayed as a C program that builds the same objects,
-under AddressSanitizer and UndefinedBehaviorSanitizer. `scripts/llvm-regress.sh <ws>` runs every C
+under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+### Specs in C
+
+A spec is a C function that returns an `int`, non-zero when its property
+holds, marked with clang's `annotate` attribute:
+
+```c
+#define SPEC __attribute__((annotate("go2lean:spec")))
+
+SPEC int spec_round_trip(uint8_t n) {
+    char buf[4];
+    format_u8(n, buf);
+    return parse_u8(buf) == n;
+}
+```
+
+The search treats a spec's 0 as a violation, as it treats undefined
+behaviour. The replayed program prints `go2lean: spec violated` and aborts
+when the spec returns 0, which confirms it (`examples/llvm/spec.c`). A spec
+says how the code is meant to be called, so it avoids the inputs that the
+direct search of a function has to guess: `format_u8(n, out)` searched on
+its own gets a one-byte `out` and overflows it, which the spec never does.
+
+`go2lean agent` writes such specs when its target is a C file:
+
+```bash
+go2lean agent -guidance docs/specs/cors.md -workspace out lib.c
+```
+
+It writes `go2lean_specs.c` next to `lib.c`, prepending `#include "lib.c"`
+so the specs see its static functions and types. It repairs the file until
+clang accepts it, searches only the specs (`go2lean llvm -specs-only`), and
+writes its report to `out/agent/<key>/report.md`. It needs a build with the
+LLVM tag. `scripts/llvm-regress.sh <ws>` runs every C
 example and compares each function's outcome with
 `testdata/regress/llvm.golden`, as CI's `llvm` job does. The first build of `lean-llvm/` fetches VeIR and
 compiles the part of it the dialect imports (under two minutes); later runs

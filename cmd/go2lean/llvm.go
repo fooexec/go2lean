@@ -21,6 +21,7 @@ func cmdLLVM(args []string) error {
 	engine := fs.String("engine", "all", "engine: random, exhaustive or all")
 	exhaustLen := fs.Int("exhaust-len", 3, "maximum buffer length in the exhaustive engine")
 	internal := fs.Bool("internal", false, "also search static functions (by default only the externally visible ones)")
+	specsOnly := fs.Bool("specs-only", false, "search only the functions marked annotate(\"go2lean:spec\")")
 	fs.Parse(args)
 	if !llvmfe.Available {
 		return errors.New("this go2lean was built without the LLVM frontend: rebuild with -tags llvm18 (or your LLVM version's tag)")
@@ -33,7 +34,7 @@ func cmdLLVM(args []string) error {
 		return err
 	}
 	ws := contract.Workspace{Root: *workspace}
-	opts := llvmhunt.Options{Trials: *trials, Seed: *seed, Fuel: *fuel, Engine: *engine, ExhaustLen: *exhaustLen, Init: -1, Internal: *internal}
+	opts := llvmhunt.Options{Trials: *trials, Seed: *seed, Fuel: *fuel, Engine: *engine, ExhaustLen: *exhaustLen, Init: -1, Internal: *internal, SpecsOnly: *specsOnly}
 	for _, src := range fs.Args() {
 		if err := llvmhunt.Run(root, ws, src, opts, os.Stdout); err != nil {
 			return err

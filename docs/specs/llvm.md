@@ -1,7 +1,9 @@
-# Languages compiled to LLVM (planned)
+# Languages compiled to LLVM
 
-*Not built yet. This is the plan for checking the same catalog on C, C++,
-Rust and other languages go2lean reads as LLVM IR (`go2lean llvm`).*
+*Partly built: specs in C work (`go2lean llvm`, `examples/llvm/spec.c`),
+with the heap, the string functions and typed inputs modelled (#269,
+#270). The agent on C (L2), advisory specs on a C project (L3) and Rust
+(L4) are next.*
 
 ## Binding
 
@@ -11,7 +13,7 @@ function that returns a bool, whatever language it came from.
 
 | language | spec function | marker |
 |---|---|---|
-| C, C++ | `bool spec_f(args..., ret)` | `__attribute__((annotate("go2lean:spec f")))` |
+| C, C++ | `int spec_f(args...)`: calls the code and returns non-zero when the property holds (built) | `__attribute__((annotate("go2lean:spec")))` |
 | Rust | `fn spec_f(args..., ret) -> bool` | `#[go2lean::spec(f)]`: a procedural macro that emits `#[no_mangle]` and the same annotation |
 | any LLVM language | a function returning `i1` | an entry in `llvm.global.annotations` naming the target |
 

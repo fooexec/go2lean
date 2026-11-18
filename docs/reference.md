@@ -104,7 +104,7 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - ✅ Replay of TinyGo-line counterexamples with `go test`, in the sandbox
 - ✅ Package `init` functions and string constants as inputs in the TinyGo line
 - 🚧 Inputs for interfaces and maps; `sync.Once`, `strconv`, `encoding/json` on the TinyGo line
-- ⬜ Specs in C; properties beyond "no undefined behaviour"
+- ✅ Specs in C: a function marked `annotate("go2lean:spec")` whose 0 is a violation, replayed with its own abort (#270)
 - ✅ `malloc`, `calloc`, `realloc`, `free` (use after free, double free; #269); parameters from their C types (DWARF)
 - ✅ The `string.h` and `ctype.h` functions parsers call most (`strlen`, `strcmp`, `strncmp`, `memcmp`, `strchr`, `strcpy`, `tolower`, `toupper`)
 - ⬜ Floats, `ptrtoint`/`inttoptr`, more intrinsics, `sprintf`, the rest of libc
