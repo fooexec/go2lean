@@ -80,6 +80,7 @@ confirmed. "Held" counts executions of Go's fuzzer on the agent's specs.
 | client-ip | gofiber/fiber | v2.52.13, v2.52.16 | re-found GHSA-gcfq; latest held |
 | client-ip | labstack/echo | v5 `f275a6b` | held (1.2M each) |
 | static-files | labstack/echo | v4.15.3, v4.16.5 | re-found the successor advisory; latest held |
+| static-files | beego/beego | `939cfde` | **guard filter bypassed with case-insensitive routing** |
 | authz-match | casbin/casbin | HEAD | `KeyMatch` over-grants a mid-pattern `*` |
 
 The new defects are listed with all others in [findings](../findings.md),

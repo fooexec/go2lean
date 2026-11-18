@@ -992,6 +992,12 @@ func (t *fnState) instr(in llvm.Value) {
 		c, a, b := t.val(in.Operand(0)), t.val(in.Operand(1)), t.val(in.Operand(2))
 		t.vars[in] = t.fresh()
 		t.emit(t.vars[in], ".select", c, a, b)
+	case llvm.PtrToInt:
+		// The pointer's address (#269): C's pointer difference, at -O0
+		// two ptrtoint and a sub (cJSON's input_end - input_pointer).
+		a := t.val(in.Operand(0))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], fmt.Sprintf("(.ptrtoint %d)", ty.IntTypeWidth()), a)
 	case llvm.Trunc, llvm.ZExt, llvm.SExt:
 		name := map[llvm.Opcode]string{llvm.Trunc: "trunc", llvm.ZExt: "zext", llvm.SExt: "sext"}[op]
 		a := t.val(in.Operand(0))

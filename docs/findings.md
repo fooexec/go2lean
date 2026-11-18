@@ -13,9 +13,9 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**56 defects in 25 projects** (as of 2026-11-16):
-- **33 new** (10 medium, 13 low, 10 minor; none high):
-  - 25 drafted, not yet filed;
+**60 defects in 26 projects** (as of 2026-11-18):
+- **37 new** (1 high, 10 medium, 16 low, 10 minor):
+  - 29 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
@@ -24,7 +24,7 @@ hand.
 - **8 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **6 high, 18 medium, 21 low, 11 minor**. The severity is
+By severity: **7 high, 18 medium, 24 low, 11 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -50,6 +50,7 @@ scores):
 
 | severity | project | defect | kind | how found | status | report |
 |---|---|---|---|---|---|---|
+| high | beego/beego | with `RouterCaseSensitive = false`, a guard filter whose pattern has capitals (`/Admin/*`) never runs: the route is served unguarded | security | advisory guidance spec | draft (private) | [advisory specs](eval/cve-specs.md) |
 | medium | panjf2000/ants | `Tune` to a smaller size does not limit concurrency; `Free()` goes negative | contract | spec from docs (fuzzer) | draft | [eleventh run](eval/eleventh-run.md) |
 | medium | panjf2000/ants | `PoolWithFunc.Invoke(nil)` returns nil, the task never runs | contract | agent spec | draft | [twelfth run](eval/twelfth-run.md) |
 | medium | avast/retry-go | with a custom `RetryIf`, `Unrecoverable` stops `Attempts(0)` but not `Attempts(n)` | contract | agent spec | draft | thirteenth run |
@@ -73,6 +74,9 @@ scores):
 | low | gin-contrib/cors | regexp origins are lowercased: `\S` becomes `\s` | wrong result | reading (advisory guidance) | draft | advisory specs |
 | low | rs/cors | `OriginAllowed` returns true without an `Origin` header under `AllowAll`/`"*"`, against its doc (from the #231 fix) | contract | advisory guidance spec | draft | advisory specs |
 | low | labstack/echo (v5) | `NewContext` without an `*Echo`, as its doc allows, then `Reset` dereferences nil | crash | advisory guidance spec | draft | [advisory specs](eval/cve-specs.md) |
+| low | beego/beego | a route `/a/*.*` panics (index -1) on `GET /a` (a 500) | crash | agent spec (fuzzer) | draft | advisory specs |
+| low | beego/beego | `URLFor` writes query keys and values unescaped: `&` or `=` in a value changes the parameters | wrong result | agent spec | draft | advisory specs |
+| low | beego/beego | template `Substr` overflows on `start + length` (panic) | crash | agent spec | draft | advisory specs |
 | minor | Masterminds/semver | `!=*` and `!=X` behave like `!= 0.0.0` | wrong result | agent spec (fuzzer) | draft | semver |
 | minor | cenkalti/backoff | `ExponentialBackOff` with `Multiplier` 1 shrinks an interval above 2^53 ns | wrong result | agent spec | not drafted (minor) | thirteenth run |
 | minor | gobwas/glob | a `}` outside a group compiles as a literal | contract | agent spec | draft (minor) | glob |

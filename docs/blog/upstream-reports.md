@@ -25,6 +25,7 @@ reporting) rather than a public issue.
 | gofiber/fiber (v2) | `BalancerForward` with no servers panics (divide by zero) on the first request; fixed in v3 only | low | specs from advisories | draft below |
 | Masterminds/semver | `<=*`, `<=x`, `=<*` accept only `0.0.x`; `!=*` acts like `!= 0.0.0` | medium | [semver](../eval/semver.md) | draft below |
 | gobwas/glob | `*{abc,b}*c??` does not match `abcXc`; `[\-]` does not compile; `QuoteMeta` still leaves `,` (#78 closed) | medium | [glob](../eval/glob.md) | draft below |
+| beego/beego | with `RouterCaseSensitive = false`, a guard filter whose pattern has capitals never runs (access control bypass); `*.*` route panic; `URLFor` unescaped; `Substr` overflow | high (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | gin-contrib/cors | a regexp origin is matched unanchored: the package's own example pattern lets `https://google.com.evil.net` read with credentials; regexps lowercased; wildcard overlap | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | rs/cors | `OriginAllowed` returns true without an `Origin` under `AllowAll`/`"*"`, against the doc #231 wrote | low | advisory specs | draft below |
@@ -837,6 +838,75 @@ if engine.RemoveExtraSlash {
 
 Related: #4923 fixes another way to reach the same `//host` redirect, a
 `X-Forwarded-Prefix` that `sanitizePathChars` empties.
+
+Found with go2lean, a tool that checks Go code against a model of its
+semantics and replays each finding as a `go test`.
+
+---
+
+## beego/beego
+
+# Draft: security report for beego/beego (not posted)
+
+*The repository has no `SECURITY.md`. Use GitHub's private vulnerability
+reporting if it is enabled (Security tab, "Report a vulnerability"), or ask
+a maintainer for a private contact. The same class as CVE-2021-30080 and
+CVE-2022-31259 (route lookup bypassing access control).*
+
+**Title:** Access control bypass: with RouterCaseSensitive = false, a filter whose pattern has capital letters never runs
+
+**Body:**
+
+With case-insensitive routing, a `BeforeRouter` filter registered with a
+pattern that contains capital letters is never applied, so the routes it
+guards are served without it. At `master` `939cfde`:
+
+```go
+func TestFilterCaseBypass(t *testing.T) {
+	cfg := *web.BConfig
+	cfg.RouterCaseSensitive = false
+	h := web.NewControllerRegisterWithCfg(&cfg)
+	h.InsertFilter("/Admin/*", web.BeforeRouter, func(ctx *context.Context) {
+		ctx.Output.SetStatus(403)
+		ctx.Output.Body([]byte("blocked"))
+	})
+	h.Get("/Admin/panel", func(ctx *context.Context) { ctx.Output.Body([]byte("secret")) })
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/Admin/panel", nil))
+	t.Log(w.Code, w.Body.String()) // 200 secret (403 blocked with RouterCaseSensitive = true)
+}
+```
+
+`newFilterRouter` (filter.go) lowercases the pattern for `mr.pattern` when
+routing is case-insensitive, but builds the filter's match tree from the
+original pattern:
+
+```go
+if !mr.routerCaseSensitive {
+	mr.pattern = strings.ToLower(pattern)
+}
+...
+mr.tree.AddRouter(pattern, true)
+```
+
+Routes are lowercased when they are added (`addToRouter`), and so is the
+request path when it is matched (`getUrlPath`), so a mixed-case filter
+tree never matches. An application that guards an admin area with
+`InsertFilter("/Admin/*", ...)` serves it to anyone. Case-sensitive
+routing (the default) and lowercase filter patterns are not affected.
+
+Fix: `mr.tree.AddRouter(mr.pattern, true)`.
+
+Three smaller defects found in the same run, for a public issue:
+- A route `/a/*.*` panics with `index out of range [-1]` on `GET /a`
+  (`leafInfo.match` reads `wildcardValues[len(wildcardValues)-1]` with no
+  wildcard values); beego answers 500 instead of 404.
+- `URLFor` / `toURL` writes query keys and values unescaped
+  (`u += k + "=" + v + "&"`), so `URLFor("C.M", "next", "/a?b=c&d")`
+  carries other parameters; `url.QueryEscape` or `url.Values.Encode` fixes
+  it.
+- The template helper `Substr(s, start, length)` overflows on
+  `start + length` (`Substr(s, MaxInt, MaxInt)` panics with a slice bound).
 
 Found with go2lean, a tool that checks Go code against a model of its
 semantics and replays each finding as a `go test`.

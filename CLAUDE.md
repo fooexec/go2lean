@@ -39,6 +39,8 @@ replays each candidate as a real `go test`. Keep the name go2lean.
 - Evaluate only maintained projects: before picking a repository, check
   that it, and the fork a finding would be reported to, is not archived
   (a fork's status needs `fork:true` in a repository search).
+- Verify a finding in an external project on its default branch (main or
+  master, at HEAD); other branches need no check.
 
 ## Words
 

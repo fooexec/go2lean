@@ -8,6 +8,8 @@ confirmed hooks.via_hooks
 confirmed oob.sum
 confirmed oob.avg
 exhausted oob.max_of
+exhausted ptrdiff.span
+confirmed ptrdiff.span_bad
 confirmed spec.format_u8
 exhausted spec.parse_u8
 exhausted spec.clamp

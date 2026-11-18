@@ -171,6 +171,15 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 			return err
 		}
 		fmt.Fprintf(log, "    %s: model %s at %s, inputs %v %v\n", res.Engine, res.ModelOutput.Panic, res.PanicAt, res.Inputs, res.Memory)
+		// What the model's run rests on (an unmodelled call, a stuck
+		// callee whose result was guessed): a violation that needs it is
+		// the model's, not yet the code's, until the replay says so.
+		for _, a := range res.Assumptions {
+			fmt.Fprintf(log, "      rests on: %s\n", a)
+		}
+		if len(res.Havoc) > 0 {
+			fmt.Fprintf(log, "      rests on: %d value(s) of unmodelled calls\n", len(res.Havoc))
+		}
 		v, err := replay(ws, src, fn, cx)
 		if err != nil {
 			return err
