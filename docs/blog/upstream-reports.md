@@ -30,6 +30,7 @@ reporting) rather than a public issue.
 | gin-contrib/cors | a regexp origin is matched unanchored: the package's own example pattern lets `https://google.com.evil.net` read with credentials; regexps lowercased; wildcard overlap | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | nothings/stb | `stb_image.h`: signed integer overflow in the scalar JPEG IDCT (`stbi__idct_block`) on a crafted file | low | [stb_image](../eval/stb-image.md) | draft below (stb discusses security bugs in public issues) |
 | nothings/stb | `stb_image.h`: PSD matte removal converts a negative float to `unsigned char` | low | [stb_image](../eval/stb-image.md) | second draft below |
+| valyala/fasthttp | `URI.Path()` is not idempotent; a doubly-encoded dot segment re-parses to a `..` traversal (double-decoding) | low | [fasthttp](../eval/fasthttp.md) | draft below |
 | rs/cors | `OriginAllowed` returns true without an `Origin` under `AllowAll`/`"*"`, against the doc #231 wrote | low | advisory specs | draft below |
 | labstack/echo (v5) | `NewContext` without an `*Echo` (allowed by its doc), then `Reset`, panics | low | advisory specs | draft below |
 | magiconair/properties | goroutine leak on every parse error | medium | [seventh run](../eval/seventh-run.md) | filed: magiconair/properties#101 |
@@ -1010,4 +1011,64 @@ before the conversion would fix both.
 
 Found with go2lean, which checks C code against a model of its LLVM IR
 and replays each finding as a C program under the sanitizers.
+
+## valyala/fasthttp
+
+**Title:** URI.Path() is not idempotent: a doubly percent-encoded dot segment re-parses to a path traversal
+
+On `master` (`7b1ac76`), `URI.Path()` is not idempotent: parsing the path
+it returns a second time changes it, and a doubly percent-encoded dot
+segment becomes a `..` traversal on the second parse.
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/valyala/fasthttp"
+)
+
+func main() {
+	for _, raw := range []string{"/%252e%252e/secret", "/a/%252e%252e/secret"} {
+		var u1 fasthttp.URI
+		u1.Parse(nil, []byte(raw))
+		p1 := append([]byte(nil), u1.Path()...)
+		var u2 fasthttp.URI
+		u2.Parse(nil, p1)
+		fmt.Printf("%q -> Path() %q -> re-parsed %q\n", raw, p1, u2.Path())
+	}
+}
+```
+
+```
+"/%252e%252e/secret"  -> Path() "/%2e%2e/secret"  -> re-parsed "/secret"
+"/a/%252e%252e/secret" -> Path() "/a/%2e%2e/secret" -> re-parsed "/secret"
+```
+
+`URI.Parse` percent-decodes once and then resolves `.`/`..` segments. A
+doubly-encoded `%252e%252e` decodes once to the literal `%2e%2e`, which is
+not a dot segment and so survives into `Path()`. Parsing that output again
+decodes `%2e%2e` to `..` and resolves it, escaping the directory.
+
+Single-encoded input is handled correctly: `/a/%2e%2e/secret` and
+`/a/../secret` both give `/secret` in one pass, and climbs above the root
+are clamped. So fasthttp's own single-decode request handling is not
+directly vulnerable -- within one server the leftover `%2e%2e` is a literal
+filename, not `..`.
+
+The impact is for a consumer that decodes `Path()` a second time, which is
+a common deployment: a reverse proxy built on fasthttp that forwards the
+decoded path to an upstream that decodes again. There the doubly-encoded
+dot segment becomes a real `..` and escapes the intended root.
+
+A normalized path is expected to be idempotent (`norm(norm(p)) ==
+norm(p)`), which the rest of a server relies on. Two ways to make it hold:
+leave reserved percent-escapes encoded in `Path()` (do not turn `%25` into
+a literal `%` that a later decode re-reads), or fully resolve
+percent-encoded dot segments before removing dot segments so nothing that
+decodes to `..` can survive.
+
+Found with go2lean, which checks Go code against a model of its semantics
+and replays each finding as a `go test`.
 

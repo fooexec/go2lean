@@ -55,6 +55,7 @@ Every property file has these sections:
 | CORS grants only configured origins | [cors.md](cors.md) | gofiber/fiber GHSA-fmg4-x8pw-hjhg, GHSA-g5jq-qmqr-qrwf |
 | The client's identity does not come from what it sends | [client-ip.md](client-ip.md) | gofiber/fiber GHSA-3q5p-3558-364f, GHSA-gcfq-8gqf-4876; go-chi/chi GHSA-3fxj-6jh8-hvhx, GHSA-j6qf-3m9c-vwj3 |
 | Static files stay under their root and behind their guards | [static-files.md](static-files.md) | labstack/echo GHSA-vfp3-v2rc-x9fp and its successor; beego GHSA-95f9-94vc-665h |
+| A URL path is normalized once and for all (idempotent; no encoded dot escapes) | [path-normalization.md](path-normalization.md) | path-traversal family; valyala/fasthttp (found by go2lean) |
 | An authorization matcher grants no more than its pattern | [authz-match.md](authz-match.md) | casbin `KeyMatch` (no advisory; found by go2lean) |
 
 ## Language and runtime properties
@@ -86,6 +87,7 @@ specs.
 | static-files | labstack/echo | v4.15.3, v4.16.5 | re-found the successor advisory; latest held |
 | static-files | beego/beego | `939cfde` | **guard filter bypassed with case-insensitive routing** |
 | authz-match | casbin/casbin | HEAD | `KeyMatch` over-grants a mid-pattern `*` |
+| path-normalization | valyala/fasthttp | `7b1ac76` (master) | **`URI.Path()` not idempotent**: doubly-encoded `%252e%252e` re-parses to a `..` traversal |
 | c-api-memory | DaveGamble/cJSON | v1.7.16 to HEAD | from CVE-2023-50472 alone: re-found CVE-2024-31755 and CVE-2023-50471, each held from its fix on; the open use after free of #1081 |
 | parser-bounds | DaveGamble/cJSON | v1.7.17 to HEAD | from CVE-2019-11834 alone: re-found CVE-2023-53154 on v1.7.17; v1.7.18 and HEAD held: 5 of 9 specs exhausted, the other 4 held 13M to 21M libFuzzer runs each |
 | parser-bounds | nothings/stb (`stb_image.h`) | `9600522` (master), `dev` | from stb#1225 alone: **signed overflow in the scalar JPEG IDCT**, which the project's fuzzers (SSE2 only) miss; with libFuzzer, a PSD float conversion (new) and a GIF LZW out-of-bounds read (fixed on `dev` only); four formats held |
