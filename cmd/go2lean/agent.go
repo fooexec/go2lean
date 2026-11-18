@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,6 +36,8 @@ func cmdAgent(args []string) error {
 	// The agent's specs are few and target large functions (a trial on a
 	// converter with a thousand generated fields takes seconds): a 10 s
 	// budget left some of them with a handful of trials.
+	lib := fs.String("lib", "", "on a C header: the library's .c files, comma-separated globs, linked with the specs (the argument is then the public header)")
+	cflags := fs.String("cflags", "", "on a C file: flags for every compilation, comma-separated (-Iinclude,-DX=1)")
 	memory := fs.Bool("memory", true, "on a C file: memory errors only (out of bounds, use after free, double free), not the rest of undefined behaviour")
 	fuzzTime := fs.Duration("fuzztime", 30*time.Second, "after the pipeline, fuzz each spec with go test -fuzz this long (0: off)")
 	opts := searchFlags(fs, 120)
@@ -50,7 +53,18 @@ func cmdAgent(args []string) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("agent: exactly one package pattern (or C file) expected")
 	}
-	if strings.HasSuffix(fs.Arg(0), ".c") {
+	if strings.HasSuffix(fs.Arg(0), ".c") || (*lib != "" && strings.HasSuffix(fs.Arg(0), ".h")) {
+		var libFiles []string
+		for _, pat := range splitList(*lib) {
+			ms, err := filepath.Glob(pat)
+			if err != nil || len(ms) == 0 {
+				return fmt.Errorf("agent: -lib %s matches no file", pat)
+			}
+			for _, m := range ms {
+				abs, _ := filepath.Abs(m)
+				libFiles = append(libFiles, abs)
+			}
+		}
 		// The agent on C (#270): specs in C, searched on the LLVM line.
 		if !llvmfe.Available {
 			return errors.New("agent on C needs the LLVM frontend: rebuild with -tags llvm18 (or your LLVM version's tag)")
@@ -64,7 +78,7 @@ func cmdAgent(args []string) error {
 			return err
 		}
 		return agent.RunC(context.Background(), root, contract.Workspace{Root: *ws.workspace}, fs.Arg(0), llm, agent.Options{
-			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, FuzzTime: *fuzzTime, Memory: *memory,
+			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, FuzzTime: *fuzzTime, Memory: *memory, Lib: libFiles, CFlags: splitList(*cflags),
 		}, os.Stdout)
 	}
 	w, env, err := openWorkspace(ws)

@@ -41,6 +41,11 @@ type Options struct {
 	FuzzTime time.Duration
 	// Memory (C only) searches and replays for memory errors only.
 	Memory bool
+	// Lib (C only) are the library's .c files, linked with the specs; the
+	// source argument is then its public header, which the specs include
+	// and the model reads. CFlags go to every compilation (-I, -D).
+	Lib    []string
+	CFlags []string
 }
 
 // Run drives the agent on one package: propose specs, repair until they

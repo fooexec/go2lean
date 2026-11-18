@@ -90,8 +90,8 @@ func extractC(resp string) string {
 
 // clangCheck compiles the spec file for syntax and types only and returns
 // clang's diagnostics, or "" when it compiles.
-func clangCheck(path string) string {
-	out, err := exec.Command("clang", "-fsyntax-only", "-w", path).CombinedOutput()
+func clangCheck(path string, flags ...string) string {
+	out, err := exec.Command("clang", append(append([]string{"-fsyntax-only", "-w"}, flags...), path)...).CombinedOutput()
 	if err == nil {
 		return ""
 	}
@@ -120,6 +120,12 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 		shown = shown[:maxSource] + "\n/* ... truncated ... */\n"
 	}
 	user := fmt.Sprintf("Library source (%s):\n\n```c\n%s\n```\n", filepath.Base(src), shown)
+	if len(opts.Lib) > 0 {
+		// A library of several files: the model reads its public header;
+		// the implementation is linked, not shown, and not in scope for
+		// the specs' includes.
+		user = fmt.Sprintf("Public header of the library (%s). Its implementation is linked in; do not\ninclude any .c file, only this header, and call only what it declares.\n\n```c\n%s\n```\n", filepath.Base(src), shown)
+	}
 	if opts.Guidance != "" {
 		user += "\nGuidance: write most specs for this property. A property it states outranks a\ncomment in the source that contradicts it.\n\n" + opts.Guidance + "\n"
 	}
@@ -146,7 +152,7 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 			if err := os.WriteFile(specPath, []byte(header+spec+"\n"), 0o644); err != nil {
 				return err
 			}
-			diag := clangCheck(specPath)
+			diag := clangCheck(specPath, opts.CFlags...)
 			if diag == "" {
 				break
 			}
@@ -164,7 +170,7 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 		os.WriteFile(filepath.Join(agentDir, CSpecFile), []byte(header+spec+"\n"), 0o644)
 		fmt.Fprintf(out, "== search and replay of the specs (%s)\n", specPath)
 		log.Reset()
-		so := llvmhunt.Options{Trials: 2000, Seed: 42, Fuel: 20000, Engine: "all", ExhaustLen: 3, Init: -1, SpecsOnly: true, Fuzz: opts.FuzzTime, Memory: opts.Memory}
+		so := llvmhunt.Options{Trials: 2000, Seed: 42, Fuel: 20000, Engine: "all", ExhaustLen: 3, Init: -1, SpecsOnly: true, Fuzz: opts.FuzzTime, Memory: opts.Memory, Lib: opts.Lib, CFlags: opts.CFlags}
 		runErr = llvmhunt.Run(root, ws, specPath, so, io.MultiWriter(out, &log))
 		if runErr != nil {
 			fmt.Fprintf(out, "  error: %v\n", runErr)
