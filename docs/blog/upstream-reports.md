@@ -28,8 +28,8 @@ reporting) rather than a public issue.
 | beego/beego | with `RouterCaseSensitive = false`, a guard filter whose pattern has capitals never runs (access control bypass); `*.*` route panic; `URLFor` unescaped; `Substr` overflow | high (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | gin-contrib/cors | a regexp origin is matched unanchored: the package's own example pattern lets `https://google.com.evil.net` read with credentials; regexps lowercased; wildcard overlap | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
-| nothings/stb | `stb_image.h`: signed integer overflow in the scalar JPEG IDCT (`stbi__idct_block`) on a crafted file | low | [stb_image](../eval/stb-image.md) | draft below (stb discusses security bugs in public issues) |
-| nothings/stb | `stb_image.h`: PSD matte removal converts a negative float to `unsigned char` | low | [stb_image](../eval/stb-image.md) | second draft below |
+| nothings/stb | `stb_image.h`: signed integer overflow in the scalar JPEG IDCT (`stbi__idct_block`) on a crafted file | minor | [stb_image](../eval/stb-image.md) | draft below (stb discusses security bugs in public issues) |
+| nothings/stb | `stb_image.h`: PSD matte removal converts a negative float to `unsigned char` | minor | [stb_image](../eval/stb-image.md) | second draft below |
 | valyala/fasthttp | `URI.Path()` is not idempotent; a doubly-encoded dot segment re-parses to a `..` traversal (double-decoding) | low | [fasthttp](../eval/fasthttp.md) | draft below |
 | rs/cors | `OriginAllowed` returns true without an `Origin` under `AllowAll`/`"*"`, against the doc #231 wrote | low | advisory specs | draft below |
 | labstack/echo (v5) | `NewContext` without an `*Echo` (allowed by its doc), then `Reset`, panics | low | advisory specs | draft below |
