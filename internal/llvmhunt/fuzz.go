@@ -46,9 +46,19 @@ static uint64_t g2l_take(int k) {
   return v;
 }
 
-/* A C string of up to 32 bytes. */
+/* A length for what follows: up to max, and no more than the bytes left
+   (the model's small bound on inputs does not hold the fuzzer back). */
+static size_t g2l_len(size_t elem, size_t max) {
+  size_t n = (size_t)g2l_take(2);
+  if (elem == 0) elem = 1;
+  if (n > g2l_n / elem) n = g2l_n / elem;
+  if (n > max) n = max;
+  return n;
+}
+
+/* A C string of up to 4096 bytes. */
 static char *g2l_str(void) {
-  size_t n = g2l_take(1) % 33;
+  size_t n = g2l_len(1, 4096);
   char *s = malloc(n + 1);
   for (size_t i = 0; i < n; i++) s[i] = (char)g2l_take(1);
   s[n] = 0;
@@ -79,12 +89,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 			eb := max(g.EB, 1)
 			// malloc of the exact size, so ASan sees a read past the end
 			// (one byte for an empty buffer, which is still not NULL).
-			fmt.Fprintf(&b, "  size_t %s_n = g2l_take(1) %% %d;\n  uint8_t *%s = malloc(%s_n ? %s_n * %d : 1);\n", v, g.MaxLen+1, v, v, v, eb)
+			fmt.Fprintf(&b, "  size_t %s_n = g2l_len(%d, 4096);\n  uint8_t *%s = malloc(%s_n ? %s_n * %d : 1);\n", v, eb, v, v, v, eb)
 			fmt.Fprintf(&b, "  for (size_t i = 0; i < %s_n * %d; i++) %s[i] = (uint8_t)g2l_take(1);\n", v, eb, v)
 			frees = append(frees, v)
 		case "zbuf":
 			eb := max(g.EB, 1)
-			fmt.Fprintf(&b, "  size_t %s_n = g2l_take(1) %% %d;\n  void *%s = calloc(%s_n ? %s_n : 1, %d);\n", v, g.MaxLen+1, v, v, v, eb)
+			fmt.Fprintf(&b, "  size_t %s_n = g2l_take(1) %% 257;\n  void *%s = calloc(%s_n ? %s_n : 1, %d);\n", v, v, v, v, eb)
 			frees = append(frees, v)
 		case "len":
 			fmt.Fprintf(&b, "  long long %s = (long long)a%d_n;\n", v, g.Of)
@@ -143,7 +153,8 @@ type fuzzResult struct {
 
 // fuzz builds fn's target and runs it for d; a crash is run again on its
 // input and recorded.
-func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, d time.Duration, seed int) (*fuzzResult, error) {
+func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options) (*fuzzResult, error) {
+	d, seed := opts.Fuzz, opts.Seed
 	h, err := fuzzHarness(src, fn)
 	if err != nil {
 		return &fuzzResult{Skipped: err.Error()}, nil
@@ -157,7 +168,12 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, d time.Duratio
 		return nil, err
 	}
 	bin := filepath.Join(dir, "fuzz")
-	build := exec.Command("clang", "-g", "-O1", "-fsanitize=fuzzer,address,undefined", "-fno-sanitize-recover=all", "-w", harness, "-o", bin)
+	objs, err := opts.libObjects(filepath.Join(ws.Root, "llvm"), true)
+	if err != nil {
+		return &fuzzResult{Skipped: err.Error()}, nil
+	}
+	args := append(append(append([]string{"-g", "-O1"}, opts.sanitizers(true)...), opts.CFlags...), "-w", harness)
+	build := exec.Command("clang", append(append(args, objs...), "-o", bin, "-lm")...)
 	if out, err := build.CombinedOutput(); err != nil {
 		return &fuzzResult{Skipped: "build failed: " + firstLine(string(out))}, nil
 	}
@@ -211,6 +227,9 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, d time.Duratio
 	v := &contract.Verdict{Counterexample: cx.ID, PocDir: dir,
 		Evidence: contract.Evidence{Cmd: bin + " " + filepath.Join(dir, "testdata", filepath.Base(name)), Exit: exit, StdoutTail: tail(stdout), StderrTail: tail(rerr)}}
 	report := sanitizerReport(rerr)
+	if c := MemClass(rerr); c != "" {
+		v.Observed = map[string]string{"mem_class": c}
+	}
 	if report == "" && fn.Spec && strings.Contains(rerr, specViolated) {
 		report = specViolated
 	}

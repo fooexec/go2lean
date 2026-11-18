@@ -3,7 +3,10 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/fooexec/go2lean/internal/contract"
 	llvmfe "github.com/fooexec/go2lean/internal/frontend/llvm"
@@ -22,6 +25,9 @@ func cmdLLVM(args []string) error {
 	exhaustLen := fs.Int("exhaust-len", 3, "maximum buffer length in the exhaustive engine")
 	internal := fs.Bool("internal", false, "also search static functions (by default only the externally visible ones)")
 	specsOnly := fs.Bool("specs-only", false, "search only the functions marked annotate(\"go2lean:spec\")")
+	memory := fs.Bool("memory", false, "memory errors only (out of bounds, use after free, double free): signed arithmetic wraps and the rest of UBSan is off")
+	lib := fs.String("lib", "", "more C files of the library, comma-separated globs, linked with the source (a spec file that includes the library's headers)")
+	cflags := fs.String("cflags", "", "flags for every compilation, comma-separated (-Iinclude,-DX=1)")
 	fuzzFor := fs.Duration("fuzz", 0, "run libFuzzer this long on each function the model search did not settle (e.g. 60s)")
 	fs.Parse(args)
 	if !llvmfe.Available {
@@ -35,11 +41,32 @@ func cmdLLVM(args []string) error {
 		return err
 	}
 	ws := contract.Workspace{Root: *workspace}
-	opts := llvmhunt.Options{Trials: *trials, Seed: *seed, Fuel: *fuel, Engine: *engine, ExhaustLen: *exhaustLen, Init: -1, Internal: *internal, SpecsOnly: *specsOnly, Fuzz: *fuzzFor}
+	opts := llvmhunt.Options{Trials: *trials, Seed: *seed, Fuel: *fuel, Engine: *engine, ExhaustLen: *exhaustLen, Init: -1, Internal: *internal, SpecsOnly: *specsOnly, Fuzz: *fuzzFor, Memory: *memory, CFlags: splitList(*cflags)}
+	for _, pat := range splitList(*lib) {
+		ms, err := filepath.Glob(pat)
+		if err != nil || len(ms) == 0 {
+			return fmt.Errorf("llvm: -lib %s matches no file", pat)
+		}
+		for _, m := range ms {
+			abs, _ := filepath.Abs(m)
+			opts.Lib = append(opts.Lib, abs)
+		}
+	}
 	for _, src := range fs.Args() {
 		if err := llvmhunt.Run(root, ws, src, opts, os.Stdout); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// splitList splits a comma-separated flag value, dropping empty items.
+func splitList(s string) []string {
+	var out []string
+	for _, x := range strings.Split(s, ",") {
+		if x = strings.TrimSpace(x); x != "" {
+			out = append(out, x)
+		}
+	}
+	return out
 }

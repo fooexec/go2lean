@@ -35,6 +35,7 @@ func cmdAgent(args []string) error {
 	// The agent's specs are few and target large functions (a trial on a
 	// converter with a thousand generated fields takes seconds): a 10 s
 	// budget left some of them with a handful of trials.
+	memory := fs.Bool("memory", true, "on a C file: memory errors only (out of bounds, use after free, double free), not the rest of undefined behaviour")
 	fuzzTime := fs.Duration("fuzztime", 30*time.Second, "after the pipeline, fuzz each spec with go test -fuzz this long (0: off)")
 	opts := searchFlags(fs, 120)
 	fs.Parse(args)
@@ -63,7 +64,7 @@ func cmdAgent(args []string) error {
 			return err
 		}
 		return agent.RunC(context.Background(), root, contract.Workspace{Root: *ws.workspace}, fs.Arg(0), llm, agent.Options{
-			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, FuzzTime: *fuzzTime,
+			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, FuzzTime: *fuzzTime, Memory: *memory,
 		}, os.Stdout)
 	}
 	w, env, err := openWorkspace(ws)

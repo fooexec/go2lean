@@ -13,8 +13,10 @@ cd "$(dirname "$0")/.."
 WS=${1:?workspace}
 rm -rf "$WS"; mkdir -p "$WS"
 go build -tags llvm18 -o "$WS/g2l" ./cmd/go2lean
-for src in examples/llvm/*.c; do
+for src in examples/llvm/*.c examples/llvm/*/spec.c; do
   name=$(basename "$src" .c)
+  # A library of several files is a directory with a spec.c.
+  [ "$(dirname "$src")" = examples/llvm ] || name=$(basename "$(dirname "$src")")
   # An example may ask for flags on its first line (the fuzzer's budget).
   flags=$(sed -n '1s|^// go2lean-llvm-flags: ||p' "$src")
   # shellcheck disable=SC2086
