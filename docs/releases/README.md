@@ -11,13 +11,14 @@ a tag and its notes; there are no binaries to build.
 
 | when | what |
 |---|---|
-| Monday to Friday | Pull requests as usual: CI green, merge, docs updated with each. |
-| Saturday | Freeze: only documentation and fixes merge. Draft the notes. |
-| Sunday | Gates, tag, release. |
+| Monday to Saturday | Pull requests as usual: CI green, merge, docs updated with each. There is no freeze. |
+| Saturday or Sunday morning | Draft the notes from what has merged. |
+| Sunday | Refresh the notes, run the gates, then the maintainer tags and publishes. |
 
 ## Steps
 
-1. **Draft the notes** (Saturday):
+1. **Draft the notes** (Saturday or Sunday morning; refresh them just before
+   the gates if more has merged):
 
    ```bash
    scripts/release.sh notes > docs/releases/vX.Y.Z.md
@@ -42,9 +43,9 @@ a tag and its notes; there are no binaries to build.
    `scripts/regress.sh`, `scripts/sem-diff.sh`, `scripts/llvm-regress.sh`
    (CLAUDE.md lists the rest).
 
-4. **Tag and publish**, from the head of `main` that passed the gates. A
-   pushed tag is public and cannot be taken back, so this is a person's
-   step:
+4. **Tag and publish**, from the head of `main` that passed the gates. The
+   maintainer does this step: a pushed tag is public and cannot be taken
+   back, so the tools prepare it and never run it:
 
    ```bash
    git tag -a vX.Y.Z -m "go2lean vX.Y.Z" origin/main
