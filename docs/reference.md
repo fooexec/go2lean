@@ -113,7 +113,8 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - ✅ Floats: `float` and `double` as IEEE bit patterns; arithmetic, `fcmp`, conversions, `fabs`, `sqrt`, `floor`, `ceil`, `fmuladd`; float parameters (#269)
 - ✅ `inttoptr` (by the address's object), out parameters (`int *`) from their C types
 - ✅ glibc `ctype` (`isdigit`, `isspace`, `tolower`, ... via `__ctype_*_loc`) as the real C-locale tables
-- ⬜ `frem`, more intrinsics, `sprintf`, `strtod`, the rest of libc
+- ✅ `strtod` (decimal; no hex, `inf` or `nan`) and `errno`
+- ⬜ `frem`, more intrinsics, `sprintf`, `sscanf`, the rest of libc
 - ✅ CI for the LLVM line: the `llvm` job runs its unit tests and `scripts/llvm-regress.sh` (the C examples against `testdata/regress/llvm.golden`) when the line or the core it is built on changes (#268)
 
 **Agent and scale**: 2 / 4

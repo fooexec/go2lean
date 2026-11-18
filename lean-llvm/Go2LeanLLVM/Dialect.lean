@@ -151,6 +151,9 @@ inductive Op where
   /-- C's `realloc(p, size)`: a fresh object of `size` bytes holding the
   old one's first bytes (zero past them), and the old one freed. -/
   | realloc
+  /-- `strtod(nptr, endptr)` (#271): parse a decimal float from memory,
+  set `endptr`, return the value. Args `[nptr, endptr]`. -/
+  | strtod
   /-- A C string function (#269), by name: `strlen`, `strcmp`, `strncmp`,
   `memcmp`, `strchr`, `strcpy`, `tolower`, `toupper`. Each reads the bytes
   one by one, so a string without its terminator is read out of bounds,
@@ -512,6 +515,96 @@ def ptrOfAddr (m : Veir.MemoryState) (a : UInt64) : Option LPtr :=
       | none => false
   inside.map fun i => .val ⟨i, a⟩
 
+/-- `strtod` (#271): parse a decimal float from the model's memory, reading
+one byte at a time (so an over-read past the object is undefined behaviour
+as in C), set `endptr` to the first unparsed byte, and return the value.
+The value is computed with `Float.ofScientific`: exact for what binary64
+represents, approximate past its precision (as a real `strtod` also rounds).
+A hexadecimal float, `inf` and `nan` are not parsed: the scan stops, as it
+would at any other non-numeric byte. -/
+
+def isSpaceB (b : Nat) : Bool := b == 32 || (9 ≤ b && b ≤ 13)
+def isDigitB (b : Nat) : Bool := 48 ≤ b && b ≤ 57
+
+/-- Read a maximal run of digits from index `i`, accumulating them into
+`acc` (as `acc*10 + d`) and counting them. Returns (acc, count, nextIndex). -/
+def readDigits (m : Veir.MemoryState) (p : Veir.Data.Pointer) :
+    Nat → Nat → Nat → Nat → Res (Nat × Nat × Nat)
+  | 0, acc, cnt, i => .ok (acc, cnt, i)
+  | fuel + 1, acc, cnt, i =>
+    match cByte m p i with
+    | .ok b => if isDigitB b then readDigits m p fuel (acc * 10 + (b - 48)) (cnt + 1) (i + 1)
+               else .ok (acc, cnt, i)
+    | .panic k => .panic k
+    | .outOfFuel => .outOfFuel
+
+/-- Skip a maximal run of whitespace from `i`; returns the next index. -/
+def skipSpace (m : Veir.MemoryState) (p : Veir.Data.Pointer) : Nat → Nat → Res Nat
+  | 0, i => .ok i
+  | fuel + 1, i =>
+    match cByte m p i with
+    | .ok b => if isSpaceB b then skipSpace m p fuel (i + 1) else .ok i
+    | .panic k => .panic k
+    | .outOfFuel => .outOfFuel
+
+/-- The double `strtod` produces, and the index of the first unparsed byte
+(relative to `p`), or `none` for "no conversion" (the caller then sets
+`endptr` to the original pointer). -/
+def scanDouble (m : Veir.MemoryState) (p : Veir.Data.Pointer) : Res (Float × Option Nat) := do
+  let i0 ← skipSpace m p maxCStr 0
+  -- optional sign
+  let b0 ← cByte m p i0
+  let (neg, i1) := if b0 == 45 then (true, i0 + 1) else if b0 == 43 then (false, i0 + 1) else (false, i0)
+  let (ip, intCnt, i2) ← readDigits m p maxCStr 0 0 i1
+  -- optional fraction
+  let bd ← cByte m p i2
+  let (mant, frac, i3) ←
+    if bd == 46 then do
+      let (fp, fcnt, j) ← readDigits m p maxCStr ip 0 (i2 + 1)
+      pure (fp, fcnt, j)
+    else pure (ip, 0, i2)
+  if intCnt + frac == 0 then
+    return (0.0, none)  -- no digits: no conversion
+  -- optional exponent
+  let be ← cByte m p i3
+  let (expVal, iEnd) ←
+    if be == 101 || be == 69 then do
+      let bs ← cByte m p (i3 + 1)
+      let (eneg, k0) := if bs == 45 then (true, i3 + 2) else if bs == 43 then (false, i3 + 2) else (false, i3 + 1)
+      let (ep, ecnt, k1) ← readDigits m p maxCStr 0 0 k0
+      if ecnt == 0 then pure ((0 : Int), i3)   -- "e" with no digits: not part of the number
+      else pure ((if eneg then -(ep : Int) else ep), k1)
+    else pure ((0 : Int), i3)
+  let totalExp : Int := expVal - frac
+  let base := if totalExp ≥ 0 then Float.ofScientific mant false totalExp.toNat
+              else Float.ofScientific mant true (-totalExp).toNat
+  return ((if neg then -base else base), some iEnd)
+
+def evalStrtod (heap : Heap Val) (nptr endptr : Val) : Res (Val × Heap Val) :=
+  match memOf heap with
+  | none => .panic .modelStuck
+  | some m =>
+    match nptr with
+    | .ptr (.val p) =>
+      if p.object == 0 then .panic .nilDereference else
+      match scanDouble m p with
+      | .ok (v, consumed) =>
+        -- Where endptr should point: past the number, or at nptr for "no conversion".
+        let endP : LPtr := .val ⟨p.object, p.address + (consumed.getD 0).toUInt64⟩
+        let res := (.int 64 (.val (bits64 v)), heap)
+        match endptr with
+        | .ptr (.val q) =>
+          if q.object == 0 then .ok res
+          else match storeAt heap (.ptr endP) (.val q) with
+            | .ok (_, heap) => .ok (.int 64 (.val (bits64 v)), heap)
+            | .panic k => .panic k
+            | .outOfFuel => .outOfFuel
+        | _ => .ok res
+      | .panic k => .panic k
+      | .outOfFuel => .outOfFuel
+    | .ptr .poison => .panic .undefinedBehavior
+    | _ => .panic .modelStuck
+
 def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap Val)
   | .const w v, [] => .ok (.int w (.val (BitVec.ofInt w v)), heap)
   | .poison w, [] => .ok (.int w .poison, heap)
@@ -655,6 +748,7 @@ def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap V
       | .outOfFuel => .outOfFuel
     | none => .panic .modelStuck
   | .cstr name, args => evalCStr heap name args
+  | .strtod, [n, e] => evalStrtod heap n e
   | .cfree, [.ptr p] =>
     match p with
     | .poison => .panic .undefinedBehavior

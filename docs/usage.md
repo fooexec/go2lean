@@ -451,6 +451,11 @@ and the rest, through `__ctype_b_loc` / `__ctype_tolower_loc` /
 parser that uses them runs in the model instead of getting stuck
 (`examples/llvm/ctype.c`).
 
+`strtod` runs over the model's memory too (digits, sign, fraction, exponent;
+`endptr` set to the first unparsed byte), and `errno` is a zero global, so a
+number parser as in parson or cJSON runs in the model (`examples/llvm/strtod.c`).
+`sprintf` and `sscanf` are not modelled yet; they sit on the print paths.
+
 `malloc`, `calloc`, `realloc` and `free` are modelled (unless the file
 defines them): a freed object holds no bytes, so a later access is a use
 after free, and a second `free` is a double free (`examples/llvm/heap.c`),
