@@ -91,8 +91,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 		case "null":
 			fmt.Fprintf(&b, "  void *%s = NULL;\n", v)
 		case "typed":
-			if t, _ := g.Ty.(map[string]any); t["k"] == "str" {
+			t, _ := g.Ty.(map[string]any)
+			if t["k"] == "str" {
 				fmt.Fprintf(&b, "  char *%s = g2l_str();\n", v)
+				frees = append(frees, v)
+				break
+			}
+			// An out parameter: one object of its scalar type.
+			if inner, _ := t["t"].(map[string]any); t["k"] == "ref" && inner != nil {
+				n := int(num(inner["b"]))
+				if n <= 0 {
+					n = 1
+				}
+				fmt.Fprintf(&b, "  void *%s = calloc(1, %d);\n", v, n)
+				if inner["k"] == "int" && (n == 1 || n == 2 || n == 4 || n == 8) {
+					fmt.Fprintf(&b, "  *(int%d_t *)%s = (int%d_t)g2l_take(%d);\n", n*8, v, n*8, n)
+				}
 				frees = append(frees, v)
 				break
 			}

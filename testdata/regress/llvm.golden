@@ -1,3 +1,6 @@
+confirmed align.sum_aligned_bad
+exhausted align.sum_aligned
+exhausted align.dims
 confirmed cstr.unterminated
 confirmed cstr.copy
 exhausted cstr.lookup

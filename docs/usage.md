@@ -441,6 +441,8 @@ read from the debug information of a `-g` build:
   members null or a further object, to depth 2;
 - a `char *` with no length after it is a NUL-terminated string;
 - a `T **` is a slot holding a null or a pointer to a `T`;
+- a pointer to one scalar (`int *`, `size_t *`, `double *`) with no
+  length after it is an out parameter: one object of its type, never null;
 - any other pointer followed by an integer is a buffer and its length.
 
 `malloc`, `calloc`, `realloc` and `free` are modelled (unless the file
@@ -450,6 +452,11 @@ also when they are reached through a table of function pointers
 (`hooks.c`). `strlen`, `strcmp`, `strncmp`, `memcmp`, `strchr`, `strcpy`,
 `tolower` and `toupper` run byte by byte over the model's memory, so a
 string without its terminator is read out of bounds (`cstr.c`).
+
+`inttoptr` gives back a pointer into the live object that holds the
+address, so a buffer aligned by arithmetic on its address keeps its bounds
+(`align.c`); 0 is null. Where trials get stuck, the log names the site, so
+the next thing to model is visible.
 
 A counterexample is replayed as a C program that builds the same objects,
 under AddressSanitizer and UndefinedBehaviorSanitizer.

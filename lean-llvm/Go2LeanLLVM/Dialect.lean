@@ -115,6 +115,11 @@ inductive Op where
   poison pointer gives poison). -/
   | ptrtoint (w : Nat)
   | sext (w : Nat)
+  /-- `inttoptr` (#269): 0 is null; another address points into the live
+  object that holds it (or ends there), the provenance a C program's
+  integer arithmetic on a pointer keeps (stb_image aligns its buffers so).
+  An address in no object gives no pointer, and the model is stuck. -/
+  | inttoptr
   /-- `alloca` of `bytes` bytes. -/
   | alloca (bytes : Nat)
   /-- Load of a `w`-bit integer. -/
@@ -498,6 +503,15 @@ def fun1Eval (name : String) (x : Float) : Option Float :=
   | "round" => some x.round
   | _ => none
 
+/-- The pointer `inttoptr` gives for address `a`. -/
+def ptrOfAddr (m : Veir.MemoryState) (a : UInt64) : Option LPtr :=
+  if a == 0 then some Veir.Data.LLVM.Ptr.null else
+  let inside := (List.range m.objects.size).find? fun i =>
+    i != 0 && match m.objects[i]? with
+      | some o => o.size > 0 && o.base ≤ a && a.toNat ≤ o.base.toNat + o.size
+      | none => false
+  inside.map fun i => .val ⟨i, a⟩
+
 def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap Val)
   | .const w v, [] => .ok (.int w (.val (BitVec.ofInt w v)), heap)
   | .poison w, [] => .ok (.int w .poison, heap)
@@ -556,6 +570,15 @@ def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap V
     match p with
     | .val q => .ok (.int w (.val (BitVec.ofNat w q.address.toNat)), heap)
     | .poison => .ok (.int w .poison, heap)
+  | .inttoptr, [.int _ a] =>
+    match a with
+    | .poison => .ok (.ptr .poison, heap)
+    | .val x =>
+      match memOf heap with
+      | some m => match ptrOfAddr m x.toNat.toUInt64 with
+        | some p => .ok (.ptr p, heap)
+        | none => .panic .modelStuck
+      | none => .panic .modelStuck
   | .zext w', [.int w a] =>
     if h : w < w' then .ok (.int w' (Veir.Data.LLVM.Int.zext a w' false h), heap) else .panic .modelStuck
   | .sext w', [.int w a] =>

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -160,6 +161,15 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 				certificate = fmt.Sprintf("; exhaustive: no UB on all %.0f inputs", res.Domain)
 			}
 			fmt.Fprintf(log, "    no UB in %d trials (%d stuck, %d out of fuel)%s\n", res.Trials, res.Stuck, res.OutOfFuel, certificate)
+			// Where the trials got stuck: what to model next.
+			sites := make([]string, 0, len(res.StuckSites))
+			for site := range res.StuckSites {
+				sites = append(sites, site)
+			}
+			sort.Slice(sites, func(i, j int) bool { return res.StuckSites[sites[i]] > res.StuckSites[sites[j]] })
+			for _, site := range sites {
+				fmt.Fprintf(log, "      stuck %d× at %s\n", res.StuckSites[site], site)
+			}
 			// An exhausted domain is settled; anything less goes to the
 			// fuzzer.
 			if !res.Exhausted || res.Stuck > 0 || len(res.Assumptions) > 0 {

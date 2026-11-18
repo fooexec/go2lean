@@ -109,7 +109,8 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 	if err != nil {
 		return err
 	}
-	const maxSource = 120000
+	// stb_image.h is 278 KB; larger sources are cut.
+	const maxSource = 320000
 	shown := string(code)
 	if len(shown) > maxSource {
 		shown = shown[:maxSource] + "\n/* ... truncated ... */\n"

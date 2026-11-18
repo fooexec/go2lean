@@ -1048,6 +1048,12 @@ func (t *fnState) instr(in llvm.Value) {
 		a := t.val(in.Operand(0))
 		t.vars[in] = t.fresh()
 		t.emit(t.vars[in], fmt.Sprintf("(.ptrtoint %d)", ty.IntTypeWidth()), a)
+	case llvm.IntToPtr:
+		// The address back to a pointer (#269): null, or into the object
+		// that holds it.
+		a := t.val(in.Operand(0))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], ".inttoptr", a)
 	case llvm.Trunc, llvm.ZExt, llvm.SExt:
 		name := map[llvm.Opcode]string{llvm.Trunc: "trunc", llvm.ZExt: "zext", llvm.SExt: "sext"}[op]
 		a := t.val(in.Operand(0))
