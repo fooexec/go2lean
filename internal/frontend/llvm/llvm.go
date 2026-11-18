@@ -12,6 +12,7 @@ package llvm
 import (
 	"encoding/hex"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -387,6 +388,15 @@ func (t *fnState) val(v llvm.Value) int {
 		if (c < -2 || c > 2) && len(t.consts) < 32 && !slices.Contains(t.consts, c) {
 			t.consts = append(t.consts, c, c-1, c+1)
 		}
+	case !v.IsAConstantFP().IsNil():
+		f, _ := v.DoubleValue()
+		bits := int64(math.Float64bits(f))
+		if ty.TypeKind() == llvm.FloatTypeKind {
+			bits = int64(math.Float32bits(float32(f)))
+		}
+		t.emit(d, fmt.Sprintf("(.const %d %s)", bitWidth(ty), lint(bits)))
+	case isFloat(ty) && !v.IsAUndefValue().IsNil():
+		t.emit(d, fmt.Sprintf("(.poison %d)", bitWidth(ty)))
 	case ty.TypeKind() == llvm.PointerTypeKind && (v.IsNull() || !v.IsAUndefValue().IsNil()):
 		// undef may be any pointer; null is one of its values.
 		t.emit(d, ".null")
@@ -535,6 +545,8 @@ func tyJSON(t llvm.Type) any {
 	switch t.TypeKind() {
 	case llvm.IntegerTypeKind:
 		return map[string]any{"k": "int", "w": t.IntTypeWidth()}
+	case llvm.FloatTypeKind, llvm.DoubleTypeKind:
+		return map[string]any{"k": "int", "w": bitWidth(t)}
 	case llvm.StructTypeKind:
 		var fs []any
 		for _, f := range t.StructElementTypes() {
@@ -568,6 +580,10 @@ func typeName(t llvm.Type) string {
 		return fmt.Sprintf("[%d x %s]", t.ArrayLength(), typeName(t.ElementType()))
 	case llvm.VoidTypeKind:
 		return "void"
+	case llvm.FloatTypeKind:
+		return "float"
+	case llvm.DoubleTypeKind:
+		return "double"
 	}
 	return fmt.Sprintf("type kind %d", t.TypeKind())
 }
@@ -710,6 +726,24 @@ func (l *lowerer) constGEPOffset(c llvm.Value) (int64, bool) {
 	return offset, true
 }
 
+// isFloat is a float or double, which the model holds as its IEEE bit
+// pattern (an i32 or i64).
+func isFloat(t llvm.Type) bool {
+	k := t.TypeKind()
+	return k == llvm.FloatTypeKind || k == llvm.DoubleTypeKind
+}
+
+// bitWidth is the width of an integer type, or of a float's bit pattern.
+func bitWidth(t llvm.Type) int {
+	switch t.TypeKind() {
+	case llvm.FloatTypeKind:
+		return 32
+	case llvm.DoubleTypeKind:
+		return 64
+	}
+	return t.IntTypeWidth()
+}
+
 func isAgg(t llvm.Type) bool {
 	k := t.TypeKind()
 	return k == llvm.StructTypeKind || k == llvm.ArrayTypeKind
@@ -720,6 +754,8 @@ func tyLean(t llvm.Type) string {
 	switch t.TypeKind() {
 	case llvm.IntegerTypeKind:
 		return fmt.Sprintf("(.int %d)", t.IntTypeWidth())
+	case llvm.FloatTypeKind, llvm.DoubleTypeKind:
+		return fmt.Sprintf("(.int %d)", bitWidth(t))
 	case llvm.PointerTypeKind:
 		return ".ptr"
 	case llvm.StructTypeKind:
@@ -744,6 +780,16 @@ func path(idx []uint32) string {
 		s[i] = fmt.Sprint(v)
 	}
 	return "[" + strings.Join(s, ", ") + "]"
+}
+
+// opFNeg is LLVMFNeg, which go-llvm does not name.
+const opFNeg llvm.Opcode = 66
+
+var fpreds = map[llvm.FloatPredicate]string{
+	llvm.FloatPredicateFalse: "false", llvm.FloatOEQ: "oeq", llvm.FloatOGT: "ogt", llvm.FloatOGE: "oge",
+	llvm.FloatOLT: "olt", llvm.FloatOLE: "ole", llvm.FloatONE: "one", llvm.FloatORD: "ord",
+	llvm.FloatUNO: "uno", llvm.FloatUEQ: "ueq", llvm.FloatUGT: "ugt", llvm.FloatUGE: "uge",
+	llvm.FloatULT: "ult", llvm.FloatULE: "ule", llvm.FloatUNE: "une", llvm.FloatPredicateTrue: "true",
 }
 
 var preds = map[llvm.IntPredicate]string{
@@ -852,6 +898,10 @@ func (l *lowerer) function(f llvm.Value, index int) (string, Func) {
 				g.K = "zbuf"
 			}
 			fn.Gens = append(fn.Gens, g)
+		case llvm.FloatTypeKind, llvm.DoubleTypeKind:
+			// A small integer as a float: the C harness passes the same
+			// integer, which the prototype converts.
+			fn.Gens = append(fn.Gens, Gen{K: "fp", Name: name, W: bitWidth(ty)})
 		case llvm.StructTypeKind, llvm.ArrayTypeKind:
 			fn.Gens = append(fn.Gens, Gen{K: "agg", Name: name, Ty: tyJSON(ty)})
 		default:
@@ -930,7 +980,7 @@ func (t *fnState) loadAgg(p int, ty llvm.Type) int {
 		if f.ty.TypeKind() == llvm.PointerTypeKind {
 			t.emit(v, ".loadPtr", a)
 		} else {
-			t.emit(v, fmt.Sprintf("(.load %d)", f.ty.IntTypeWidth()), a)
+			t.emit(v, fmt.Sprintf("(.load %d)", bitWidth(f.ty)), a)
 		}
 		t.emit(next, fmt.Sprintf("(.insert %s)", path(f.path)), acc, v)
 		acc = next
@@ -1003,6 +1053,35 @@ func (t *fnState) instr(in llvm.Value) {
 		a := t.val(in.Operand(0))
 		t.vars[in] = t.fresh()
 		t.emit(t.vars[in], fmt.Sprintf("(.%s %d)", name, ty.IntTypeWidth()), a)
+	case llvm.FAdd, llvm.FSub, llvm.FMul, llvm.FDiv, llvm.FRem:
+		name := map[llvm.Opcode]string{llvm.FAdd: "fadd", llvm.FSub: "fsub", llvm.FMul: "fmul", llvm.FDiv: "fdiv", llvm.FRem: "frem"}[op]
+		a, b := t.val(in.Operand(0)), t.val(in.Operand(1))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], fmt.Sprintf("(.fbin %q)", name), a, b)
+	case opFNeg:
+		a := t.val(in.Operand(0))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], ".fneg", a)
+	case llvm.FCmp:
+		a, b := t.val(in.Operand(0)), t.val(in.Operand(1))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], fmt.Sprintf("(.fcmp %q)", fpreds[in.FloatPredicate()]), a, b)
+	case llvm.SIToFP, llvm.UIToFP, llvm.FPToSI, llvm.FPToUI, llvm.FPExt, llvm.FPTrunc:
+		name := map[llvm.Opcode]string{llvm.SIToFP: "sitofp", llvm.UIToFP: "uitofp", llvm.FPToSI: "fptosi", llvm.FPToUI: "fptoui", llvm.FPExt: "fpext", llvm.FPTrunc: "fptrunc"}[op]
+		a := t.val(in.Operand(0))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], fmt.Sprintf("(.fconv %q %d)", name, bitWidth(ty)), a)
+	case llvm.BitCast:
+		// Between a float and an integer of its width the bit pattern is
+		// the value already.
+		if from := in.Operand(0).Type(); from.TypeKind() != llvm.PointerTypeKind && ty.TypeKind() != llvm.PointerTypeKind &&
+			!isAgg(from) && !isAgg(ty) && bitWidth(from) == bitWidth(ty) {
+			t.vars[in] = t.val(in.Operand(0))
+			return
+		}
+		t.issue("instruction %s not modelled", strings.TrimSpace(in.String()))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], `(.unsupported "bitcast")`)
 	case llvm.Alloca:
 		n := t.l.td.TypeAllocSize(in.AllocatedType())
 		if c := in.Operand(0); !c.IsAConstantInt().IsNil() {
@@ -1031,8 +1110,8 @@ func (t *fnState) instr(in llvm.Value) {
 		}
 		t.vars[in] = t.fresh()
 		switch ty.TypeKind() {
-		case llvm.IntegerTypeKind:
-			t.emit(t.vars[in], fmt.Sprintf("(.load %d)", ty.IntTypeWidth()), p)
+		case llvm.IntegerTypeKind, llvm.FloatTypeKind, llvm.DoubleTypeKind:
+			t.emit(t.vars[in], fmt.Sprintf("(.load %d)", bitWidth(ty)), p)
 		case llvm.PointerTypeKind:
 			t.emit(t.vars[in], ".loadPtr", p)
 		default:
@@ -1168,6 +1247,18 @@ func (t *fnState) call(in llvm.Value) {
 		t.vars[in] = t.fresh()
 		t.emit(t.vars[in], ".fshl", a, b, c)
 		return
+	case strings.HasPrefix(name, "llvm.fabs.") || strings.HasPrefix(name, "llvm.sqrt.") ||
+		strings.HasPrefix(name, "llvm.floor.") || strings.HasPrefix(name, "llvm.ceil.") ||
+		strings.HasPrefix(name, "llvm.trunc.") || strings.HasPrefix(name, "llvm.round."):
+		a := t.val(in.Operand(0))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], fmt.Sprintf("(.fun1 %q)", strings.Split(name, ".")[1]), a)
+		return
+	case strings.HasPrefix(name, "llvm.fmuladd.") || strings.HasPrefix(name, "llvm.fma."):
+		a, b, c := t.val(in.Operand(0)), t.val(in.Operand(1)), t.val(in.Operand(2))
+		t.vars[in] = t.fresh()
+		t.emit(t.vars[in], ".fma", a, b, c)
+		return
 	case strings.HasPrefix(name, "llvm.memset."):
 		dst, b, n := t.val(in.Operand(0)), t.val(in.Operand(1)), t.val(in.Operand(2))
 		t.emit(t.fresh(), ".memset", dst, b, n)
@@ -1233,9 +1324,9 @@ func (t *fnState) call(in llvm.Value) {
 		return
 	}
 	if !known {
-		if ty.TypeKind() == llvm.IntegerTypeKind {
+		if ty.TypeKind() == llvm.IntegerTypeKind || isFloat(ty) {
 			t.issue("call %s: result is havoc, effects not modelled", name)
-			t.l.havoc = append(t.l.havoc, ty.IntTypeWidth())
+			t.l.havoc = append(t.l.havoc, bitWidth(ty))
 			t.cur.instrs = append(t.cur.instrs, fmt.Sprintf(".havoc %d %d", d, len(t.l.havoc)-1))
 		} else if ty.TypeKind() == llvm.VoidTypeKind {
 			t.issue("call %s: effects not modelled", name)
@@ -1260,10 +1351,10 @@ func (t *fnState) call(in llvm.Value) {
 // an integer (or no result), stuck for anything else (an aggregate or
 // pointer of havoc would be a value the callee cannot return).
 func (t *fnState) fallback(d int, ty llvm.Type, what string) string {
-	if ty.TypeKind() == llvm.IntegerTypeKind || ty.TypeKind() == llvm.VoidTypeKind {
+	if ty.TypeKind() == llvm.IntegerTypeKind || isFloat(ty) || ty.TypeKind() == llvm.VoidTypeKind {
 		w := 64
-		if ty.TypeKind() == llvm.IntegerTypeKind {
-			w = ty.IntTypeWidth()
+		if ty.TypeKind() != llvm.VoidTypeKind {
+			w = bitWidth(ty)
 		}
 		t.l.havoc = append(t.l.havoc, w)
 		return fmt.Sprintf(".havoc %d %d", d, len(t.l.havoc)-1)

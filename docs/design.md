@@ -372,11 +372,13 @@ and hid a real division by zero (`portable.Head`). It also showed the Go
 line missing two bugs when run without `-deps` (xpkg `Share`, portable
 `Port`), which the comparison now always passes.
 
-Not yet: floats, `ptrtoint`, `freeze`, `malloc`/`free` and other C library
-calls (havoc), specs and properties beyond "no undefined behaviour" in the
-LLVM line, inputs for interfaces and maps in the TinyGo line, `sync.Once`
-and reflection-heavy code (`encoding/json`) on the TinyGo line, and CI for
-the LLVM line (it needs LLVM's development files).
+Since built (#268 to #271): CI for the LLVM line, the C heap, the string
+functions, `ptrtoint`, floats (IEEE bit patterns in `i32` and `i64`
+registers, computed with Lean's `Float` and `Float32`), typed inputs from
+DWARF, and specs in C. Not yet: `freeze`, `sprintf`, `strtod` and the rest
+of the C library (havoc), inputs for interfaces and maps in the TinyGo
+line, `sync.Once` and reflection-heavy code (`encoding/json`) on the
+TinyGo line.
 
 ### 4.5 Frontend emitters (Go side)
 

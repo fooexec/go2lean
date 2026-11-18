@@ -1,8 +1,9 @@
 # Findings
 
 Every defect in another project that go2lean found and that was then
-confirmed in real Go: by the replay stage's `go test`, by Go's fuzzer on a
-go2lean spec, or by a hand-written test. The evaluation reports in
+confirmed in the real program. In Go, by the replay stage's `go test`, by
+Go's fuzzer on a go2lean spec, or by a hand-written test. In C, by the
+replayed C program under ASan and UBSan. The evaluation reports in
 [`eval/`](eval/) give the details. This page lists the defects once each,
 with their status upstream.
 
@@ -13,18 +14,18 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**60 defects in 26 projects** (as of 2026-11-18):
+**65 defects in 27 projects** (as of 2026-11-18):
 - **37 new** (1 high, 10 medium, 16 low, 10 minor):
   - 29 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
   - 1 not reportable (archived);
-- **15 already reported upstream** and not fixed;
-- **8 re-found from security advisories** or a known issue, all fixed
+- **16 already reported upstream** and not fixed;
+- **12 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **7 high, 18 medium, 24 low, 11 minor**. The severity is
+By severity: **7 high, 19 medium, 28 low, 11 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -109,6 +110,7 @@ Found independently; the project's tracker already has it, not fixed.
 | low | Masterminds/semver | prerelease numbers above uint64 compared as text | wrong result | spec from docs (fuzzer) | PRs #315, #323, #326 | semver, ninth run |
 | low | gobwas/glob | `QuoteMeta` does not escape `,` | wrong result | agent spec (fuzzer) | #78 (closed 2026-10-26, still reproduces at `ff0540d`) | glob |
 | minor | dustin/go-humanize | `Ordinal(-1)` is `-1th` | wrong result | spec from docs | PRs #171, #179 | ninth run |
+| low | DaveGamble/cJSON | `ReplaceItemInObject(o, item->string, item)` frees the item's key, then copies it: a heap use after free | memory safety | advisory spec (C) | #1081, PR #1083 | [cJSON](eval/cjson.md) |
 
 ## Re-found, fixed upstream
 
@@ -126,6 +128,10 @@ nothing to report.
 | medium | golang/go | `regexp/syntax`: `(?:[aA]0\|A)` matches `a` (found by glob's own fuzz target during the run) | fuzzer | golang/go#59007, Go 1.26 | glob |
 | low | gofiber/fiber (v2) | CORS `New` panics on a list with spaces after a comma | advisory spec | v2.52.3 | advisory specs |
 | low | gofiber/fiber (v2) | CORS entry after `", "` mis-parsed | advisory spec | v2.52.16 | advisory specs |
+| medium | DaveGamble/cJSON | `cJSON_ParseWithLength` reads one byte past its buffer in `parse_string` (CVE-2023-53154), from CVE-2019-11834's spec | advisory spec (C) | v1.7.18 | [cJSON](eval/cjson.md) |
+| low | DaveGamble/cJSON | `SetValuestring(item, NULL)` passes NULL to `strlen` (CVE-2024-31755), from CVE-2023-50472's spec | advisory spec (C) | v1.7.18 | [cJSON](eval/cjson.md) |
+| low | DaveGamble/cJSON | `InsertItemInArray(a, i, NULL)` dereferences NULL (CVE-2023-50471) | advisory spec (C) | v1.7.17 | cJSON |
+| low | DaveGamble/cJSON | `SetValuestring` calls `strcpy` on overlapping strings (#881) | advisory spec (C) | v1.7.19 | cJSON |
 
 ## Benchmarks
 

@@ -1,4 +1,4 @@
-# The LLVM line on cJSON (2026-11-17)
+# The LLVM line on cJSON (2026-11-17, advisory specs 2026-11-18)
 
 The first run of the LLVM line on a real C library, and of `go2lean agent`
 on C (#269, #270). [cJSON](https://github.com/DaveGamble/cJSON)
@@ -69,6 +69,68 @@ On the real cJSON the same six specs hold, with no false positive. Two are
 strings built from escape pieces and 248,832 small nested arrays and
 objects.
 
+## Specs from one advisory, across versions (L3)
+
+The method of the Go line's [advisory specs](cve-specs.md), on C (#271).
+`go2lean agent -guidance` got one advisory, CVE-2023-50472 (a crash in
+`cJSON_SetValuestring`, v1.7.16), stated as the general property of
+[c-api-memory.md](../specs/c-api-memory.md). The agent ran on v1.7.16 and
+wrote seven specs. The same file then ran unchanged on v1.7.17, v1.7.18 and
+HEAD (`6d9f244`, after v1.7.19), with `go2lean llvm -specs-only`.
+
+| spec | v1.7.16 | v1.7.17 | v1.7.18 | HEAD | what it is |
+|---|---|---|---|---|---|
+| `setvaluestring_null` | confirmed | confirmed | exhausted | exhausted | `SetValuestring(item, NULL)`: `strlen(NULL)`. CVE-2024-31755, fixed in v1.7.18 |
+| `insert_null_item` | confirmed | exhausted | exhausted | exhausted | `InsertItemInArray(a, i, NULL)` on a non-empty array. CVE-2023-50471, fixed in v1.7.17 |
+| `setvaluestring_alias` | confirmed | confirmed | confirmed | violated | `strcpy` with overlapping strings (cJSON#881), fixed in v1.7.19 to return `NULL`, which this spec does not expect |
+| `replace_alias_key` | confirmed | confirmed | confirmed | confirmed | `ReplaceItemInObject(o, item->string, item)` frees the key, then copies it: a use after free. Open: cJSON#1081, PR #1083 |
+| `add_cs_alias_key` | confirmed | confirmed | confirmed | confirmed | the same aliasing through `AddItemToObjectCS`, whose key must outlive the item: the spec's mistake |
+| `setvaluestring_types` | exhausted | exhausted | exhausted | exhausted | every constructor's item |
+| `detach_delete` | exhausted | exhausted | exhausted | exhausted | detach and delete by index, key and NULL (1,728 inputs) |
+
+What this shows:
+- **One advisory led to two other CVEs.** The advisory's own crash needs
+  an item whose string is NULL, which no spec built. But the spec written
+  for it passes NULL as the new string: CVE-2024-31755, found by others a
+  year later in v1.7.17. A second spec covered CVE-2023-50471, the
+  advisory's sibling.
+- **Each spec holds from its fix on.** On v1.7.18 and later the NULL specs
+  are exhausted: no input of their domains crashes.
+- **An open defect, re-found.** On HEAD the use after free in
+  `ReplaceItemInObject` is still there. It is reported upstream, with a fix
+  waiting.
+- **Two results are the specs' own.** One spec breaks the documented
+  contract of `AddItemToObjectCS`. The other expects a result that
+  v1.7.19 changed on purpose. Both are told apart by reading the
+  documentation and each version's change, not by the tool.
+
+**A second chain, on the parser.** The guidance was CVE-2019-11834 only
+(an out-of-bounds read on a NUL in a string literal, fixed in 1.7.11), as
+the property of [parser-bounds.md](../specs/parser-bounds.md). The agent
+ran on v1.7.17 and wrote nine specs over `cJSON_Parse`,
+`cJSON_ParseWithLength`, `cJSON_ParseWithLengthOpts`, `cJSON_ParseWithOpts`
+and `cJSON_Minify`.
+
+| spec | v1.7.17 | v1.7.18 | HEAD |
+|---|---|---|---|
+| `parse_grammar_truncated`, `_opts` | confirmed: heap over-read in `parse_string` (`cJSON.c:786`), one byte past a buffer of exactly `len` bytes | held | held |
+| `parse_nul_in_string` | exhausted (38,416 inputs) | exhausted | exhausted |
+| `minify_pieces` | exhausted (20,736) | exhausted | exhausted |
+| five more (raw bytes, C strings, options) | held or exhausted | held or exhausted | held or exhausted |
+
+The over-read is CVE-2023-53154, fixed in v1.7.18. As with the first
+chain, the spec for an old advisory found a later one. The specs that
+found it build a value from a small grammar and cut it at every length;
+the raw-byte specs never reached that check.
+
+**Floats were what made the second CVE reachable.** On the first run on
+v1.7.16, `insert_null_item` held, with 420 of 2,000 trials stuck. It
+builds its array with `cJSON_CreateNumber(double)`, whose float compares
+and conversions the model did not have. Floats are now modelled as IEEE bit
+patterns, computed with Lean's `Float` and `Float32`
+(`examples/llvm/float.c`). Afterwards no trial is stuck, and the spec finds
+CVE-2023-50471.
+
 ## What this says
 
 The LLVM line now runs a real C library through its API without forged
@@ -86,3 +148,7 @@ Two lessons for the next targets:
 
 libFuzzer on the same specs (L2, #270) would cover what the model's search
 draws rarely, as Go's fuzzer does on the Go line.
+
+The advisory run adds a third lesson: **a spec written from one advisory
+finds that advisory's siblings and successors.** The C line now does what
+the Go line did on chi, echo and fiber.

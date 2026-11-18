@@ -108,7 +108,8 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - ✅ `malloc`, `calloc`, `realloc`, `free` (use after free, double free; #269); parameters from their C types (DWARF)
 - ✅ The `string.h` and `ctype.h` functions parsers call most (`strlen`, `strcmp`, `strncmp`, `memcmp`, `strchr`, `strcpy`, `tolower`, `toupper`)
 - ✅ `ptrtoint` (C's pointer differences, #269)
-- ⬜ Floats, `inttoptr`, more intrinsics, `sprintf`, the rest of libc
+- ✅ Floats: `float` and `double` as IEEE bit patterns; arithmetic, `fcmp`, conversions, `fabs`, `sqrt`, `floor`, `ceil`, `fmuladd`; float parameters (#269)
+- ⬜ `inttoptr`, `frem`, more intrinsics, `sprintf`, `strtod`, the rest of libc
 - ✅ CI for the LLVM line: the `llvm` job runs its unit tests and `scripts/llvm-regress.sh` (the C examples against `testdata/regress/llvm.golden`) when the line or the core it is built on changes (#268)
 
 **Agent and scale**: 2 / 4
