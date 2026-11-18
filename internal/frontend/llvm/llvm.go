@@ -689,6 +689,21 @@ func ctypeMask(c int) uint16 {
 	return m
 }
 
+// errnoGlobal is a 4-byte zero global standing for errno; __errno_location
+// returns a pointer to it.
+func (l *lowerer) errnoGlobal() int {
+	if l.ctypeIdx == nil {
+		l.ctypeIdx = map[string]int{}
+	}
+	if i, ok := l.ctypeIdx["errno"]; ok {
+		return i
+	}
+	i := len(l.globals)
+	l.globals = append(l.globals, &globalInit{size: 4, bytes: make([]byte, 4)})
+	l.ctypeIdx["errno"] = i
+	return i
+}
+
 // ctypeLoc synthesises the table and the cell for a glibc ctype locator
 // (the table covers char indices -128..255; the cell holds a pointer to
 // its element 0, as glibc does) and returns the cell's global index.
@@ -1455,12 +1470,34 @@ func (t *fnState) call(in llvm.Value) {
 			t.vars[in] = t.fresh()
 			t.emit(t.vars[in], ".realloc", t.val(in.Operand(0)), t.val(in.Operand(1)))
 			return
+		case "__errno_location":
+			// errno: a thread-local int the model holds as a synthetic
+			// zero global (#271). strtod and friends do not set it, so a
+			// caller's errno==ERANGE check is simply false.
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], fmt.Sprintf("(.global %d)", t.l.errnoGlobal()))
+			return
 		case "__ctype_b_loc", "__ctype_tolower_loc", "__ctype_toupper_loc":
 			// glibc's ctype tables (isdigit, isspace, tolower, ...): the
 			// call returns a pointer to a cell holding a pointer into the
 			// table, which the model holds as a synthetic global (#271).
 			t.vars[in] = t.fresh()
 			t.emit(t.vars[in], fmt.Sprintf("(.global %d)", t.l.ctypeLoc(name)))
+			return
+		case "strtod", "strtof", "__strtod_internal":
+			// strtod(nptr, endptr): parse a decimal float from memory and
+			// set endptr (#271). endptr may be null (one operand short).
+			nptr := t.val(in.Operand(0))
+			var endptr int
+			if in.OperandsCount() >= 3 {
+				endptr = t.val(in.Operand(1))
+			} else {
+				e := t.fresh()
+				t.emit(e, ".null")
+				endptr = e
+			}
+			t.vars[in] = t.fresh()
+			t.emit(t.vars[in], ".strtod", nptr, endptr)
 			return
 		case "strlen", "strcmp", "strncmp", "memcmp", "strchr", "strcpy", "tolower", "toupper":
 			// string.h and ctype.h, byte by byte over the model's memory.

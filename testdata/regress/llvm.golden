@@ -30,3 +30,6 @@ exhausted spec.parse_u8
 exhausted spec.clamp
 confirmed spec.spec_round_trip
 exhausted spec.spec_clamp
+confirmed strtod.classify_bad
+exhausted strtod.classify_ok
+exhausted strtod.count_numbers
