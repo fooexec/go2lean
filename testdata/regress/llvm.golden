@@ -1,6 +1,11 @@
 confirmed cstr.unterminated
 confirmed cstr.copy
 exhausted cstr.lookup
+confirmed float.scaled
+exhausted float.scaled_ok
+confirmed float.bucket
+exhausted float.spec_number
+confirmed float.spec_halve
 confirmed heap.uaf
 confirmed heap.dfree
 exhausted heap.grow

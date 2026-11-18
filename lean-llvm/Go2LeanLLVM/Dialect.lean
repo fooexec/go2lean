@@ -171,6 +171,22 @@ inductive Op where
   | bitCount (which : Nat)
   /-- `llvm.fshl`: args `[a, b, c]`, the high half of `a:b << c % w`. -/
   | fshl
+  /-- Floating point (#269): a `float` or `double` in a register is its
+  IEEE bit pattern, an `i32` or `i64`, so memory holds it as bytes like
+  any integer. `fbin` is `fadd` `fsub` `fmul` `fdiv` `frem` on two values
+  of the same width, computed in that width. -/
+  | fbin (name : String)
+  | fneg
+  /-- `fcmp` with LLVM's predicate name (`oeq`, `ult`, `uno`, ...). -/
+  | fcmp (pred : String)
+  /-- `sitofp` `uitofp` `fptosi` `fptoui` `fpext` `fptrunc` to width `w`.
+  An `fptosi` or `fptoui` whose value does not fit is poison. -/
+  | fconv (kind : String) (w : Nat)
+  /-- A one-argument intrinsic: `fabs` `sqrt` `floor` `ceil` `trunc`
+  `round`. -/
+  | fun1 (name : String)
+  /-- `llvm.fmuladd` and `llvm.fma`: `a * b + c`. -/
+  | fma
   /-- An instruction the frontend does not lower: the model is stuck. -/
   | unsupported (what : String)
   deriving Repr
@@ -387,6 +403,100 @@ def storeAt (heap : Heap Val) (v : Val) (p : LPtr) : Res (Val × Heap Val) :=
     | .panic k => .panic k
     | .outOfFuel => .outOfFuel
   | none => .panic .modelStuck
+
+/-! Floating point: values are IEEE bit patterns, computed with Lean's
+`Float` (binary64) and `Float32` (binary32). -/
+
+def f64 (b : BitVec 64) : Float := Float.ofBits b.toNat.toUInt64
+def bits64 (f : Float) : BitVec 64 := BitVec.ofNat 64 f.toBits.toNat
+def f32 (b : BitVec 32) : Float32 := Float32.ofBits b.toNat.toUInt32
+def bits32 (f : Float32) : BitVec 32 := BitVec.ofNat 32 f.toBits.toNat
+
+/-- The value of a `w`-bit float as a binary64 (exact for binary32). -/
+def asFloat : (w : Nat) → BitVec w → Option Float
+  | 64, b => some (f64 b)
+  | 32, b => some (f32 b).toFloat
+  | _, _ => none
+
+/-- A binary64 rounded to a `w`-bit float. -/
+def ofFloat : (w : Nat) → Float → Option (BitVec w)
+  | 64, f => some (bits64 f)
+  | 32, f => some (bits32 f.toFloat32)
+  | _, _ => none
+
+def fbin64 (name : String) (a b : Float) : Option Float :=
+  match name with
+  | "fadd" => some (a + b) | "fsub" => some (a - b)
+  | "fmul" => some (a * b) | "fdiv" => some (a / b)
+  | _ => none
+
+def fbin32 (name : String) (a b : Float32) : Option Float32 :=
+  match name with
+  | "fadd" => some (a + b) | "fsub" => some (a - b)
+  | "fmul" => some (a * b) | "fdiv" => some (a / b)
+  | _ => none
+
+/-- `fadd` and its kin in width `w` (binary32 arithmetic for `float`). -/
+def fbinW (name : String) : (w : Nat) → BitVec w → BitVec w → Option (BitVec w)
+  | 64, a, b => (fbin64 name (f64 a) (f64 b)).map bits64
+  | 32, a, b => (fbin32 name (f32 a) (f32 b)).map bits32
+  | _, _, _ => none
+
+/-- LLVM's `fcmp` predicates: an ordered one is false on a NaN, an
+unordered one true. -/
+def fcmpEval (pred : String) (a b : Float) : Option Bool :=
+  let uno := a.isNaN || b.isNaN
+  let rel : String → Option Bool := fun
+    | "eq" => some (a == b) | "ne" => some (!(a == b))
+    | "gt" => some (decide (a > b)) | "ge" => some (decide (a ≥ b))
+    | "lt" => some (decide (a < b)) | "le" => some (decide (a ≤ b))
+    | _ => none
+  match pred with
+  | "false" => some false | "true" => some true
+  | "ord" => some !uno | "uno" => some uno
+  | _ =>
+    let r := (pred.drop 1).toString
+    match pred.front with
+    | 'o' => (rel r).map (!uno && ·)
+    | 'u' => (rel r).map (uno || ·)
+    | _ => none
+
+/-- `fptosi` / `fptoui` of `x` to `w` bits: rounded toward zero, poison
+when that does not fit (or `x` is NaN). -/
+def fpToInt (signed : Bool) (w : Nat) (x : Float) : LInt w :=
+  let t := if x < 0 then x.ceil else x.floor
+  let two (n : Nat) : Float := Float.ofNat (2 ^ n)
+  if x.isNaN || w == 0 || w > 64 then .poison
+  else if signed then
+    if t ≥ -(two (w - 1)) && t < two (w - 1) then .val (BitVec.ofInt w t.toInt64.toInt) else .poison
+  else
+    if t ≥ 0 && t < two w then .val (BitVec.ofNat w t.toUInt64.toNat) else .poison
+
+/-- The float conversions of `Op.fconv`, from a `w`-bit value. -/
+def fconvEval (kind : String) (w' : Nat) {w : Nat} (a : BitVec w) : Option (LInt w') :=
+  match kind with
+  | "sitofp" => (match w' with
+      | 32 => some (.val ((bits32 (Float32.ofInt a.toInt)).cast (by decide)))
+      | 64 => some (.val ((bits64 (Float.ofInt a.toInt)).cast (by decide)))
+      | _ => none)
+  | "uitofp" => (match w' with
+      | 32 => some (.val ((bits32 (Float32.ofNat a.toNat)).cast (by decide)))
+      | 64 => some (.val ((bits64 (Float.ofNat a.toNat)).cast (by decide)))
+      | _ => none)
+  | "fptosi" => (asFloat w a).map (fpToInt true w')
+  | "fptoui" => (asFloat w a).map (fpToInt false w')
+  | "fpext" | "fptrunc" => do
+    let x ← asFloat w a
+    return .val (← ofFloat w' x)
+  | _ => none
+
+def fun1Eval (name : String) (x : Float) : Option Float :=
+  match name with
+  | "fabs" => some x.abs | "sqrt" => some x.sqrt
+  | "floor" => some x.floor | "ceil" => some x.ceil
+  | "trunc" => some (if x < 0 then x.ceil else x.floor)
+  | "round" => some x.round
+  | _ => none
 
 def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap Val)
   | .const w v, [] => .ok (.int w (.val (BitVec.ofInt w v)), heap)
@@ -610,6 +720,52 @@ def denote (_ : Unit) (heap : Heap Val) : Op → List Val → Res (Val × Heap V
     match (heap[2 + i]? : Option Val) with
     | some v@(.ptr _) => .ok (v, heap)
     | _ => .panic .modelStuck
+  | .fbin name, [.int w a, .int w' b] =>
+    if h : w' = w then
+      match a, b.cast h with
+      | .val x, .val y => match fbinW name w x y with
+        | some r => .ok (.int w (.val r), heap)
+        | none => .panic .modelStuck
+      | _, _ => .ok (.int w .poison, heap)
+    else .panic .modelStuck
+  | .fneg, [.int w a] =>
+    match a with
+    | .val x => if w == 0 then .panic .modelStuck else .ok (.int w (.val (x ^^^ BitVec.twoPow w (w - 1))), heap)
+    | .poison => .ok (.int w .poison, heap)
+  | .fcmp pred, [.int w a, .int w' b] =>
+    if h : w' = w then
+      match a, b.cast h with
+      | .val x, .val y =>
+        match asFloat w x, asFloat w y with
+        | some fx, some fy => match fcmpEval pred fx fy with
+          | some r => .ok (.int 1 (.val (if r then 1#1 else 0#1)), heap)
+          | none => .panic .modelStuck
+        | _, _ => .panic .modelStuck
+      | _, _ => .ok (.int 1 .poison, heap)
+    else .panic .modelStuck
+  | .fconv kind w', [.int _ a] =>
+    match a with
+    | .val x => match fconvEval kind w' x with
+      | some r => .ok (.int w' r, heap)
+      | none => .panic .modelStuck
+    | .poison => .ok (.int w' .poison, heap)
+  | .fun1 name, [.int w a] =>
+    match a with
+    | .val x => match (do ofFloat w (← fun1Eval name (← asFloat w x))) with
+      | some r => .ok (.int w (.val r), heap)
+      | none => .panic .modelStuck
+    | .poison => .ok (.int w .poison, heap)
+  | .fma, [.int w a, .int w₁ b, .int w₂ c] =>
+    if h : w₁ = w ∧ w₂ = w then
+      match a, b.cast h.1, c.cast h.2 with
+      | .val x, .val y, .val z =>
+        match (do
+            let p ← fbinW "fmul" w x y
+            fbinW "fadd" w p z) with
+        | some r => .ok (.int w (.val r), heap)
+        | none => .panic .modelStuck
+      | _, _, _ => .ok (.int w .poison, heap)
+    else .panic .modelStuck
   | _, _ => .panic .modelStuck
 
 /-- The bytes a string of hex digits spells (how the frontend writes the

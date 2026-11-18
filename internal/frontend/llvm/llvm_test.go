@@ -45,3 +45,37 @@ func TestLowerOOB(t *testing.T) {
 		}
 	}
 }
+
+// Floats (#269) lower to bit patterns with no unmodelled instruction.
+func TestLowerFloat(t *testing.T) {
+	for _, tool := range []string{"clang", "opt"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not found", tool)
+		}
+	}
+	bc, err := Compile("../../../examples/llvm/float.c", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(bc, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range m.Funcs {
+		if len(f.Issues) != 0 {
+			t.Errorf("%s: issues %v", f.Name, f.Issues)
+		}
+		if f.Name == "scaled" && (len(f.Gens) != 1 || f.Gens[0].K != "fp" || f.Gens[0].W != 64) {
+			t.Errorf("scaled: gens %+v, want one double", f.Gens)
+		}
+		if f.Name == "bucket" && (len(f.Gens) != 1 || f.Gens[0].K != "fp" || f.Gens[0].W != 32) {
+			t.Errorf("bucket: gens %+v, want one float", f.Gens)
+		}
+	}
+	// 0.5 as a double's bits; the conversions and the comparison.
+	for _, want := range []string{"(.const 64 4602678819172646912)", `(.fbin "fmul")`, `(.fconv "fptosi" 32)`, `(.fconv "sitofp" 64)`, `(.fcmp "oge")`, `(.fbin "fdiv")`} {
+		if !strings.Contains(m.Lean, want) {
+			t.Errorf("model lacks %s", want)
+		}
+	}
+}

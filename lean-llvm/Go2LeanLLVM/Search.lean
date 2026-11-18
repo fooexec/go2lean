@@ -65,10 +65,13 @@ inductive Gen where
   /-- A value of a C type from the debug information (a pointer to a
   struct, built member by member). -/
   | typed (name : String) (t : CTy)
+  /-- A `w`-bit float (32 or 64) holding a drawn integer, so the C harness
+  can pass the same integer. -/
+  | fp (name : String) (w : Nat)
   deriving Repr, Inhabited
 
 def Gen.name : Gen → String
-  | .int n _ | .buf n _ _ | .len n _ _ | .null n | .obj n _ _ | .agg n _ | .zbuf n _ _ | .typed n _ => n
+  | .int n _ | .buf n _ _ | .len n _ _ | .null n | .obj n _ _ | .agg n _ | .zbuf n _ _ | .typed n _ | .fp n _ => n
 
 /-- A generated argument before it is placed in memory. -/
 inductive Arg where
@@ -80,7 +83,14 @@ inductive Arg where
   /-- `n` zero elements of `elemBytes` bytes. -/
   | zbuf (elemBytes n : Nat)
   | tree (v : TVal)
+  /-- A `w`-bit float of the integer `v`. -/
+  | fp (w : Nat) (v : Int)
   deriving Repr, Inhabited
+
+/-- The bit pattern of the `w`-bit float nearest to `v`. -/
+def fpBits (w : Nat) (v : Int) : Val :=
+  if w == 32 then .int w (.val (BitVec.ofNat w (Float32.ofInt v).toBits.toNat))
+  else .int w (.val (BitVec.ofNat w (Float.ofInt v).toBits.toNat))
 
 /-- Interesting values of a `w`-bit integer. -/
 def specials (w : Nat) : List Int :=
@@ -210,6 +220,9 @@ def genArgs (gens : List Gen) (g : StdGen) (extra : List Int := []) (strs : List
     | .typed _ t =>
       let (v, g') := genTVal g extra strs t
       g := g'; out := out.push (.tree v)
+    | .fp _ w =>
+      let (v, g') := randInt g 16 extra
+      g := g'; out := out.push (.fp w v)
   -- Each length is its buffer's element count.
   let fixed := (gens.zip out.toList).map fun (gen, a) =>
     match gen with
@@ -287,6 +300,7 @@ def materialise (args : List Arg) (globals : List GlobalInit := []) : Option (Li
   for a in args do
     match a with
     | .int w v => vals := vals.push (.int w (.val (BitVec.ofInt w v)))
+    | .fp w v => vals := vals.push (fpBits w v)
     | .buf eb es =>
       let (m', p) ← (match m.alloc (eb * es.length).toUInt64 with | .ok r => some r | _ => none)
       m := m'
@@ -364,7 +378,7 @@ def runOnce (p : Prog) (globals : List GlobalInit) (fid : FuncId) (args : List A
 
 def argJson (gen : Gen) (a : Arg) : List (String × Json) × List (String × Json) :=
   match gen, a with
-  | _, .int _ v => ([(gen.name, Json.str (toString v))], [])
+  | _, .int _ v | _, .fp _ v => ([(gen.name, Json.str (toString v))], [])
   | _, .buf _ es => ([], [(gen.name, Json.arr (es.map (Json.str ∘ toString)).toArray)])
   | _, .null => ([], [])
   | _, .obj bs => ([], [(gen.name, Json.arr (bs.map (Json.str ∘ toString)).toArray)])
@@ -411,6 +425,7 @@ def genChoices (exLen : Nat) (extra : List Int := []) (strs : List (List Nat) :=
   | .agg _ t => [.val t.zero]
   | .zbuf _ eb maxLen => (List.range (min exLen maxLen + 1)).map (.zbuf eb)
   | .typed _ t => t.choices.map .tree
+  | .fp _ w => (smallInts 16 extra).map (.fp w)
 
 def domainSize (exLen : Nat) (gens : List Gen) (extra : List Int := []) (strs : List (List Nat) := []) : Nat :=
   gens.foldl (fun acc g => acc * (genChoices exLen extra strs g).length) 1
@@ -531,6 +546,7 @@ def genOfJson (j : Json) : Except String Gen := do
   | "zbuf" => return .zbuf name (← j.getObjValAs? Nat "eb") (← j.getObjValAs? Nat "maxLen")
   | "agg" => return .agg name (← tyOfJson (← j.getObjVal? "ty"))
   | "typed" => return .typed name (← ctyOfJson (← j.getObjVal? "ty"))
+  | "fp" => return .fp name (← j.getObjValAs? Nat "w")
   | k => throw s!"unknown generator {k}"
 
 def specOfJson (j : Json) : Except String Spec := do

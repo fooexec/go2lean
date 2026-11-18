@@ -1,9 +1,10 @@
 # Languages compiled to LLVM
 
 *Partly built: specs in C work (`go2lean llvm`, `examples/llvm/spec.c`),
-with the heap, the string functions and typed inputs modelled (#269,
-#270). The agent on C (L2), advisory specs on a C project (L3) and Rust
-(L4) are next.*
+with the heap, the string functions, floats and typed inputs modelled
+(#269, #270), and `go2lean agent` writes them. Advisory specs ran on cJSON
+(L3, [c-api-memory.md](c-api-memory.md)). libFuzzer (L2) and Rust (L4)
+are next.*
 
 ## Binding
 
