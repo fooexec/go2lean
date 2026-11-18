@@ -3,8 +3,8 @@
 *Partly built: specs in C work (`go2lean llvm`, `examples/llvm/spec.c`),
 with the heap, the string functions, floats and typed inputs modelled
 (#269, #270), and `go2lean agent` writes them. Advisory specs ran on cJSON
-(L3, [c-api-memory.md](c-api-memory.md)). libFuzzer (L2) and Rust (L4)
-are next.*
+(L3, [c-api-memory.md](c-api-memory.md)). libFuzzer runs on what the model
+search does not settle (`go2lean llvm -fuzz`, L2). Rust (L4) is next.*
 
 ## Binding
 
@@ -22,7 +22,7 @@ The marker always ends as an entry in `llvm.global.annotations`, which is
 the one thing go2lean reads.
 
 The two checking tools mirror the Go binding:
-- **Fuzzer:** libFuzzer, which every LLVM language can link. It is to this
+- **Fuzzer:** libFuzzer (built for C: `-fuzz`), which every LLVM language can link. It is to this
   line what `go test -fuzz` is to Go.
 - **Replay:** a C harness that calls the target and the spec through the
   C ABI, at first. Each language's own test runner (`cargo test`, CTest)

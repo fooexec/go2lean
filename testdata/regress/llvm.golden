@@ -1,3 +1,6 @@
+confirmed align.sum_aligned_bad
+exhausted align.sum_aligned
+exhausted align.dims
 confirmed cstr.unterminated
 confirmed cstr.copy
 exhausted cstr.lookup
@@ -6,6 +9,8 @@ exhausted float.scaled_ok
 confirmed float.bucket
 exhausted float.spec_number
 confirmed float.spec_halve
+confirmed fuzz.weight_of
+fuzzed fuzz.weight_of_ok
 confirmed heap.uaf
 confirmed heap.dfree
 exhausted heap.grow

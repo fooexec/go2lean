@@ -105,11 +105,13 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - ✅ Package `init` functions and string constants as inputs in the TinyGo line
 - 🚧 Inputs for interfaces and maps; `sync.Once`, `strconv`, `encoding/json` on the TinyGo line
 - ✅ Specs in C: a function marked `annotate("go2lean:spec")` whose 0 is a violation, replayed with its own abort (#270)
+- ✅ libFuzzer on what the model search does not settle (`-fuzz`; held but not exhausted, stuck, resting on unmodelled calls, not reproduced; #270)
 - ✅ `malloc`, `calloc`, `realloc`, `free` (use after free, double free; #269); parameters from their C types (DWARF)
 - ✅ The `string.h` and `ctype.h` functions parsers call most (`strlen`, `strcmp`, `strncmp`, `memcmp`, `strchr`, `strcpy`, `tolower`, `toupper`)
 - ✅ `ptrtoint` (C's pointer differences, #269)
 - ✅ Floats: `float` and `double` as IEEE bit patterns; arithmetic, `fcmp`, conversions, `fabs`, `sqrt`, `floor`, `ceil`, `fmuladd`; float parameters (#269)
-- ⬜ `inttoptr`, `frem`, more intrinsics, `sprintf`, `strtod`, the rest of libc
+- ✅ `inttoptr` (by the address's object), out parameters (`int *`) from their C types
+- ⬜ `frem`, more intrinsics, `sprintf`, `strtod`, the rest of libc
 - ✅ CI for the LLVM line: the `llvm` job runs its unit tests and `scripts/llvm-regress.sh` (the C examples against `testdata/regress/llvm.golden`) when the line or the core it is built on changes (#268)
 
 **Agent and scale**: 2 / 4

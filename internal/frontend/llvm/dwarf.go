@@ -142,6 +142,15 @@ func paramCTy(t dwarf.Type, lengthNext bool) any {
 		if isChar(target) && !lengthNext {
 			return map[string]any{"k": "str"}
 		}
+		// A pointer to one scalar with no length after it is an out
+		// parameter (stbi_load's int *x): one object of its type, never
+		// null, since the caller passes the address of its variable.
+		if !lengthNext && !isChar(target) {
+			switch target.(type) {
+			case *dwarf.IntType, *dwarf.UintType, *dwarf.BoolType, *dwarf.EnumType, *dwarf.FloatType:
+				return map[string]any{"k": "ref", "t": cty(target, 0)}
+			}
+		}
 		return nil
 	}
 }

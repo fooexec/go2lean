@@ -26,6 +26,8 @@ inductive CTy where
   /-- A NUL-terminated string (`char *`). -/
   | str
   | ptr (t : CTy)
+  /-- A pointer that is never null: an out parameter (`int *x`). -/
+  | ref (t : CTy)
   | null
   | struct (size : Nat) (fields : List (Nat × CTy))
   | zero (bytes : Nat)
@@ -137,6 +139,9 @@ partial def genTVal (g : StdGen) (extra : List Int) (strs : List (List Nat)) : C
     if k == 0 then (.null, g) else
     let (v, g) := genTVal g extra strs t
     (.ptr v, g)
+  | .ref t =>
+    let (v, g) := genTVal g extra strs t
+    (.ptr v, g)
   | .struct size fs =>
     let (vs, g) := fs.foldl (fun (acc, g) (off, t) =>
       let (v, g) := genTVal g extra strs t; (acc ++ [(off, v)], g)) ([], g)
@@ -148,6 +153,7 @@ partial def CTy.zeroVal : CTy → TVal
   | .int b => .int b 0
   | .str => .str []
   | .null | .ptr _ => .null
+  | .ref t => .ptr t.zeroVal
   | .zero b => .zero b
   | .struct size fs => .struct size (fs.map fun (off, t) => (off, t.zeroVal))
 
@@ -501,6 +507,12 @@ def search (p : Prog) (globals : List GlobalInit) (sp : Spec) : Json := Id.run d
         if fallback.isNone then fallback := some j
         clean' := false
       | (.holds, s) =>
+        -- A run that read the result of an unmodelled call held for the
+        -- values guessed, not for every value: no exhaustion.
+        if !s.log.isEmpty then
+          clean' := false
+          if assumed.size < 32 && !assumed.contains "values of unmodelled calls" then
+            assumed := assumed.push "values of unmodelled calls"
         for a in s.assumed do
           if !assumed.contains a && assumed.size < 32 then assumed := assumed.push a
       | _ => clean' := false
@@ -528,6 +540,7 @@ partial def ctyOfJson (j : Json) : Except String CTy := do
   | "null" => return .null
   | "zero" => return .zero (← j.getObjValAs? Nat "b")
   | "ptr" => return .ptr (← ctyOfJson (← j.getObjVal? "t"))
+  | "ref" => return .ref (← ctyOfJson (← j.getObjVal? "t"))
   | "struct" =>
     let fs ← (← j.getObjValAs? (Array Json) "fields").toList.mapM fun f => do
       return ((← f.getObjValAs? Nat "off"), (← ctyOfJson (← f.getObjVal? "t")))

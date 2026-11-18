@@ -441,6 +441,8 @@ read from the debug information of a `-g` build:
   members null or a further object, to depth 2;
 - a `char *` with no length after it is a NUL-terminated string;
 - a `T **` is a slot holding a null or a pointer to a `T`;
+- a pointer to one scalar (`int *`, `size_t *`, `double *`) with no
+  length after it is an out parameter: one object of its type, never null;
 - any other pointer followed by an integer is a buffer and its length.
 
 `malloc`, `calloc`, `realloc` and `free` are modelled (unless the file
@@ -451,8 +453,39 @@ also when they are reached through a table of function pointers
 `tolower` and `toupper` run byte by byte over the model's memory, so a
 string without its terminator is read out of bounds (`cstr.c`).
 
+`inttoptr` gives back a pointer into the live object that holds the
+address, so a buffer aligned by arithmetic on its address keeps its bounds
+(`align.c`); 0 is null. Where trials get stuck, the log names the site, so
+the next thing to model is visible.
+
 A counterexample is replayed as a C program that builds the same objects,
 under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+`-fuzz 60s` adds libFuzzer. It runs on each function the model search did
+not settle:
+- it held without exhausting its domain;
+- trials were stuck, or it read results of unmodelled calls;
+- its violation did not reproduce in the real program.
+
+A target decodes the parameters from the fuzzer's bytes and calls the
+function under ASan and UBSan; it is written to
+`out/fuzz/<key>/<function>/`. A crash input is run once more and recorded
+as a counterexample with its verdict:
+
+```
+  weight_of
+    random: model index_out_of_range ...
+      rests on: 1 value(s) of unmodelled calls
+    -> spurious
+    libfuzzer: crash after 19772 runs, input .../fuzz/m_fuzz/weight_of/testdata/crash-...
+    -> confirmed fuzz.c:15:12: runtime error: index -4 out of bounds
+```
+
+The model's search is the one that can exhaust a domain. The fuzzer runs
+the real program, so it reaches what the model does not run (here
+`strtol`) and values the search rarely draws (`examples/llvm/fuzz.c`).
+Parameters a target cannot decode yet (a pointer to a struct) are listed
+as not fuzzed.
 
 ### Specs in C
 
@@ -483,7 +516,11 @@ go2lean agent -guidance docs/specs/cors.md -workspace out lib.c
 ```
 
 It writes `go2lean_specs.c` next to `lib.c`, prepending `#include "lib.c"`
-so the specs see its static functions and types. It repairs the file until
+so the specs see its static functions and types. A violation whose
+undefined behaviour is in a spec's own body (its arithmetic on its
+parameters) is the spec's error, `ub_in_spec`, not a finding; the agent
+gets those reports and one round to fix the specs. `-fuzztime` also runs
+libFuzzer on the specs the model search did not settle. It repairs the file until
 clang accepts it, searches only the specs (`go2lean llvm -specs-only`), and
 writes its report to `out/agent/<key>/report.md`. It needs a build with the
 LLVM tag. `scripts/llvm-regress.sh <ws>` runs every C

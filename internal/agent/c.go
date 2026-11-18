@@ -53,6 +53,10 @@ violation (a 0, or undefined behaviour inside the library). Rules:
   the input valid by construction (a small grammar: pick a value kind, then
   its parts) rather than concatenating random pieces that rarely form a valid
   input. An input the code rejects early tests nothing.
+- The spec's own code must have no undefined behaviour: reduce or check each
+  integer parameter before arithmetic on it (w = 1 + (unsigned)w % 4, not
+  3 * w), and index only within your buffers. Undefined behaviour in the
+  spec's body is reported as the spec's error, not a finding.
 - Keep each spec small and deterministic. Free what you allocate. Check the
   library's documented preconditions in the spec (return 1 early when an input
   is outside them) instead of reporting them as violations.
@@ -109,7 +113,8 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 	if err != nil {
 		return err
 	}
-	const maxSource = 120000
+	// stb_image.h is 278 KB; larger sources are cut.
+	const maxSource = 320000
 	shown := string(code)
 	if len(shown) > maxSource {
 		shown = shown[:maxSource] + "\n/* ... truncated ... */\n"
@@ -131,35 +136,53 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 	}
 	os.WriteFile(filepath.Join(agentDir, "call-1-response.md"), []byte(resp), 0o644)
 	spec := extractC(resp)
-	for round := 0; ; round++ {
-		if spec == "" {
-			return fmt.Errorf("agent: the response has no C code block")
+	var log bytes.Buffer
+	var runErr error
+	for specRound := 0; ; specRound++ {
+		for round := 0; ; round++ {
+			if spec == "" {
+				return fmt.Errorf("agent: the response has no C code block")
+			}
+			if err := os.WriteFile(specPath, []byte(header+spec+"\n"), 0o644); err != nil {
+				return err
+			}
+			diag := clangCheck(specPath)
+			if diag == "" {
+				break
+			}
+			if round >= opts.MaxRepairs {
+				return fmt.Errorf("agent: the spec file does not compile after %d repairs:\n%s", round, firstLines(diag, 20))
+			}
+			fmt.Fprintf(out, "== spec file does not compile; repair %d\n%s\n", round+1, firstLines(diag, 10))
+			repair := user + "\nYour spec file:\n\n```c\n" + spec + "\n```\n\nclang rejected it:\n\n```\n" + firstLines(diag, 40) + "\n```\n\nAnswer with the whole corrected spec file in one C code block."
+			resp, err = completeRetrying(ctx, llm, cSystemPrompt, repair, out)
+			if err != nil {
+				return err
+			}
+			spec = extractC(resp)
 		}
-		if err := os.WriteFile(specPath, []byte(header+spec+"\n"), 0o644); err != nil {
-			return err
+		os.WriteFile(filepath.Join(agentDir, CSpecFile), []byte(header+spec+"\n"), 0o644)
+		fmt.Fprintf(out, "== search and replay of the specs (%s)\n", specPath)
+		log.Reset()
+		so := llvmhunt.Options{Trials: 2000, Seed: 42, Fuel: 20000, Engine: "all", ExhaustLen: 3, Init: -1, SpecsOnly: true, Fuzz: opts.FuzzTime}
+		runErr = llvmhunt.Run(root, ws, specPath, so, io.MultiWriter(out, &log))
+		if runErr != nil {
+			fmt.Fprintf(out, "  error: %v\n", runErr)
 		}
-		diag := clangCheck(specPath)
-		if diag == "" {
+		// Specs with undefined behaviour in their own body test nothing: the
+		// agent gets the reports and one more round.
+		bad := specErrors(log.String())
+		if len(bad) == 0 || specRound >= 1 || runErr != nil {
 			break
 		}
-		if round >= opts.MaxRepairs {
-			return fmt.Errorf("agent: the spec file does not compile after %d repairs:\n%s", round, firstLines(diag, 20))
-		}
-		fmt.Fprintf(out, "== spec file does not compile; repair %d\n%s\n", round+1, firstLines(diag, 10))
-		repair := user + "\nYour spec file:\n\n```c\n" + spec + "\n```\n\nclang rejected it:\n\n```\n" + firstLines(diag, 40) + "\n```\n\nAnswer with the whole corrected spec file in one C code block."
-		resp, err = completeRetrying(ctx, llm, cSystemPrompt, repair, out)
+		fmt.Fprintf(out, "== %d spec(s) with undefined behaviour of their own; revision %d\n", len(bad), specRound+1)
+		revise := user + "\nYour spec file:\n\n```c\n" + spec + "\n```\n\nThe replay found undefined behaviour in the body of these specs themselves, not in the library, so they test nothing yet:\n\n```\n" + strings.Join(bad, "\n") + "\n```\n\nFix those specs (bound each parameter before arithmetic on it) and keep the others. Answer with the whole spec file in one C code block."
+		resp, err = completeRetrying(ctx, llm, cSystemPrompt, revise, out)
 		if err != nil {
 			return err
 		}
+		os.WriteFile(filepath.Join(agentDir, fmt.Sprintf("revision-%d-response.md", specRound+1)), []byte(resp), 0o644)
 		spec = extractC(resp)
-	}
-	os.WriteFile(filepath.Join(agentDir, CSpecFile), []byte(header+spec+"\n"), 0o644)
-	fmt.Fprintf(out, "== search and replay of the specs (%s)\n", specPath)
-	var log bytes.Buffer
-	so := llvmhunt.Options{Trials: 2000, Seed: 42, Fuel: 20000, Engine: "all", ExhaustLen: 3, Init: -1, SpecsOnly: true}
-	runErr := llvmhunt.Run(root, ws, specPath, so, io.MultiWriter(out, &log))
-	if runErr != nil {
-		fmt.Fprintf(out, "  error: %v\n", runErr)
 	}
 	if !opts.ReportRound {
 		return runErr
@@ -176,6 +199,24 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 	}
 	fmt.Fprintf(out, "== report written to %s\n", path)
 	return runErr
+}
+
+// specErrors are the specs the search log reports with undefined
+// behaviour in their own body, each with its sanitizer line.
+func specErrors(log string) []string {
+	var out []string
+	var fn, verdict string
+	for _, line := range strings.Split(log, "\n") {
+		switch {
+		case strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") && !strings.Contains(line, " "+"static functions"):
+			fn = strings.TrimSpace(line)
+		case strings.HasPrefix(line, "    -> "):
+			verdict = strings.TrimPrefix(line, "    -> ")
+		case strings.Contains(line, llvmhunt.SpecUB+":"):
+			out = append(out, fn+": "+verdict)
+		}
+	}
+	return out
 }
 
 func firstLines(s string, n int) string {
