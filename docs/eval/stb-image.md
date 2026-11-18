@@ -57,6 +57,8 @@ asks it to bound each parameter before arithmetic.
 | `png`, `bmp`, `tga`, `gif`, `psd`, `pnm` | held (2,000 model trials each) |
 | `zlib_memory_safe` | exhausted (480 inputs) |
 
+Two of the specs that held fail under libFuzzer (below).
+
 ## The defect: signed overflow in the JPEG IDCT
 
 A 200-byte baseline JPEG, which the SSE2 build decodes without error,
@@ -96,5 +98,33 @@ The draft report is in [upstream reports](../blog/upstream-reports.md).
 
 ## libFuzzer on the same specs
 
-The six specs that held in the model search are running under
-`go2lean llvm -specs-only -fuzz 120s`; their numbers will be added here.
+The six specs that held in the model search then ran under libFuzzer for
+two minutes each (`go2lean llvm -specs-only -fuzz 120s`):
+
+| spec | model | libFuzzer |
+|---|---|---|
+| `png`, `bmp`, `tga`, `pnm` | held | held, 5.2M to 7.1M runs each |
+| `gif_memory_safe` | held (19 trials out of fuel) | **crash after 12,876 runs:** LZW index 4098 into `prefix[4097]` |
+| `psd_memory_safe` | held | **crash after 395 runs:** a negative float converted to `unsigned char` |
+
+The fuzzer found what the model's search drew too rarely, which is what
+it is there for. Both crash inputs were turned back into image files (95
+and 56 bytes) and loaded by a plain program with `stbi_load_from_memory`.
+
+**GIF: index out of bounds in the LZW decoder.** On `master`, a code chain
+walks `g->prefix[cur]` with `cur = 4098`. The array is `stbi__uint16[4097]`
+inside the GIF state struct. The read lands in the next member, so ASan
+does not see it and UBSan's bounds check does. `dev` rejects the file
+since `389145f` (2026-11-12, "don't allow initial code size <2 or >8 bits
+in GIF"), which is not on `master` yet. It is counted as re-found and
+fixed upstream.
+
+**PSD: float-to-integer conversion out of range.** On `master` and on
+`dev`, a 56-byte PSD with an alpha channel and raw pixel data reaches the
+"remove weird white matte" step. That step computes
+`p / a + 255 * (1 - 1/a)` and converts it to `unsigned char`. For a colour
+darker than the white matte allows, the value is negative (-462.458 here),
+and converting it is undefined behaviour in C. The 16-bit branch has the
+same code. The file is not otherwise malformed; it only has pixel values
+that do not come from a white matte. **Severity: low**, as for the IDCT:
+undefined behaviour giving wrong pixels, not a memory error.

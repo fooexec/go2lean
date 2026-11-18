@@ -29,6 +29,7 @@ reporting) rather than a public issue.
 | gin-gonic/gin | with `RemoveExtraSlash` and a route `/:p/`, `GET //evil.com` redirects to `//evil.com/` | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | gin-contrib/cors | a regexp origin is matched unanchored: the package's own example pattern lets `https://google.com.evil.net` read with credentials; regexps lowercased; wildcard overlap | medium (security) | [advisory specs](../eval/cve-specs.md) | draft below, **private channel** |
 | nothings/stb | `stb_image.h`: signed integer overflow in the scalar JPEG IDCT (`stbi__idct_block`) on a crafted file | low | [stb_image](../eval/stb-image.md) | draft below (stb discusses security bugs in public issues) |
+| nothings/stb | `stb_image.h`: PSD matte removal converts a negative float to `unsigned char` | low | [stb_image](../eval/stb-image.md) | second draft below |
 | rs/cors | `OriginAllowed` returns true without an `Origin` under `AllowAll`/`"*"`, against the doc #231 wrote | low | advisory specs | draft below |
 | labstack/echo (v5) | `NewContext` without an `*Echo` (allowed by its doc), then `Reset`, panics | low | advisory specs | draft below |
 | magiconair/properties | goroutine leak on every parse error | medium | [seventh run](../eval/seventh-run.md) | filed: magiconair/properties#101 |
@@ -964,6 +965,48 @@ the scalar IDCT is not exercised under UBSan. A fuzzer build with
 A possible fix is to do the IDCT's arithmetic in `unsigned int`, which
 wraps like the SIMD path and gives the same pixels, or to clamp the
 dequantised coefficients to the range a valid JPEG can hold.
+
+Found with go2lean, which checks C code against a model of its LLVM IR
+and replays each finding as a C program under the sanitizers.
+
+### Second issue
+
+**Title:** stb_image: PSD matte removal converts a negative float to `unsigned char` (UB)
+
+On `master` (`9600522`) and `dev` (`3db7872`), loading a 56-byte PSD with
+four channels and raw pixel data is undefined behaviour in the "remove
+weird white matte" step of `stbi__psd_load`:
+
+```
+OEJQUwABAAAAAAAAAAQAAAABAAAABAAIAAMAAAAAAAAAAAAAAAAAAFli7rzn1LG578b9STssE6I=
+```
+
+```c
+// load.c
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#include <stdio.h>
+int main(int argc, char **argv) {
+  FILE *f = fopen(argv[1], "rb");
+  unsigned char b[4096];
+  int n = (int)fread(b, 1, sizeof b, f), x, y, c;
+  fclose(f);
+  stbi_image_free(stbi_load_from_memory(b, n, &x, &y, &c, 0));
+  return 0;
+}
+```
+
+```
+$ clang -g -fsanitize=undefined -fno-sanitize-recover=all load.c -o load -lm && ./load matte.psd
+stb_image.h:6313:27: runtime error: -462.458 is outside the range of representable values of type 'unsigned char'
+```
+
+The step computes `pixel*ra + inv_a`, that is `p/a + 255*(1 - 1/a)`. For a
+colour darker than a white matte allows (`p < 255*(1 - a)`), the value is
+negative, and converting a float out of range to `unsigned char` is
+undefined behaviour (C11 6.3.1.4). The 16-bit branch above it does the
+same with `stbi__uint16`. Clamping the value to `[0, 255]` (`[0, 65535]`)
+before the conversion would fix both.
 
 Found with go2lean, which checks C code against a model of its LLVM IR
 and replays each finding as a C program under the sanitizers.

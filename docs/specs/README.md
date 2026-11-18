@@ -88,7 +88,7 @@ specs.
 | authz-match | casbin/casbin | HEAD | `KeyMatch` over-grants a mid-pattern `*` |
 | c-api-memory | DaveGamble/cJSON | v1.7.16 to HEAD | from CVE-2023-50472 alone: re-found CVE-2024-31755 and CVE-2023-50471, each held from its fix on; the open use after free of #1081 |
 | parser-bounds | DaveGamble/cJSON | v1.7.17 to HEAD | from CVE-2019-11834 alone: re-found CVE-2023-53154 on v1.7.17; v1.7.18 and HEAD held: 5 of 9 specs exhausted, the other 4 held 13M to 21M libFuzzer runs each |
-| parser-bounds | nothings/stb (`stb_image.h`) | `9600522` (master), `dev` | from stb#1225 alone: **signed overflow in the scalar JPEG IDCT**, which the project's fuzzers (SSE2 only) miss; six formats held |
+| parser-bounds | nothings/stb (`stb_image.h`) | `9600522` (master), `dev` | from stb#1225 alone: **signed overflow in the scalar JPEG IDCT**, which the project's fuzzers (SSE2 only) miss; with libFuzzer, a PSD float conversion (new) and a GIF LZW out-of-bounds read (fixed on `dev` only); four formats held |
 
 The new defects are listed with all others in [findings](../findings.md),
 and their reports wait in [upstream reports](../blog/upstream-reports.md).

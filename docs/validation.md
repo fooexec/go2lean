@@ -104,8 +104,10 @@ specs in C:
   printer bug;
 - written from one advisory each, re-find three later CVEs.
 
-On [stb_image](../docs/eval/stb-image.md) they find a signed overflow in
-the scalar JPEG IDCT that the project's own fuzzers do not reach.
+On [stb_image](../docs/eval/stb-image.md) they find:
+- a signed overflow in the scalar JPEG IDCT that the project's own fuzzers
+  do not reach;
+- with libFuzzer on the specs the model did not settle, two more defects.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover
