@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/fuzzexport"
 )
 
 const systemPrompt = `You are the property-proposal agent of go2lean, a tool that finds bugs in Go
@@ -369,6 +370,17 @@ func repairPrompt(issues []string, previous string) string {
 		fmt.Fprintf(&b, "- %s\n", is)
 	}
 	fmt.Fprintf(&b, "\nPrevious file:\n%s\nRewrite the file so that every spec stays inside the modelled subset. Drop a spec rather than keep one that cannot be modelled.", fence(previous))
+	return b.String()
+}
+
+// seedRepairPrompt sends specs back that fail on the fuzzer's seed input.
+func seedRepairPrompt(bad []fuzzexport.Result, previous string) string {
+	var b strings.Builder
+	b.WriteString("These specs of your previous go2lean_specs_test.go are false on the fuzzer's seed input (the zero value of every parameter: empty strings, empty slices, 0), before any search:\n")
+	for _, r := range bad {
+		fmt.Fprintf(&b, "- %s: %s\n", r.Fuzz, strings.TrimSpace(r.Message))
+	}
+	fmt.Fprintf(&b, "\nPrevious file:\n%s\nA spec that is false on a trivial input fails on every version, fixed ones too, and checks nothing. For each one, find what the zero input does that your oracle did not expect and fix the oracle or add the precondition (return true for inputs outside the behaviour under test). Do not weaken the property: it must still be false for the defect it was written for. Answer with the whole file.", fence(previous))
 	return b.String()
 }
 

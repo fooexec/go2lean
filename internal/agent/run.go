@@ -157,6 +157,34 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 		return err
 	}
 
+	// Seed gate: a spec that is false on the fuzzer's own seed input (the
+	// zero values of its parameters), before any search, checks nothing: it
+	// fails on every version, fixed ones too. It goes back to the agent with
+	// the failing input, as a spec the frontend rejected does.
+	for round := 0; round < opts.MaxRepairs; round++ {
+		results, _, ferr := fuzzexport.Run(ws, moduleDir, pkgPath, fuzzexport.Options{FuzzTime: time.Second})
+		if ferr != nil {
+			fmt.Fprintf(out, "  seed check: %v\n", ferr)
+			break
+		}
+		bad := seedFailures(results)
+		if len(bad) == 0 {
+			break
+		}
+		fmt.Fprintf(out, "== seed gate: %d spec(s) false on the fuzzer's seed input; asking the agent to revise (round %d)\n", len(bad), round+1)
+		resp, err := ask(systemPrompt, seedRepairPrompt(bad, spec))
+		if err != nil {
+			return err
+		}
+		next := extractGo(resp)
+		if next == "" {
+			break
+		}
+		if spec, report, err = install(next); err != nil {
+			return err
+		}
+	}
+
 	res, err := runRest(ws, env, report, spec, opts.Search, out)
 	if err != nil {
 		return err
@@ -479,4 +507,16 @@ func isReport(resp string) bool {
 		}
 	}
 	return false
+}
+
+// seedFailures returns the targets that fail before the fuzzer mutated
+// anything: its seed input already makes the spec false.
+func seedFailures(results []fuzzexport.Result) []fuzzexport.Result {
+	var bad []fuzzexport.Result
+	for _, r := range results {
+		if r.Status == "violated" && (r.Execs == "" || r.Execs == "0") {
+			bad = append(bad, r)
+		}
+	}
+	return bad
 }
