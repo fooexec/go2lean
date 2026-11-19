@@ -57,7 +57,7 @@ notes)
   echo "    go install github.com/fooexec/go2lean/cmd/go2lean@$next"
   echo "    cd your/module && go2lean run ./..."
   echo
-  echo "The LLVM line (C and C++) needs LLVM's development files and a build"
+  echo "The LLVM line (C) needs LLVM's development files and a build"
   echo "with the tag: go build -tags llvm18 ./cmd/go2lean (docs/usage.md)."
   echo
   echo "## Merged since $last"
