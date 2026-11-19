@@ -7,7 +7,8 @@ JPEG, BMP, GIF, PSD, TGA, HDR, PIC and PNM from memory, and is built into
 a great many programs. Its README says that security bugs are discussed in
 public issues. All results are on the default branch, `master` at
 `9600522` (2026-11-12), and were checked on `dev` at `3db7872`
-(2026-11-17).
+(2026-11-17). The IDCT and PSD cases were run again on `dev` at `98bc640`
+(2026-11-19) and still reproduce.
 
 The library was compiled as one C file: `#define STB_IMAGE_IMPLEMENTATION`,
 `STBI_NO_STDIO` (no file paths) and `STBI_NO_SIMD`. With `STBI_NO_SIMD` the
