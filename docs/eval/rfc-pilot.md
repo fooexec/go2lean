@@ -36,6 +36,18 @@ prove them:
   tokens) on the first goal, without an answer; the "closest value" goal as
   one theorem was too large for it.
 
+**Localised afterwards** with small functions of one operation each
+(`examples/proofs-limits/`):
+- `&^`, `|`, division by 2, a `uint8` multiplication, conditions, `&&` and
+  several `if`s with `return` are all proved;
+- a shift by a symbolic count was not: `Proof/Simp.lean` had no lemma for
+  `shl` and `shr`, so the step stopped at an unreduced match. Added
+  (`dp_shl`, `dp_shr`); `ShlVar` is proved now;
+- a 64-bit constant of 2^32 or more is what is left: `wp_auto` stops with
+  "maximum recursion depth" while stepping (1000 is fine; also with
+  `maxRecDepth` at 1,000,000). The decoder compares with `1<<62 - win`, so it
+  stops there, and so does the packet number goal.
+
 So the link A to B is open for this function. Its model is loop-free and
 small, which is the case `prove` is meant for, so this is a limit of the
 prover on 64-bit bit-vector arithmetic (`&^`, `|`, conversions) to be
