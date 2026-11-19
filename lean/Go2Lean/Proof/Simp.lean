@@ -106,4 +106,38 @@ variable (or : Oracle) (h : Heap Val) {w : Nat} (a b : BitVec w)
   show cmpInt (fun a b => BitVec.ule b a) [.int w a, .int w b] = _; simp [cmpInt]
 
 
+-- Shifts: the count may have another width than the value (Go's `x << n` with
+-- `n` of any integer type); the model's shift count is `n.toNat`, and a count at
+-- or beyond the width gives 0 (or the sign fill).
+@[simp] theorem dp_shl (cs : Bool) :
+    denotePure or h (.shl cs) [.int w a, .int w' n] =
+    if cs && n.msb then .panic .negativeShift
+    else .ok (.int w (if n.toNat ≥ w then 0#w else a <<< n.toNat)) := by
+  show (match shiftCount cs (.int w' n) with
+        | .ok k => (.ok (.int w (if k ≥ w then 0#w else a <<< k)) : Res Val)
+        | .panic p => .panic p
+        | .outOfFuel => .outOfFuel) = _
+  simp only [shiftCount]
+  by_cases hc : cs = true ∧ n.msb = true
+  · simp [hc]
+  · simp [hc]
+
+@[simp] theorem dp_shr (signed cs : Bool) :
+    denotePure or h (.shr signed cs) [.int w a, .int w' n] =
+    if cs && n.msb then .panic .negativeShift
+    else .ok (.int w (if n.toNat ≥ w then (if signed && a.msb then -1#w else 0#w)
+                      else (if signed then a.sshiftRight n.toNat else a >>> n.toNat))) := by
+  show (match shiftCount cs (.int w' n) with
+        | .ok k =>
+          if k ≥ w then (.ok (.int w (if signed && a.msb then -1#w else 0#w)) : Res Val)
+          else .ok (.int w (if signed then a.sshiftRight k else a >>> k))
+        | .panic p => .panic p
+        | .outOfFuel => .outOfFuel) = _
+  simp only [shiftCount]
+  by_cases hc : cs = true ∧ n.msb = true
+  · simp [hc]
+  · simp [hc]
+    split <;> rfl
+
+
 end Go2Lean.GoSSA
