@@ -13,10 +13,14 @@ import (
 )
 
 // scripted answers each call with the next response.
-type scripted struct{ resps []string }
+type scripted struct {
+	resps []string
+	users []string // the user message of each call
+}
 
 func (s *scripted) Name() string { return "scripted" }
 func (s *scripted) Complete(ctx context.Context, system, user string) (string, error) {
+	s.users = append(s.users, user)
 	r := s.resps[0]
 	s.resps = s.resps[1:]
 	return r, nil
@@ -58,5 +62,44 @@ func TestSpecErrors(t *testing.T) {
 	got := specErrors(log)
 	if len(got) != 1 || !strings.HasPrefix(got[0], "spec_a: inconclusive") {
 		t.Errorf("specErrors = %q, want spec_a only", got)
+	}
+}
+
+// A library of several files: the agent shows the model the public header
+// (not the implementation), the spec file includes that header, and clang
+// is given the -I flags.
+func TestRunCHeaderLibrary(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("no clang")
+	}
+	dir := t.TempDir()
+	inc := filepath.Join(dir, "include")
+	os.MkdirAll(inc, 0o755)
+	hdr := filepath.Join(inc, "lib.h")
+	os.WriteFile(hdr, []byte("#include \"types.h\"\nint twice(MyInt x);\n"), 0o644)
+	os.WriteFile(filepath.Join(inc, "types.h"), []byte("typedef int MyInt;\n"), 0o644)
+	impl := filepath.Join(dir, "lib.c")
+	os.WriteFile(impl, []byte("#include \"lib.h\"\nint twice(MyInt x) { return 2 * x; }\n"), 0o644)
+	// types.h is found only through -I: the spec file does not compile without the flag.
+	spec := "```c\n__attribute__((annotate(\"go2lean:spec\"))) int spec_twice(int x) { return x > 1000 || x < -1000 || twice(x) == x + x; }\n```"
+	llm := &scripted{resps: []string{spec, spec}}
+	var out bytes.Buffer
+	ws := contract.Workspace{Root: filepath.Join(dir, "ws")}
+	_ = RunC(context.Background(), dir, ws, hdr, llm, Options{
+		MaxRepairs: 1, Lib: []string{impl}, CFlags: []string{"-I" + inc},
+	}, &out)
+	if strings.Contains(out.String(), "does not compile") || strings.Contains(out.String(), "repair 1") {
+		t.Fatalf("the spec should compile with the -I flag:\n%s", out.String())
+	}
+	if len(llm.users) == 0 || !strings.Contains(llm.users[0], "Public header of the library") ||
+		strings.Contains(llm.users[0], "return 2 * x") {
+		t.Errorf("the model should see the header, not the implementation:\n%s", llm.users[0])
+	}
+	b, err := os.ReadFile(filepath.Join(inc, CSpecFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `#include "`+hdr+`"`) || strings.Contains(string(b), impl) {
+		t.Errorf("spec file should include the header only:\n%s", b)
 	}
 }

@@ -16,11 +16,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-52876C" alt="License: MIT" /></a>
 </p>
 
-Find bugs in Go functions by translating them into an executable semantic
+Find bugs in Go and C code by translating it into an executable semantic
 model in Lean 4, searching that model for counterexamples, and verifying every
-counterexample with the real Go toolchain. Built-in templates provide safety
-properties; humans or an optional LLM agent write business specs in Go.
-Lean finds the inputs; `go test` is the judge.
+counterexample by running the real code. Two front ends feed one model: Go
+(through `go/ssa`) and C (through LLVM IR, `go2lean llvm`). Built-in templates
+provide safety properties; humans or an optional LLM agent write business
+specs, in Go or in C. Lean finds the inputs; `go test` (Go) or a C program
+under AddressSanitizer (C) is the judge.
 
 
 > **Scope.** A bounded, search-based bug finder—not a guarantee of
@@ -28,12 +30,18 @@ Lean finds the inputs; `go test` is the judge.
 > ([runs](docs/eval/fifth-run.md)); it translates 72% of the standard
 > library's functions completely ([audit](docs/eval/std-audit.md)). It has
 > found 69 confirmed defects across 29 projects, 40 of them new
-> ([findings](docs/findings.md)). See
-> [limitations](docs/limitations.md) and [validation](docs/validation.md)
-> for scope and evidence.
+> ([findings](docs/findings.md)). The Go line is the mature one; the C line
+> is a prototype that has found defects in cJSON and stb_image. See [limitations](docs/limitations.md) and
+> [validation](docs/validation.md) for scope and evidence.
 
 ## Features
 
+- **C through LLVM IR** — `go2lean llvm` models a C file or a
+  multi-file library (heap, strings, `ctype`, `strtod`, floats), builds
+  inputs from its C types, searches for memory errors and for violations of
+  specs written in C, runs libFuzzer where the model's search stops, and
+  replays every finding as a C program under AddressSanitizer
+  ([C and LLVM IR](docs/usage.md#c-and-llvm-ir), [C specs](docs/usage.md#specs-in-c)).
 - **Executable Go models in Lean 4** — translate Go through SSA into a
   fuel-bounded semantic model, with unsupported behavior made explicit.
 - **Safety checks without handwritten specs** — automatically generate
@@ -66,8 +74,11 @@ Lean finds the inputs; `go test` is the judge.
 - **User models** — a call the model does not look into (an SDK client, a
   cgo binding) can be given a model written in Go, in `.go2lean/models`,
   without changing go2lean ([usage](docs/usage.md#user-models)).
-- **Optional spec-writing agent** — read source, propose and repair Go specs,
-  run the pipeline, and report the verdicts. The basic pipeline needs no API key.
+- **Optional spec-writing agent** — read source (a Go package, or a C file
+  or library), propose and repair specs, run the pipeline, and report the
+  verdicts. Given a published advisory it writes the specs that find that
+  bug class and its siblings ([property catalog](docs/specs/README.md)).
+  The basic pipeline needs no API key.
 
 ## Quick start
 
@@ -107,22 +118,38 @@ Sandboxed replay and agent Lean checks do not inherit host credentials from
 the environment. Other readable host paths remain exposed; this is not a
 complete host-secret boundary.
 
+**C:** the same loop on a C file. Building it needs LLVM's development files
+and the sanitizer runtime (`llvm-18-dev`, `libclang-rt-18-dev` on Ubuntu):
+
+```sh
+go build -tags llvm18 -o go2lean ./cmd/go2lean
+./go2lean llvm examples/llvm/oob.c
+```
+
+It finds the off-by-one read in `sum` and the signed overflow in `avg`,
+confirms both by running the code under AddressSanitizer and UBSan, and
+shows that `max_of` has no undefined behaviour on any input it tries.
+`-memory` keeps to memory errors, `-fuzz 60s` adds libFuzzer, and
+`-lib 'src/*.c'` takes a library of several files.
+
 See the [usage guide](docs/usage.md) for sample output, agent setup, command
 options, and running against another module.
 
 ## How it works
 
-![Go source and human- or agent-written specs compile into a Lean model; built-in specs guide search; candidate inputs are replayed with go test.](docs/images/how-it-works.svg)
+![Go source (through go/ssa) or C source (through LLVM IR), with human- or agent-written specs, compile into one Lean model; built-in specs guide search; candidate inputs are replayed as real code.](docs/images/how-it-works.svg)
 
-1. **Compile stage** — translate Go source and optional Go specs into an
-   executable Lean model.
+1. **Compile stage** — translate Go source (`go/ssa`) or C source (LLVM IR),
+   and optional specs, into an executable Lean model.
 2. **Spec & search stage** — check built-in safety properties and business
-   specs, using seeded random search and small-domain exhaustive search.
-3. **Replay stage** — run candidate inputs with `go test` and report
-   **confirmed**, **spurious**, or **inconclusive**, with replayable test artifacts.
+   specs, using seeded random search and small-domain exhaustive search;
+   on C, libFuzzer then runs the real code where the model's search stops.
+3. **Replay stage** — run candidate inputs as real code (`go test` for Go, a C
+   program under AddressSanitizer for C) and report **confirmed**,
+   **spurious**, or **inconclusive**, with replayable artifacts.
 
 No counterexample found does **not** mean proved correct. The optional agent
-writes Go specs; it does not replace model search or real Go verification.
+writes specs; it does not replace model search or real execution.
 [Pipeline details and proof boundaries →](docs/pipeline.md)
 
 ## Writing a spec
@@ -201,6 +228,9 @@ large arrays updated in place it also finds k016 at the default budget
 | Topic | Details |
 |---|---|
 | [Usage guide](docs/usage.md) | Agent setup, commands, real modules, C / LLVM |
+| [Findings](docs/findings.md) | Every defect found in other projects, with severity and upstream status |
+| [Property catalog](docs/specs/README.md) | Security properties written once (redirect, CORS, path normalization, C memory safety...), checked on any project |
+| [Releases](docs/releases/README.md) | Weekly releases (Sundays) and the [changelog](CHANGELOG.md) |
 | [Pipeline & specs](docs/pipeline.md) | Model construction, search, replay, spec examples |
 | [Spec skill](.claude/skills/go2lean-spec/SKILL.md) | For an agent: what to check in a repo, which oracle, reading verdicts, the model-gap ledger |
 | [Go support](docs/reference.md#supported-go-subset) | Supported constructs and library models |

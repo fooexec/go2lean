@@ -1,19 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-labelledby="title desc">
-  <title id="title">go2lean — Go in. Evidence out.</title>
-  <desc id="desc">Model Go functions in Lean, search for counterexamples, then replay them with real Go tests. A research prototype for finding bugs.</desc>
+  <title id="title">go2lean — Code in. Evidence out.</title>
+  <desc id="desc">Model Go and C functions in Lean, search for counterexamples, then replay them as real code: go test for Go, a sanitized C program for C. A research prototype for finding bugs.</desc>
   <!-- Shared with how-it-works.svg: warm paper, sage, terracotta, slate blue. -->
   <rect width="1200" height="440" rx="12" fill="#f8f5ef"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif">
-    <rect x="48" y="38" width="240" height="30" rx="15" fill="#e3e7d9"/>
-    <text x="64" y="59" fill="#53654c" font-size="13" font-weight="600" letter-spacing="1.5">GO + LEAN 4 / BUG FINDER</text>
+    <rect x="48" y="38" width="276" height="30" rx="15" fill="#e3e7d9"/>
+    <text x="64" y="59" fill="#53654c" font-size="13" font-weight="600" letter-spacing="1.5">GO + C + LEAN 4 / BUG FINDER</text>
     <text x="44" y="150" font-size="78" font-weight="750" letter-spacing="-4" fill="#43594c">go<tspan fill="#ac644a">2</tspan>lean</text>
-    <text x="48" y="207" fill="#43594c" font-family="Georgia, 'Times New Roman', serif" font-size="34" letter-spacing="-.7">Go in. Evidence out.</text>
+    <text x="48" y="207" fill="#43594c" font-family="Georgia, 'Times New Roman', serif" font-size="34" letter-spacing="-.7">Code in. Evidence out.</text>
     <text x="48" y="249" fill="#6d6f63" font-size="20">Model the code. Find a counterexample.</text>
-    <text x="48" y="278" fill="#6d6f63" font-size="20">Let real Go tests decide.</text>
+    <text x="48" y="278" fill="#6d6f63" font-size="20">Let real execution decide.</text>
     <g font-size="14" font-weight="600">
       <rect x="48" y="320" width="151" height="36" rx="8" fill="#e3e7d9"/><text x="66" y="343" fill="#53654c">Executable models</text>
-      <rect x="209" y="320" width="124" height="36" rx="8" fill="#f0dbcd"/><text x="228" y="343" fill="#914f39">Specs in Go</text>
-      <rect x="343" y="320" width="152" height="36" rx="8" fill="#e2e9eb"/><text x="361" y="343" fill="#496571">Replayable tests</text>
+      <rect x="209" y="320" width="150" height="36" rx="8" fill="#f0dbcd"/><text x="228" y="343" fill="#914f39">Specs in Go / C</text>
+      <rect x="369" y="320" width="152" height="36" rx="8" fill="#e2e9eb"/><text x="387" y="343" fill="#496571">Replayable tests</text>
     </g>
     <text x="48" y="401" fill="#6d6f63" font-size="13" letter-spacing="1.4">RESEARCH PROTOTYPE · BOUNDED SEARCH</text>
     <rect x="618" y="70" width="528" height="310" rx="8" fill="#e3e7d9" stroke="#b4bea8"/>
@@ -22,9 +22,9 @@
     <circle cx="648" cy="85" r="5" fill="#ac644a"/><circle cx="667" cy="85" r="5" fill="#7c8e72"/><circle cx="686" cy="85" r="5" fill="#607e8a"/>
     <text x="1130" y="90" text-anchor="end" font-size="12" fill="#6d6f63" letter-spacing="1.5">THE EVIDENCE PIPELINE</text>
     <g font-family="'SFMono-Regular', Consolas, monospace" font-size="18">
-      <text x="651" y="151" fill="#ac644a">01 <tspan fill="#43594c">Go source → Lean model</tspan></text>
+      <text x="651" y="151" fill="#ac644a">01 <tspan fill="#43594c">Go · C → Lean model</tspan></text>
       <text x="651" y="199" fill="#66785e">02 <tspan fill="#43594c">Search → candidate input</tspan></text>
-      <text x="651" y="247" fill="#607e8a">03 <tspan fill="#43594c">go test → replay verdict</tspan></text>
+      <text x="651" y="247" fill="#607e8a">03 <tspan fill="#43594c">real replay → verdict</tspan></text>
     </g>
     <rect x="648" y="283" width="480" height="63" rx="8" fill="#e3e7d9"/>
     <path d="m668 314 7 7 14-16" stroke="#66785e" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>

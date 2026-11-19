@@ -546,7 +546,19 @@ go2lean agent -guidance docs/specs/cors.md -workspace out lib.c
 ```
 
 It writes `go2lean_specs.c` next to `lib.c`, prepending `#include "lib.c"`
-so the specs see its static functions and types. A violation whose
+so the specs see its static functions and types.
+
+For a library of several files, give its public header and the
+implementation files:
+
+```bash
+go2lean agent -guidance prop.md -lib 'src/*.c' -cflags -Iinclude include/lib.h
+```
+
+The model reads the header, not the implementation. The specs include only
+the header and call only the public API, which is what a caller can do. The
+implementation is linked (`-lib`) into the model, the replay and the
+fuzzer; `-cflags` are passed to every compilation. A violation whose
 undefined behaviour is in a spec's own body (its arithmetic on its
 parameters) is the spec's error, `ub_in_spec`, not a finding; the agent
 gets those reports and one round to fix the specs. `-fuzztime` also runs

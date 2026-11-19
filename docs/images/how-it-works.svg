@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="490" viewBox="0 0 1200 490" role="img" aria-labelledby="title desc">
-  <title id="title">go2lean: specs, models, and real Go replay</title>
-  <desc id="desc">Humans or an optional agent write Go specs, which compile alongside Go source into a Lean model. Built-in specs, such as no-panic checks, enter search directly. Search produces candidate inputs, which are replayed with go test and classified as confirmed, spurious, or inconclusive. No counterexample found is not a proof of correctness.</desc>
+  <title id="title">go2lean: specs, models, and real replay for Go and C</title>
+  <desc id="desc">Humans or an optional agent write specs in Go or C, which compile alongside Go source (through go/ssa) or C source (through LLVM IR) into one Lean model. Built-in specs, such as no-panic checks, enter search directly. Search produces candidate inputs, which are replayed as real code (go test for Go, a C program under AddressSanitizer for C) and classified as confirmed, spurious, or inconclusive. No counterexample found is not a proof of correctness.</desc>
   <!-- Shared with banner.svg: warm paper, sage, terracotta, slate blue. -->
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="m1 1 7 4-7 4" fill="none" stroke="#8a9985" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
@@ -14,8 +14,8 @@
     <g text-anchor="middle">
       <text x="150" y="98" font-size="19" font-weight="600" fill="#ac644a">Human / Agent</text>
       <text x="150" y="124" font-size="15" fill="#6d6f63">writes business rules</text>
-      <text x="440" y="98" font-family="Georgia, 'Times New Roman', serif" font-size="25" fill="#ac644a">Go specs</text>
-      <text x="440" y="124" font-size="15" fill="#6d6f63">func Spec(...) bool</text>
+      <text x="440" y="98" font-family="Georgia, 'Times New Roman', serif" font-size="25" fill="#ac644a">Go / C specs</text>
+      <text x="440" y="124" font-size="15" fill="#6d6f63">Spec(...) → bool</text>
       <text x="730" y="98" font-family="Georgia, 'Times New Roman', serif" font-size="25" fill="#66785e">Built-in specs</text>
       <text x="730" y="124" font-size="15" fill="#6d6f63">e.g. no_panic</text>
     </g>
@@ -23,6 +23,13 @@
       <path d="M246 93H358" stroke="#bf795c" marker-end="url(#spec-arrow)"/>
       <path d="M440 140V207" stroke="#bf795c" marker-end="url(#spec-arrow)"/>
       <path d="M730 140V207" stroke="#8a9985" marker-end="url(#arrow)"/>
+    </g>
+    <!-- The two front ends: Go through go/ssa, C through LLVM IR. -->
+    <g font-size="14" font-weight="600" text-anchor="middle">
+      <rect x="78" y="170" width="46" height="24" rx="12" fill="#f0dbcd"/>
+      <text x="101" y="187" fill="#ac644a">Go</text>
+      <rect x="132" y="170" width="104" height="24" rx="12" fill="#dfe5d9"/>
+      <text x="184" y="187" fill="#43594c">C / LLVM IR</text>
     </g>
     <!-- Code: offset paper sheets with a small highlighted expression. -->
     <g stroke="#9aa68d" stroke-width="1.5" stroke-linejoin="round">
@@ -74,15 +81,15 @@
       <path d="M807 272H943"/>
     </g>
     <g text-anchor="middle" font-size="14" fill="#6d6f63">
-      <text x="295" y="257">go/ssa → IR</text>
+      <text x="295" y="257">go/ssa · LLVM IR</text>
       <text x="585" y="257">model + specs</text>
       <text x="875" y="246">candidate</text><text x="875" y="264">inputs</text>
     </g>
     <g text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="28">
-      <text x="150" y="374" fill="#ac644a">Go source</text>
+      <text x="150" y="374" fill="#ac644a">Go · C source</text>
       <text x="440" y="374" fill="#66785e">Lean model</text>
       <text x="730" y="374" fill="#66785e">Search</text>
-      <text x="1020" y="374" fill="#607e8a">Go replay</text>
+      <text x="1020" y="374" fill="#607e8a">Real replay</text>
     </g>
     <g text-anchor="middle" font-size="16" fill="#6d6f63">
       <text x="150" y="403">Target functions</text>
