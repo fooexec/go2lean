@@ -29,6 +29,9 @@ type Options struct {
 	Search      constraint.SearchOptions
 	MaxRepairs  int // rounds spent fixing specs the frontend rejected
 	ReportRound bool
+	// SpecsOnly searches only the properties of the specs the agent wrote,
+	// not the package's built-in ones (several hundred on a large package).
+	SpecsOnly bool
 	// Guidance is extra text for the proposal round: known bug classes,
 	// invariants from the issue tracker, functions to focus on.
 	Guidance string
@@ -191,7 +194,7 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 		}
 	}
 
-	res, err := runRest(ws, env, report, spec, opts.Search, out)
+	res, err := runRest(ws, env, report, spec, opts.Search, opts.SpecsOnly, out)
 	if err != nil {
 		return err
 	}
@@ -224,14 +227,14 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 		if _, report, err = install(revised); err != nil {
 			return err
 		}
-		if _, err := runRest(ws, env, report, revised, opts.Search, out); err != nil {
+		if _, err := runRest(ws, env, report, revised, opts.Search, opts.SpecsOnly, out); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runRest(ws contract.Workspace, env pipeline.Env, report *contract.ModelReport, spec string, so constraint.SearchOptions, out io.Writer) (*pipeline.Result, error) {
+func runRest(ws contract.Workspace, env pipeline.Env, report *contract.ModelReport, spec string, so constraint.SearchOptions, specsOnly bool, out io.Writer) (*pipeline.Result, error) {
 	fmt.Fprintln(out, "== Spec & search stage: properties")
 	props, err := pipeline.Propose(ws, report, out)
 	if err != nil {
@@ -261,6 +264,9 @@ func runRest(ws contract.Workspace, env pipeline.Env, report *contract.ModelRepo
 	res := &pipeline.Result{Report: report, Properties: props}
 	var cxs []*contract.Counterexample
 	for _, p := range props {
+		if specsOnly && p.Source != "agent" {
+			continue // the built-in properties of the package are not searched
+		}
 		cx, err := pipeline.Hunt(ws, env, p, so, out)
 		if errors.Is(err, pipeline.ErrStoppedForMemory) {
 			continue // reported in its line; -resume searches it again

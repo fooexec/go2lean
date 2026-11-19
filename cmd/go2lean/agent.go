@@ -26,6 +26,7 @@ func cmdAgent(args []string) error {
 	repairs := fs.Int("repairs", 2, "rounds spent repairing specs the frontend rejected")
 	report := fs.Bool("report", true, "ask the agent for a report (and possibly revised specs) after the verdicts")
 	guidance := fs.String("guidance", "", "file with guidance for the proposal round (bug classes, invariants, functions to target)")
+	specsOnly := fs.Bool("specs-only", false, "search only the properties of the specs the agent wrote, not the package's built-in ones")
 	specFile := fs.String("spec-file", "", "name of the spec file the agent writes in the package (default go2lean_specs_test.go)")
 	// On by default: specs drive the code under test through its
 	// dependencies (an SDK's decoders and accessors), and a guessed result
@@ -91,6 +92,6 @@ func cmdAgent(args []string) error {
 		return err
 	}
 	return agent.Run(context.Background(), w, env, fs.Arg(0), llm, agent.Options{
-		Search: opts.get(), MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, SpecFile: *specFile, FuzzTime: *fuzzTime,
+		Search: opts.get(), MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, SpecsOnly: *specsOnly, SpecFile: *specFile, FuzzTime: *fuzzTime,
 	}, os.Stdout)
 }
