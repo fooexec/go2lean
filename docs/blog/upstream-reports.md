@@ -514,7 +514,8 @@ semantics and replays each finding as a `go test`.
 
 **Body:**
 
-On v2 (v2.52.16 and the `v2` branch at `9407e6e`),
+On v2 (v2.52.16, released on 2026-10-23, and the `v2` branch at `9407e6e`,
+whose last commit is that release),
 `proxy.BalancerForward(nil)` or `BalancerForward([]string{})` returns a
 handler without complaint. That handler's first request panics with
 `integer divide by zero` in `roundrobin.get`:
@@ -918,7 +919,7 @@ semantics and replays each finding as a `go test`.
 
 **Title:** stb_image: signed integer overflow in the scalar JPEG IDCT (`stbi__idct_block`)
 
-On `master` (`9600522`) and `dev` (`3db7872`), a crafted 200-byte baseline
+On `master` (`9600522`) and `dev` (`98bc640`), a crafted 200-byte baseline
 JPEG overflows `int` in the second (horizontal) pass of
 `stbi__idct_block`, which is undefined behaviour in C. The SIMD IDCT is
 not affected: its 16-bit arithmetic wraps by definition. So the overflow
@@ -974,7 +975,7 @@ and replays each finding as a C program under the sanitizers.
 
 **Title:** stb_image: PSD matte removal converts a negative float to `unsigned char` (UB)
 
-On `master` (`9600522`) and `dev` (`3db7872`), loading a 56-byte PSD with
+On `master` (`9600522`) and `dev` (`98bc640`), loading a 56-byte PSD with
 four channels and raw pixel data is undefined behaviour in the "remove
 weird white matte" step of `stbi__psd_load`:
 
@@ -1016,7 +1017,7 @@ and replays each finding as a C program under the sanitizers.
 
 **Title:** URI.Path() is not idempotent: a doubly percent-encoded dot segment re-parses to a path traversal
 
-On `master` (`7b1ac76`), `URI.Path()` is not idempotent: parsing the path
+On `master` (`7b1ac76`; its `go.mod` needs Go 1.26 or later), `URI.Path()` is not idempotent: parsing the path
 it returns a second time changes it, and a doubly percent-encoded dot
 segment becomes a `..` traversal on the second parse.
 

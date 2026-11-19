@@ -59,6 +59,26 @@ a tag and its notes; there are no binaries to build.
    GOFLAGS=-mod=mod go install github.com/fooexec/go2lean/cmd/go2lean@vX.Y.Z
    ```
 
+## Before the drafts are filed
+
+The upstream report drafts (docs/blog/upstream-reports.md) are filed by the
+maintainer, some days after they were written. Check them the day they are
+filed, and whenever a release goes out:
+
+1. For each draft, compare the commit it names with the project's current
+   default branch: `git ls-remote <repo> HEAD`. Most do not move.
+2. For a draft whose project moved, run its reproduction on the new head,
+   from the draft's own code block, not retyped. A defect fixed upstream is
+   dropped from the draft list (and noted in [findings](../findings.md)).
+3. A draft that names a branch (fiber's `v2`) is compared on that branch, and
+   says whether the branch is still released.
+4. Write down the date and the commit it was re-run on; do not rewrite the
+   commit the finding was first made on.
+
+Last checked on 2026-11-19: 15 drafts, none fixed upstream. Moved since they
+were written: go-retryablehttp (a Go version bump only), stb `dev`, and
+grpc-go; their reproductions were run again and still fail the same way.
+
 ## What a release says
 
 Four parts, as in [v0.1.2](https://github.com/fooexec/go2lean/releases/tag/v0.1.2):
