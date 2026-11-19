@@ -32,6 +32,11 @@ asks for disclosure and for a report in the reporter's own words.
 | `quicvarint` | 7 (round trips, length, parse agreement) | held | held, 2.3M to 3.0M runs each |
 | `http3`, round 1 (RFC 9114 rules, request round trip) | 8 | 2 counterexamples, both spurious (the model chose `Header.Get` and `CanonicalMIMEHeaderKey`) | held, 1.1M to 1.8M runs each |
 | `http3`, round 2 (history and the QPACK advisory) | 7 | 3 counterexamples, all spurious | **3 specs violated**, 3 held (size limits, trailers, plain CONNECT with a port) |
+| `internal/protocol` (packet numbers against RFC 9000 A.3 and its example, stream IDs, connection IDs, versions) | 29 | held | held, 1.1M to 5.4M runs each |
+| `internal/utils` (RTT estimator against RFC 9002 5.3 and A.7, PTO) | 4 | held | held, 1.5M to 2.2M runs each |
+| `internal/congestion` (Reno window against RFC 9002 7, pacer, hybrid slow start) | 4 | held | held, 1.8M to 2.5M runs each |
+| `internal/wire` (frame round trips and lengths, ACK ranges, transport parameters, headers) | 40 | held | 38 held; 2 violated, both specs' own (below) |
+| root package (frame sorter against a byte array, stream flow control, token store) | 4 | held | held, 1.5M to 1.6M runs each |
 
 The three violations of round 2 are all inputs quic-go accepts and the RFC
 rules out (reproduced by hand on `a02d451`, with the same field sent to
@@ -50,6 +55,14 @@ rules out (reproduced by hand on `a02d451`, with the same field sent to
    `net/http` gives `text/html`. RFC 9110 section 5.5 says a recipient
    excludes it before evaluating the value. RFC 9114 does not repeat the
    rule, so this one is a reading of the RFC.
+
+The two `internal/wire` violations are not defects. One is a transport
+parameters default check that the agent revised after the fuzzer had run on
+the first version (in real Go the defaults are the RFC's). The other is
+`MaybeSplitOffFrame` panicking on more than 1452 bytes of data, the size of
+the pool buffer it splits into; callers pass at most one packet of data, so
+the API cannot reach it, and the agent's revised spec states that
+precondition.
 
 **Severity: low**, all three. Each needs a peer that sends an unusual
 field, none is a memory or crash problem, and the effect is that an
