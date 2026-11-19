@@ -469,19 +469,35 @@ Severity is our own reading. Mostly in other people's code.
 
 ---
 
-## The one new high
+## The one new high: beego filter bypass
 
 <div class="callout danger">
-<p>An access-control bypass in a popular Go web framework's route filters.</p>
+<p>With <code>RouterCaseSensitive = false</code>, a guard filter whose pattern has capitals never runs.</p>
 </div>
 
-<ul>
-<li>Found by an advisory-guided spec, then reproduced by hand</li>
-<li>A private report is drafted and not yet filed</li>
-<li><b>Details are withheld here</b> until the project has had its chance</li>
-</ul>
+<div class="two">
+<div class="card">
 
-<div class="source">Security issues go through the project's private channel, never a public issue.</div>
+### What happens
+
+- `InsertFilter("/Admin/*", ...)`
+- `GET /Admin/panel` returns **200, served unguarded**
+- Same code with case-sensitive routing: 403
+- Default config and lowercase patterns are not affected
+
+</div>
+<div class="card">
+
+### Why
+
+- `newFilterRouter` lowercases the pattern for its field
+- but builds the match tree from the **original** pattern
+- routes and request paths are lowercased, so the tree never matches
+
+</div>
+</div>
+
+<p class="small">beego master 939cfde. Same class as CVE-2021-30080. Private report drafted, not filed. Internal only until disclosure.</p>
 
 ---
 
