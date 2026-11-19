@@ -94,3 +94,13 @@ specs.
 
 The new defects are listed with all others in [findings](../findings.md),
 and their reports wait in [upstream reports](../blog/upstream-reports.md).
+
+## Drafting an entry from an advisory
+
+`go2lean advisory GHSA-xxxx-xxxx-xxxx` fetches the advisory from OSV and
+asks the LLM for an entry in this format: a general property, its threat
+model, an oracle that does not use the package's own code, the pieces
+inputs are built from, and the pitfalls. It never writes the trigger. A
+draft is a starting point: read it, then check it as the pipeline plan
+(#287) says, on the version before the fix (it must be violated) and on
+the fix (it must hold).

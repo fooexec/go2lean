@@ -40,6 +40,8 @@ func main() {
 		err = cmdRank(os.Args[2:])
 	case "agent":
 		err = cmdAgent(os.Args[2:])
+	case "advisory":
+		err = cmdAdvisory(os.Args[2:])
 	case "fuzz":
 		err = cmdFuzz(os.Args[2:])
 	case "prove":
@@ -77,6 +79,7 @@ func usage() {
                                                   state functional theorems (wpFun contracts) and prove them
   go2lean rank    [-workspace out]                 order confirmed verdicts by how plausible their input is (tiers 1-4)
   go2lean summary [-workspace out]                 all verdicts and proofs of a workspace as Markdown
+  go2lean advisory [-o file] <GHSA-id|CVE-id>      draft a catalog property from an advisory (OSV)
   go2lean agent   [-workspace out] [-llm claude|mock:<file>] <package>
                                                   agent: propose spec-in-Go properties, run, report
   go2lean llvm    [-workspace out] <file.c|.ll|.bc> C / LLVM IR: model every function, search for UB,
