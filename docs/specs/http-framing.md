@@ -48,3 +48,7 @@ chunk sizes with extensions and with signs.
   rejects, or reads another length.
 - Compare bytes consumed, not only the parsed values: two parsers can agree
   on every field and still disagree on where the message ends.
+- Call `net/http.ReadRequest` in the spec when the package's dependencies
+  allow it, and compare what it returns. A reference re-written from the
+  RFC is usually stricter than `net/http`, and the spec then fails on
+  messages both parsers accept (the first run, `docs/eval/http-framing.md`).
