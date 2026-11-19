@@ -49,6 +49,9 @@ type Options struct {
 	// was exhausted (which covers small inputs only), its violation did
 	// not reproduce, or the search failed. 0 does not fuzz.
 	Fuzz time.Duration
+	// FuzzConfirmed also fuzzes a function whose violation the replay
+	// confirmed, to compare what the fuzzer finds with the model's finding.
+	FuzzConfirmed bool
 	// Memory looks for memory errors only (CVE-class: out-of-bounds
 	// reads and writes, use after free, double free): signed arithmetic
 	// wraps (-fwrapv) in the model, the replay and the fuzzer, and they
@@ -298,7 +301,7 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 		}
 		// The model's violation did not hold in the real program (it
 		// rested on unmodelled code): the fuzzer looks on the real one.
-		if v.Status != contract.VerdictConfirmed {
+		if v.Status != contract.VerdictConfirmed || opts.FuzzConfirmed {
 			if err := fuzzLog(ws, src, key, fn, opts, log); err != nil {
 				return err
 			}
