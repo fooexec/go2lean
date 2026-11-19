@@ -1,0 +1,12 @@
+[
+ {
+  "func": "DecodePacketNumber",
+  "name": "DecodePN_congruent_in_range",
+  "post": "(1 ≤ length.toNat ∧ length.toNat ≤ 4 ∧ 0 ≤ truncated.toInt ∧ truncated.toInt < 2 ^ (8 * length.toNat) ∧ -1 ≤ largest.toInt ∧ largest.toInt < 2 ^ 62 - 1) → ∃ r, ret = .int 64 r ∧ 0 ≤ r.toInt ∧ r.toInt < 2 ^ 62 ∧ r.toInt % 2 ^ (8 * length.toNat) = truncated.toInt"
+ },
+ {
+  "func": "DecodePacketNumber",
+  "name": "DecodePN_in_half_window",
+  "post": "(1 ≤ length.toNat ∧ length.toNat ≤ 4 ∧ 0 ≤ truncated.toInt ∧ truncated.toInt < 2 ^ (8 * length.toNat) ∧ -1 ≤ largest.toInt ∧ largest.toInt < 2 ^ 62 - 1) → ∃ r, ret = .int 64 r ∧ (largest.toInt + 1 - 2 ^ (8 * length.toNat) / 2 < r.toInt ∨ 2 ^ 62 - 2 ^ (8 * length.toNat) ≤ r.toInt) ∧ (r.toInt ≤ largest.toInt + 1 + 2 ^ (8 * length.toNat) / 2 ∨ r.toInt < 2 ^ (8 * length.toNat))"
+ }
+]
