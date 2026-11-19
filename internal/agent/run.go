@@ -162,6 +162,12 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 	// fails on every version, fixed ones too. It goes back to the agent with
 	// the failing input, as a spec the frontend rejected does.
 	for round := 0; round < opts.MaxRepairs; round++ {
+		// The specs become properties in the workspace, which the fuzz
+		// export reads.
+		if _, perr := pipeline.Propose(ws, report, io.Discard); perr != nil {
+			fmt.Fprintf(out, "  seed check: %v\n", perr)
+			break
+		}
 		results, _, ferr := fuzzexport.Run(ws, moduleDir, pkgPath, fuzzexport.Options{FuzzTime: time.Second})
 		if ferr != nil {
 			fmt.Fprintf(out, "  seed check: %v\n", ferr)
