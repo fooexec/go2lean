@@ -108,6 +108,10 @@ On [stb_image](../docs/eval/stb-image.md) they find:
 - a signed overflow in the scalar JPEG IDCT that the project's own fuzzers
   do not reach;
 - with libFuzzer on the specs the model did not settle, two more defects.
+
+Three more C parsers (json-parser, parson, lcms2) came back
+[clean](../docs/eval/c-clean-results.md), with the reasons and what to
+pick next.
 An [audit of the standard library](../docs/eval/std-audit.md) measures the
 compile stage on all of its 165 public packages: 71.4% of its functions
 translate completely, 3.4% are held back by Go the model does not cover
