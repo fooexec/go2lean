@@ -152,6 +152,7 @@ The small pieces inputs are built from, so that a search can combine them: chara
 How a spec for this property goes wrong for the wrong reason (comparing exact formats, stricter-than-reference implementations, missing preconditions).
 
 Rules:
+- State the property by what the victim or the system observes (the harm), not by the mechanism the advisory names. A property about "the Host header" misses the next advisory in the family, which uses another input to reach the same harm; "the redirect lands on another site, as a browser resolves it" does not. Say which mechanisms the advisory names only inside Inputs, as classes of input pieces, together with the other classes that reach the same harm.
 - State the property in general terms. Never write the advisory's trigger or any input that violates it, and do not name the advisory's project, function or file.
 - The property must hold for the fixed version and fail for the vulnerable one; do not restrict it to the vulnerable version.
 - If the advisory is not a property that can be checked by running code (a build, configuration or documentation issue), answer with the single line "NOT CHECKABLE: <reason>".`
