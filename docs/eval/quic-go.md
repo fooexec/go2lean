@@ -85,6 +85,49 @@ reads the same message differently (an HTTP/3 front end that forwards the
 field to a server, a CONNECT proxy that dials `r.Host`). The drafts are in
 [upstream reports](../blog/upstream-reports.md).
 
+## Advisories of other QUIC and HTTP/3 implementations (2026-11-20)
+
+quic-go's own eight advisories were already in the specs above. The other
+implementations have more: 25 advisories on OSV for `quinn-proto` (13),
+`quiche` (5), `s2n-quic` (4) and Netty's HTTP/3 codec (4; none for
+aioquic, msquic, neqo or h3). `go2lean advisory` drafted each as a general
+property, and the drafts were grouped by the quic-go component they apply
+to and given to `go2lean agent -specs-only` as guidance
+([connection state](../specs/quic-resource-bounds.md),
+[datagram, framer, paths, Retry, transport parameters](../specs/quic-resource-bounds-2.md),
+[HTTP/3 decoder](../specs/http3-decoder-bounds.md)). A connection cannot be
+built inside a spec, so each property was stated on the component that owns
+the state.
+
+| class (advisory examples) | quic-go component | result |
+|---|---|---|
+| out-of-order stream data memory, zero-length frames (quinn GHSA-4w2j, RUSTSEC-2026-0341/0338) | frame sorter, receive stream, flow control | held, 0.6M runs each |
+| frames that name a stream must not open streams past the limit (RUSTSEC-2026-0523, s2n GHSA-475v) | incoming streams map | held; also read by hand: `getSendStream` checks `StreamLimitError` |
+| connection ID retirement floods and loops (quiche GHSA-xhg9, GHSA-m3hh; quinn RUSTSEC-2026-0339) | connection ID generator and manager | held |
+| CRYPTO frame floods (quiche GHSA-78wx) | crypto stream buffer | held |
+| zero-length and flooding DATAGRAM frames, send accounting (RUSTSEC-2026-0342/0343) | datagram queue | held, 1.0M to 1.5M runs |
+| unbounded PATH_CHALLENGE and PATH_RESPONSE state (quiche GHSA-w3vp) | framer, path manager | held |
+| Netty: frame length, QPACK literal, reserved frame types, default header limit | http3 frame reading and header block | 1 latent defect (below), rest held |
+
+What came out of it:
+
+- **No defect a caller can reach.** quic-go's own history (CVE-2024-22189
+  and the others) already closed these classes, and the specs agree.
+- `http3.readHeaderBlock` treats a declared length of 2^63 or more as a
+  successful empty read (`int64(length)` wraps to -1 and `io.CopyN` with a
+  negative count copies nothing). Every caller rejects lengths above
+  `maxHeaderBytes` first, so it is latent; a note, not a report.
+- `http3.ErrCode.String` prints only the low 16 bits of an unknown code.
+  Cosmetic.
+- `findSNIAndECH` tests `sniPos == 0` where it means `-1`, so an SNI
+  extension with no `host_name` entry is not an error; a client built on
+  Go's `crypto/tls` never sends one. Cosmetic.
+- The Go fuzzer reported one spec violated (the MTU finder's lost-probe
+  array staying sorted) that could not be reproduced by hand on the inputs
+  it printed; the MTU finder is an internal heuristic with no RFC rule, so
+  it is left open. The second round of the agent was cut short by the
+  environment, so its revised specs were fuzzed by hand.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five

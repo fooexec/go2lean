@@ -16,6 +16,12 @@ the threat model, never an input that breaks it, so it does not lead the
 agent to a known answer. What each run found is in the table below and in
 [advisory specs](../eval/cve-specs.md).
 
+QUIC and HTTP/3 resource bounds, transferred from other implementations'
+advisories (quinn, quiche, s2n-quic, Netty): [stream and connection
+state](quic-resource-bounds.md), [datagrams, framer, paths, Retry,
+transport parameters](quic-resource-bounds-2.md), [HTTP/3
+decoders](http3-decoder-bounds.md). Results in [quic-go](../eval/quic-go.md).
+
 ## Layers
 
 A property belongs to one of three layers:
