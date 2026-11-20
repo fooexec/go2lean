@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -595,6 +596,11 @@ func CheckGoals(leanDir, module string, f *File, goals []Goal, budget time.Durat
 		switch {
 		case ax == "":
 			r.Error = "not checked: " + firstError(text)
+		case ax == "none" && hasLeanError(text):
+			// A timeout (a runtime exception) leaves a declaration with no axiom
+			// at all, and an error in the text: not accepted (the judge's own
+			// build of it failed the same way).
+			r.Error = "not proved: " + firstError(text)
 		case strings.Contains(ax, "sorryAx") && !strings.Contains(text, "error"):
 			r.Error = "not proved: it uses sorry"
 		case strings.Contains(ax, "sorryAx"):
@@ -612,6 +618,14 @@ func CheckGoals(leanDir, module string, f *File, goals []Goal, budget time.Durat
 	}
 	return rs, text, nil
 }
+
+// hasLeanError says whether Lean's output holds an error message
+// ("file:line:col: error: ..." or "error(lean.name): ...").
+func hasLeanError(text string) bool {
+	return errorLineRe.MatchString(text)
+}
+
+var errorLineRe = regexp.MustCompile(`(?m):\d+:\d+: error[:(]`)
 
 // dependsOnItself reports whether what axiomsOf read lists the theorem
 // name itself.

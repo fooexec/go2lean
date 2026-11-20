@@ -43,3 +43,17 @@ func TestAcceptedWithoutNanoda(t *testing.T) {
 		}
 	}
 }
+
+func TestHasLeanError(t *testing.T) {
+	for log, want := range map[string]bool{
+		"Check_0.lean:21:0: error: (deterministic) timeout at `whnf`, maximum number of heartbeats (4000000) has been reached": true,
+		"Check_0.lean:27:3: error(lean.unknownIdentifier): Unknown identifier `x`":                                             true,
+		"Check_0.lean:20:8: warning: declaration uses `sorry`":                                                                 false,
+		"'X' does not depend on any axioms":                                                                                    false,
+		"":                                                                                                                     false,
+	} {
+		if got := hasLeanError(log); got != want {
+			t.Errorf("hasLeanError(%q) = %v, want %v", log, got, want)
+		}
+	}
+}
