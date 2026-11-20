@@ -358,6 +358,10 @@ type ProofCertificate struct {
 	SolutionSHA256  string   `json:"solution_sha256"`
 	Axioms          []string `json:"permitted_axioms"`
 	Judge           string   `json:"judge"`
+	// Unrun names the external checkers that did not run to the end, and why,
+	// when the judge accepted the proof without them: nanoda killed for memory
+	// (exit 137) while every other checker accepted. Empty when all ran.
+	Unrun []string `json:"unrun_checkers,omitempty"`
 	// Sandbox is "bwrap", or "off" when GO2LEAN_LEAN_SANDBOX=off.
 	Sandbox string `json:"sandbox"`
 	Dir     string `json:"dir"` // the judge's project: run Judge there again

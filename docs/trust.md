@@ -158,7 +158,16 @@ A theorem is accepted only if all three hold:
 3. Lean's kernel, and with `-paranoid` every bundled checker, accepts the
    exported environment when replayed from scratch. That catches
    `debug.skipKernelTC`, and declarations added by a metaprogram without
-   the kernel.
+   the kernel. One exception, decided for a host with 16 GB: nanoda needs
+   more than 13 GB for a proof of some 6,000 declarations (the packet number
+   decoder's shape, #291), and the out-of-memory killer ends it (exit 137).
+   When that is the only fault, every other checker ran and accepted (Lean's
+   paranoid and default kernels, lean4lean, con-leche, con-ron), the proof
+   is accepted, and the certificate's `unrun_checkers` says that nanoda did
+   not run, which `go2lean prove` also prints after the goal. A rejection by
+   any checker, a timeout, another exit code, or a second error is still a
+   rejection (`acceptedWithoutNanoda`, `judge_nanoda_test.go`). On a host
+   with the memory, nanoda runs and the field is empty.
 
 Several goals are judged together. If one is rejected, each is judged
 again in order, with the accepted ones before it, because a later proof may
@@ -173,6 +182,8 @@ judge's directory and in the proof record. It holds:
   and the solution;
 - the permitted axioms;
 - the judge command and the sandbox mode;
+- `unrun_checkers`, when a checker did not run to the end and the proof
+  was accepted without it (only nanoda killed for memory, see above);
 - the directory to run `lake comparator` in again.
 
 ## Evidence

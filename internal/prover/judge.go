@@ -89,28 +89,34 @@ func Judge(in JudgeInput) (map[int]*Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	// All at once; on a rejection, one at a time, each with the accepted
-	// ones before it (a later goal's proof may use them as contracts).
-	ok, err := judgeRun(in, in.Candidates, in.Candidates, cert)
+	// All at once, without the allowance for a nanoda killed for memory: a
+	// batch with one proof too big for nanoda would otherwise go through
+	// without nanoda checking any of the others. On a rejection, one at a
+	// time, each with the accepted ones before it (a later goal's proof may
+	// use them as contracts); only then is a nanoda killed for memory allowed,
+	// and the certificate of that goal alone says so.
+	ok, _, err := judgeRun(in, in.Candidates, in.Candidates, cert, false)
 	if err != nil {
 		return nil, err
 	}
+	unrun := map[int][]string{}
 	if !ok {
 		fmt.Fprintf(in.Log, "judge: not all %d candidates accepted, judging one at a time\n", len(in.Candidates))
 		var accepted []int
 		for _, i := range in.Candidates {
-			ok, err := judgeRun(in, append(append([]int{}, accepted...), i), []int{i}, cert)
+			ok, note, err := judgeRun(in, append(append([]int{}, accepted...), i), []int{i}, cert, true)
 			if err != nil {
 				return nil, err
 			}
 			if ok {
 				accepted = append(accepted, i)
+				unrun[i] = note
 			}
 		}
 		in.Candidates = accepted
 		if len(accepted) > 0 {
 			// The files left in Dir are the ones the certificates name.
-			if ok, err := judgeRun(in, accepted, accepted, cert); err != nil || !ok {
+			if ok, _, err := judgeRun(in, accepted, accepted, cert, true); err != nil || !ok {
 				return nil, fmt.Errorf("judge: the accepted goals were rejected together (%v)", err)
 			}
 		}
@@ -120,6 +126,7 @@ func Judge(in JudgeInput) (map[int]*Certificate, error) {
 	chal, _ := os.ReadFile(filepath.Join(in.Dir, "Challenge.lean"))
 	for _, i := range in.Candidates {
 		c := *cert
+		c.Unrun = unrun[i]
 		c.Theorem = Namespace(in.Report) + "." + TheoremName(in.Goals[i])
 		c.Func = in.Goals[i].Func
 		st, _ := statement(in.ABIs[i], in.Fids[i], TheoremName(in.Goals[i]), in.Goals[i].Post, "_root_."+in.Report.LeanModule+".prog", in.Goals[i].Empty)
@@ -342,7 +349,7 @@ func copyTree(src, dst string) error {
 // judgeRun writes a solution with the proofs of the goals in proved (the
 // others sorry) and a challenge with the statements of those in judged,
 // and runs the comparator on them.
-func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, error) {
+func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate, allowNoNanoda bool) (bool, []string, error) {
 	sorried := map[int]bool{}
 	keep := map[int]bool{}
 	for _, i := range proved {
@@ -355,11 +362,11 @@ func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, err
 	}
 	sol, err := SolutionText(in.Report, in.Goals, in.ABIs, in.Fids, sorried)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	chal, err := ChallengeText(in.Report, in.Goals, in.ABIs, in.Fids, judged)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	var names []string
 	for _, i := range judged {
@@ -373,7 +380,7 @@ func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, err
 	}, "", "  ")
 	for name, text := range map[string][]byte{"Solution.lean": []byte(sol), "Challenge.lean": []byte(chal), "comparator.json": cfg} {
 		if err := writeFile(filepath.Join(in.Dir, name), text); err != nil {
-			return false, err
+			return false, nil, err
 		}
 	}
 	args := judgeCommand(in.Paranoid)
@@ -384,10 +391,61 @@ func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, err
 	out, err := judgeCmd(in.Dir, in.Budget, args...)
 	_ = os.WriteFile(filepath.Join(in.Dir, "judge.log"), []byte(out), 0o644)
 	if err != nil {
+		if note, ok := acceptedWithoutNanoda(out); ok && allowNoNanoda {
+			fmt.Fprintf(in.Log, "judge: accepted without nanoda: %s\n", note)
+			return true, []string{note}, nil
+		}
 		fmt.Fprintf(in.Log, "judge: rejected: %s\n", lastLines(out, 6))
-		return false, nil
+		return false, nil, nil
 	}
-	return true, nil
+	return true, nil, nil
+}
+
+// acceptedWithoutNanoda says whether a rejected paranoid run is rejected only
+// because nanoda was killed for lack of memory: nanoda exited with 137 (a
+// SIGKILL, what the cgroup's out-of-memory killer sends), and every other
+// checker that ran accepted the solution, among them Lean's own two kernels.
+// Any other error, a rejection by another checker, a timeout, or a missing
+// acceptance is a rejection. nanoda needs more than 13 GB for a proof of some
+// 6,000 declarations, which a 16 GB host does not have (#291).
+func acceptedWithoutNanoda(out string) (string, bool) {
+	const killed = "error: nanoda exited with 137"
+	var errs, rejected int
+	running := map[string]bool{}
+	accepted := map[string]bool{}
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(l, "error:"):
+			errs++
+			if l != killed {
+				return "", false
+			}
+		case strings.HasPrefix(l, "Running ") && strings.HasSuffix(l, " on solution"):
+			running[strings.TrimSuffix(strings.TrimPrefix(l, "Running "), " on solution")] = true
+		case strings.HasSuffix(l, " accepts the solution"):
+			accepted[strings.TrimSuffix(l, " accepts the solution")] = true
+		case strings.HasSuffix(l, " rejected the solution"):
+			rejected++
+			if l != "nanoda kernel rejected the solution" {
+				return "", false
+			}
+		}
+	}
+	if errs != 1 || rejected != 1 || !running["nanoda kernel"] {
+		return "", false
+	}
+	for _, need := range []string{"Lean paranoid kernel", "Lean default kernel"} {
+		if !accepted[need] {
+			return "", false
+		}
+	}
+	for k := range running {
+		if k != "nanoda kernel" && !accepted[k] {
+			return "", false
+		}
+	}
+	return "nanoda: killed for lack of memory (exit 137); every other checker accepted", true
 }
 
 // JudgeError is the first error of the judge's last run in dir.
