@@ -42,7 +42,12 @@ macro_rules
     let n ← match n with
       | some n => pure n
       | none => `(n)
-    `(tactic| (apply wpPtN_step $hf rfl; intro $n:ident hn; subst hn; wp_simp [$fs,*]))
+    -- The goal must be a `wpPtN` at reducible transparency first: `apply` on
+    -- another goal (a `match` on a comparison, say) would otherwise `whnf` it at
+    -- default transparency, which unfolds `BitVec.slt c (K - h)` down to
+    -- `Nat.add _ K`, recursing on the literal `K` one `succ` at a time (#291).
+    `(tactic| (with_reducible show wpPtN _ _ _ _ _ _ _ _
+               apply wpPtN_step $hf rfl; intro $n:ident hn; subst hn; wp_simp [$fs,*]))
 
 syntax "wp_auto " term:max (" [" term,* "]")? (" using " term,+)? : tactic
 macro_rules
