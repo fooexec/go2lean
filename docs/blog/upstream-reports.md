@@ -1114,3 +1114,31 @@ parse for an empty string. All three are low impact; the first matters if
 another hop frames the message by that field. Found by property specs
 written from the RFCs and the project's validation history, run under
 `go test -fuzz`.
+
+---
+
+## quic-go: reserved HTTP/2 SETTINGS identifiers accepted (draft, 2026-11-20)
+
+*Draft for a human to rewrite and file; quic-go's AI-POLICY applies. Found
+on master `90eebba`.*
+
+**Title:** http3: SETTINGS with a reserved HTTP/2 identifier is not rejected
+
+RFC 9114 section 7.2.4.1: setting identifiers defined in HTTP/2 with no
+HTTP/3 counterpart (0x00, 0x02, 0x03, 0x04, 0x05) are reserved, and their
+receipt MUST be treated as a connection error of type H3_SETTINGS_ERROR.
+`parseSettingsFrame` (`http3/frames.go`) sends them to the `default:` branch,
+which stores them in `settingsFrame.Other`.
+
+```go
+// inside package http3
+b := quicvarint.Append(nil, 0x4)                       // SETTINGS
+b = quicvarint.Append(b, 2)                            // length
+b = append(b, 0x02, 0x01)                              // id 0x02, value 1
+fp := frameParser{r: bytes.NewReader(b)}
+_, err := fp.ParseNext(nil)                            // err == nil
+```
+
+Suggested: `case 0x0, 0x2, 0x3, 0x4, 0x5:` returning an error before
+`default:`. Also, `handleControlStream` maps parse errors to
+`H3_FRAME_ERROR`; this one should be `H3_SETTINGS_ERROR`. Low impact.
