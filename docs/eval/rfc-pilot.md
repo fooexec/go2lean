@@ -47,10 +47,17 @@ prove them:
   large constant (1000 is fine, 2^32 is not): `wp_step`'s `apply` `whnf`s a
   `match` on `BitVec.slt c (K - h)` and counts `K` down one `succ` at a
   time. Found with Lean's diagnostics and fixed (`wp_bounded`, #291);
-- what is left is the Lean kernel, which stops with "deep recursion" on the
-  proof term of a function with a 64-bit constant of 2^32 or more, with the
-  same proof as the one that works for 1000. The decoder compares with
-  `1<<62 - win`, so the packet number goal is open on that (#291).
+- the Lean kernel stopped with "deep recursion" on a proof term with a numeral
+  of 2^32 or more next to a variable, with the same proof as the one that
+  works for 1000: a known kernel behaviour (lean4#7386, lean4#8898), which
+  `bigLit` (an opaque identity around large constants in the generated
+  models) avoids; the one-operation functions with large constants are proved
+  now;
+- what is left is the proof term of the decoder's own shape (`Full` in
+  `examples/proofs-limits`: 22 instructions, three returns): the kernel runs
+  out of memory on it, because `wp_simp` copies every instruction's state
+  update into the term. So the packet number goal is open on the size of the
+  term (#291).
 
 So the link A to B is open for this function. Its model is loop-free and
 small, which is the case `prove` is meant for, so this is a limit of the
