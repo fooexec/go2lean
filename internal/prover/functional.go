@@ -431,7 +431,7 @@ under-approximation, in a state satisfying the postcondition). -/
 open Go2Lean.SSA Go2Lean.GoSSA Go2Lean.GoSSA.WP
 open %[1]s
 
-set_option maxHeartbeats 4000000
+set_option maxHeartbeats 20000000
 set_option maxRecDepth 100000
 set_option linter.unusedVariables false
 
