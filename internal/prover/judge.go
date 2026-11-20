@@ -89,28 +89,34 @@ func Judge(in JudgeInput) (map[int]*Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	// All at once; on a rejection, one at a time, each with the accepted
-	// ones before it (a later goal's proof may use them as contracts).
-	ok, err := judgeRun(in, in.Candidates, in.Candidates, cert)
+	// All at once, without the allowance for a nanoda killed for memory: a
+	// batch with one proof too big for nanoda would otherwise go through
+	// without nanoda checking any of the others. On a rejection, one at a
+	// time, each with the accepted ones before it (a later goal's proof may
+	// use them as contracts); only then is a nanoda killed for memory allowed,
+	// and the certificate of that goal alone says so.
+	ok, _, err := judgeRun(in, in.Candidates, in.Candidates, cert, false)
 	if err != nil {
 		return nil, err
 	}
+	unrun := map[int][]string{}
 	if !ok {
 		fmt.Fprintf(in.Log, "judge: not all %d candidates accepted, judging one at a time\n", len(in.Candidates))
 		var accepted []int
 		for _, i := range in.Candidates {
-			ok, err := judgeRun(in, append(append([]int{}, accepted...), i), []int{i}, cert)
+			ok, note, err := judgeRun(in, append(append([]int{}, accepted...), i), []int{i}, cert, true)
 			if err != nil {
 				return nil, err
 			}
 			if ok {
 				accepted = append(accepted, i)
+				unrun[i] = note
 			}
 		}
 		in.Candidates = accepted
 		if len(accepted) > 0 {
 			// The files left in Dir are the ones the certificates name.
-			if ok, err := judgeRun(in, accepted, accepted, cert); err != nil || !ok {
+			if ok, _, err := judgeRun(in, accepted, accepted, cert, true); err != nil || !ok {
 				return nil, fmt.Errorf("judge: the accepted goals were rejected together (%v)", err)
 			}
 		}
@@ -120,6 +126,7 @@ func Judge(in JudgeInput) (map[int]*Certificate, error) {
 	chal, _ := os.ReadFile(filepath.Join(in.Dir, "Challenge.lean"))
 	for _, i := range in.Candidates {
 		c := *cert
+		c.Unrun = unrun[i]
 		c.Theorem = Namespace(in.Report) + "." + TheoremName(in.Goals[i])
 		c.Func = in.Goals[i].Func
 		st, _ := statement(in.ABIs[i], in.Fids[i], TheoremName(in.Goals[i]), in.Goals[i].Post, "_root_."+in.Report.LeanModule+".prog", in.Goals[i].Empty)
@@ -342,7 +349,7 @@ func copyTree(src, dst string) error {
 // judgeRun writes a solution with the proofs of the goals in proved (the
 // others sorry) and a challenge with the statements of those in judged,
 // and runs the comparator on them.
-func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, error) {
+func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate, allowNoNanoda bool) (bool, []string, error) {
 	sorried := map[int]bool{}
 	keep := map[int]bool{}
 	for _, i := range proved {
@@ -355,11 +362,11 @@ func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, err
 	}
 	sol, err := SolutionText(in.Report, in.Goals, in.ABIs, in.Fids, sorried)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	chal, err := ChallengeText(in.Report, in.Goals, in.ABIs, in.Fids, judged)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	var names []string
 	for _, i := range judged {
@@ -373,7 +380,7 @@ func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, err
 	}, "", "  ")
 	for name, text := range map[string][]byte{"Solution.lean": []byte(sol), "Challenge.lean": []byte(chal), "comparator.json": cfg} {
 		if err := writeFile(filepath.Join(in.Dir, name), text); err != nil {
-			return false, err
+			return false, nil, err
 		}
 	}
 	args := judgeCommand(in.Paranoid)
@@ -383,17 +390,15 @@ func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, err
 	fmt.Fprintf(in.Log, "judge: %s on %s\n", strings.Join(args, " "), strings.Join(names, ", "))
 	out, err := judgeCmd(in.Dir, in.Budget, args...)
 	_ = os.WriteFile(filepath.Join(in.Dir, "judge.log"), []byte(out), 0o644)
-	cert.Unrun = nil
 	if err != nil {
-		if note, ok := acceptedWithoutNanoda(out); ok {
-			cert.Unrun = []string{note}
+		if note, ok := acceptedWithoutNanoda(out); ok && allowNoNanoda {
 			fmt.Fprintf(in.Log, "judge: accepted without nanoda: %s\n", note)
-			return true, nil
+			return true, []string{note}, nil
 		}
 		fmt.Fprintf(in.Log, "judge: rejected: %s\n", lastLines(out, 6))
-		return false, nil
+		return false, nil, nil
 	}
-	return true, nil
+	return true, nil, nil
 }
 
 // acceptedWithoutNanoda says whether a rejected paranoid run is rejected only
