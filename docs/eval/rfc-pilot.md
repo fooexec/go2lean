@@ -66,12 +66,35 @@ looked at, not of the approach. Next steps, in order of cost:
 3. The other two pilot functions (the variable-length integer length,
    RFC 9002's RTT update) with the same setup.
 
+## A against B by execution (done)
+
+The proof is blocked, but the agreement can be checked on a bounded domain by
+running the model: `examples/rfc-pilot/PacketNumberAgainstModel.lean` runs the
+model of `DecodePacketNumber` and compares the result with B in Lean
+(`closestRep`: the closest number, by enumerating the candidates around the
+expected one, a tie going to the larger).
+- **Every 1-byte input** with `largest` in [-1, 600] and all 256 truncated
+  values: 154,112 inputs, no disagreement.
+- **1 to 4 bytes**, boundary values of `largest` and `truncated` (the edges of
+  the window, of 2^32 and of 2^62) and random ones: 12,532 inputs, no
+  disagreement.
+- **Negative control:** B with the tie rule reversed gives 44 disagreements,
+  all exact ties of the 4-byte case, so the check does see a difference, and
+  the model breaks ties upward as the RFC's example does.
+
+This is a check of a bounded domain, not a proof: the 1-byte case is
+complete over the range, the others sample it. It does not depend on the
+prover's limits (#291).
+
 ## What this says so far
 
 - Writing B in Lean from the prose, with a Lean-checked lemma that reduces
   it to simple pieces, works and caught an error of mine. B is cheap to write
   and check by itself.
-- The model side does not yet follow. Whether A and B agree is, for now,
-  established only by the Go-side check that is already in the results
-  (`quic-go.md`: the agent's spec against the RFC algorithm held 3.7M runs of
-  Go's fuzzer, and the model search found no counterexample), not by a proof.
+- A and B agree on every input tried (154,112 exhaustive, 12,532 sampled),
+  with a negative control that shows the check can fail. The proof for all
+  inputs is open (#291).
+- B written in Lean and run as a program costs a short file and needs no
+  engine change. Taking a decidable Lean post as a property of the search
+  engine (so that `go2lean hunt` runs it, with the engines' seeds and
+  budgets) is the next step if this pays off on the other two functions.

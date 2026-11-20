@@ -11,3 +11,21 @@ the reference written in Lean from the RFC's prose, not from its pseudocode.
   (range and congruence; the half window). Together with `Closest.lean` they
   give the closest-value property. They are **not proved**: the automatic
   prover times out on this function, see `docs/eval/rfc-pilot.md`.
+
+- `PacketNumberAgainstModel.lean`: B executed against the model. `closestRep`
+  is B in Lean (the closest representative, by enumerating the candidates
+  around the expected number); the program runs the model of quic-go's
+  `DecodePacketNumber` on every 1-byte input with `largest` in [-1, 600] and on
+  boundary and random inputs of 1 to 4 bytes, and compares. Needs a workspace
+  with the model built:
+
+```bash
+cd quic-go                       # a checkout of quic-go (a02d451)
+go2lean compile -workspace ws ./internal/protocol
+cd ws/lean && lake build Go2LeanModels
+lake lean <path to>/PacketNumberAgainstModel.lean
+```
+
+  Result: 154,112 exhaustive and 12,532 boundary and random inputs, no
+  disagreement. With B's tie rule reversed (a negative control) the same
+  program reports 44 disagreements, all on exact ties.
