@@ -3367,6 +3367,25 @@ func (t *fnState) binop(x *ssa.BinOp) error {
 	if eqOp && flatComparable(x.X.Type()) {
 		op = pick(x.Op == token.EQL, "eqDeep", "neDeep")
 	}
+	if x.Op == token.AND && isInt {
+		// a & ^b is one andNot, not a bnot and an and (the model's value is the
+		// same). The two-instruction form made Lean's kernel run out of memory
+		// on the proof of a function that has it (#291).
+		for _, pair := range [2][2]ssa.Value{{x.X, x.Y}, {x.Y, x.X}} {
+			if inner, ok := elidableBnot(pair[1]); ok {
+				a, err := t.val(pair[0])
+				if err != nil {
+					return err
+				}
+				b, err := t.val(inner)
+				if err != nil {
+					return err
+				}
+				t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("andNot"), Args: []ir.Var{a, b}})
+				return nil
+			}
+		}
+	}
 	a, err := t.val(x.X)
 	if err != nil {
 		return err
@@ -3377,6 +3396,28 @@ func (t *fnState) binop(x *ssa.BinOp) error {
 	}
 	t.emit(ir.Instr{Dst: t.def(x), Op: op, Args: []ir.Var{a, c}})
 	return nil
+}
+
+// elidableBnot says whether v is `^b` of an integer whose only use is a `&`
+// (an operand of it): then `a & ^b` is emitted as one andNot of a and b, and
+// the `^b` itself is not emitted. It returns b.
+func elidableBnot(v ssa.Value) (ssa.Value, bool) {
+	u, ok := v.(*ssa.UnOp)
+	if !ok || u.Op != token.XOR {
+		return nil, false
+	}
+	if _, _, ok := intWidth(u.X.Type()); !ok {
+		return nil, false
+	}
+	refs := u.Referrers()
+	if refs == nil || len(*refs) != 1 {
+		return nil, false
+	}
+	and, ok := (*refs)[0].(*ssa.BinOp)
+	if !ok || and.Op != token.AND || and.X == and.Y {
+		return nil, false
+	}
+	return u.X, true
 }
 
 // flatComparable says whether t is an array or struct whose elements, all
@@ -4391,6 +4432,11 @@ func (t *fnState) unop(x *ssa.UnOp) error {
 		}
 		if _, _, ok := intWidth(x.X.Type()); !ok {
 			return fmt.Errorf("unary %s on %s", x.Op, x.X.Type())
+		}
+		if x.Op == token.XOR {
+			if _, ok := elidableBnot(x); ok {
+				return nil // folded into the andNot of its only use (binop)
+			}
 		}
 		a, err := t.val(x.X)
 		if err != nil {

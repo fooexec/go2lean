@@ -49,3 +49,35 @@ func TestModelTags(t *testing.T) {
 		}
 	}
 }
+
+// `a & ^b` is one andNot, with no bnot; a `^b` with another use stays a bnot.
+func TestAndNotFold(t *testing.T) {
+	progs, _, err := TranslateAllOpts("../../..", Options{}, "./testdata/andnotfold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := map[string][]string{}
+	for _, p := range progs {
+		for _, f := range p.Funcs {
+			for _, b := range f.Blocks {
+				for _, in := range b.Instrs {
+					if in.Op != nil {
+						ops[f.Name] = append(ops[f.Name], in.Op.Lean())
+					}
+				}
+			}
+		}
+	}
+	has := func(fn, op string) bool { return slices.Contains(ops[fn], op) }
+	for _, fn := range []string{"Fold", "FoldLeft"} {
+		if !has(fn, ".andNot") || has(fn, ".bnot") || has(fn, ".and") {
+			t.Errorf("%s: ops %v, want one andNot and no bnot or and", fn, ops[fn])
+		}
+	}
+	if !has("Shared", ".bnot") || !has("Shared", ".and") || has("Shared", ".andNot") {
+		t.Errorf("Shared: ops %v, want bnot and and", ops["Shared"])
+	}
+	if !has("Plain", ".and") || has("Plain", ".andNot") {
+		t.Errorf("Plain: ops %v, want and", ops["Plain"])
+	}
+}
