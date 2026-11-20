@@ -24,3 +24,29 @@ theorem closest_of_window (win e t r : Int) (hwin : 0 < win) (heven : win % 2 = 
       have : win * 1 ≤ win * k := Int.mul_le_mul_of_nonneg_left (by omega) (by omega)
       omega
     omega
+
+/-- The two model-side goals of `goals-packet-number.json` together give B.
+`h1` and `h2` are the bodies of `DecodePN_congruent_in_range` and
+`DecodePN_in_half_window` for the result `r` (their `∃ r, ret = .int 64 r ∧ …`),
+`hpre` their common precondition: the decoder's result is the closest number to
+`largest + 1` among those in `[0, 2^62)` with the truncated low bits, a tie
+going to the larger. -/
+theorem pn_closest (length : BitVec 8) (largest truncated r : BitVec 64)
+    (hpre : 1 ≤ length.toNat ∧ length.toNat ≤ 4 ∧ 0 ≤ truncated.toInt ∧
+      truncated.toInt < 2 ^ (8 * length.toNat) ∧ -1 ≤ largest.toInt ∧ largest.toInt < 2 ^ 62 - 1)
+    (h1 : 0 ≤ r.toInt ∧ r.toInt < 2 ^ 62 ∧ r.toInt % 2 ^ (8 * length.toNat) = truncated.toInt)
+    (h2 : (largest.toInt + 1 - 2 ^ (8 * length.toNat) / 2 < r.toInt ∨
+            2 ^ 62 - 2 ^ (8 * length.toNat) ≤ r.toInt) ∧
+          (r.toInt ≤ largest.toInt + 1 + 2 ^ (8 * length.toNat) / 2 ∨
+            r.toInt < 2 ^ (8 * length.toNat))) :
+    ∀ m : Int, 0 ≤ m → m < 2 ^ 62 → m % 2 ^ (8 * length.toNat) = truncated.toInt →
+      ((r.toInt - (largest.toInt + 1)).natAbs < (m - (largest.toInt + 1)).natAbs ∨
+       ((r.toInt - (largest.toInt + 1)).natAbs = (m - (largest.toInt + 1)).natAbs ∧ m ≤ r.toInt)) := by
+  obtain ⟨hl1, hl4, -, -, -, -⟩ := hpre
+  have hwin : (0 : Int) < 2 ^ (8 * length.toNat) := Int.pow_pos (by decide)
+  have heven : (2 : Int) ^ (8 * length.toNat) % 2 = 0 := by
+    obtain ⟨k, hk⟩ : ∃ k, 8 * length.toNat = k + 1 := ⟨8 * length.toNat - 1, by omega⟩
+    rw [hk, Int.pow_succ]
+    exact Int.mul_emod_left _ _
+  exact closest_of_window (2 ^ (8 * length.toNat)) (largest.toInt + 1) truncated.toInt r.toInt
+    hwin heven h1.1 h1.2.1 h1.2.2 h2.1 h2.2
