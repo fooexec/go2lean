@@ -42,12 +42,7 @@ macro_rules
     let n ← match n with
       | some n => pure n
       | none => `(n)
-    -- The goal must be a `wpPtN` at reducible transparency first: `apply` on
-    -- another goal (a `match` on a comparison, say) would otherwise `whnf` it at
-    -- default transparency, which unfolds `BitVec.slt c (K - h)` down to
-    -- `Nat.add _ K`, recursing on the literal `K` one `succ` at a time (#291).
-    `(tactic| (with_reducible show wpPtN _ _ _ _ _ _ _ _
-               apply wpPtN_step $hf rfl; intro $n:ident hn; subst hn; wp_simp [$fs,*]))
+    `(tactic| (apply wpPtN_step $hf rfl; intro $n:ident hn; subst hn; wp_simp [$fs,*]))
 
 syntax "wp_auto " term:max (" [" term,* "]")? (" using " term,+)? : tactic
 macro_rules
@@ -58,8 +53,13 @@ macro_rules
       (← `(tactic| fail "wp_auto: no contract for this call"))
     `(tactic| (
       (try (apply wpPt_of_N; intro _))
+      -- `wp_step`'s `apply` first `whnf`s the goal: that evaluates a `match` on
+      -- concrete values (what makes a goal with literal inputs go on), but on
+      -- `BitVec.slt c (K - h)` with a large literal `K` it recurses on `K` one
+      -- `succ` at a time (#291). A bounded depth lets the first go through and
+      -- makes the second fail at once, so that `split` takes the `match`.
       repeat' (first
-        | wp_step $hf [$fs,*]
+        | (set_option maxRecDepth 3000 in wp_step $hf [$fs,*])
         | split
         | (apply wpFun_mono
            rotate_left
