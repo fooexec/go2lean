@@ -383,11 +383,64 @@ func judgeRun(in JudgeInput, proved, judged []int, cert *Certificate) (bool, err
 	fmt.Fprintf(in.Log, "judge: %s on %s\n", strings.Join(args, " "), strings.Join(names, ", "))
 	out, err := judgeCmd(in.Dir, in.Budget, args...)
 	_ = os.WriteFile(filepath.Join(in.Dir, "judge.log"), []byte(out), 0o644)
+	cert.Unrun = nil
 	if err != nil {
+		if note, ok := acceptedWithoutNanoda(out); ok {
+			cert.Unrun = []string{note}
+			fmt.Fprintf(in.Log, "judge: accepted without nanoda: %s\n", note)
+			return true, nil
+		}
 		fmt.Fprintf(in.Log, "judge: rejected: %s\n", lastLines(out, 6))
 		return false, nil
 	}
 	return true, nil
+}
+
+// acceptedWithoutNanoda says whether a rejected paranoid run is rejected only
+// because nanoda was killed for lack of memory: nanoda exited with 137 (a
+// SIGKILL, what the cgroup's out-of-memory killer sends), and every other
+// checker that ran accepted the solution, among them Lean's own two kernels.
+// Any other error, a rejection by another checker, a timeout, or a missing
+// acceptance is a rejection. nanoda needs more than 13 GB for a proof of some
+// 6,000 declarations, which a 16 GB host does not have (#291).
+func acceptedWithoutNanoda(out string) (string, bool) {
+	const killed = "error: nanoda exited with 137"
+	var errs, rejected int
+	running := map[string]bool{}
+	accepted := map[string]bool{}
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(l, "error:"):
+			errs++
+			if l != killed {
+				return "", false
+			}
+		case strings.HasPrefix(l, "Running ") && strings.HasSuffix(l, " on solution"):
+			running[strings.TrimSuffix(strings.TrimPrefix(l, "Running "), " on solution")] = true
+		case strings.HasSuffix(l, " accepts the solution"):
+			accepted[strings.TrimSuffix(l, " accepts the solution")] = true
+		case strings.HasSuffix(l, " rejected the solution"):
+			rejected++
+			if l != "nanoda kernel rejected the solution" {
+				return "", false
+			}
+		}
+	}
+	if errs != 1 || rejected != 1 || !running["nanoda kernel"] {
+		return "", false
+	}
+	for _, need := range []string{"Lean paranoid kernel", "Lean default kernel"} {
+		if !accepted[need] {
+			return "", false
+		}
+	}
+	for k := range running {
+		if k != "nanoda kernel" && !accepted[k] {
+			return "", false
+		}
+	}
+	return "nanoda: killed for lack of memory (exit 137); every other checker accepted", true
 }
 
 // JudgeError is the first error of the judge's last run in dir.

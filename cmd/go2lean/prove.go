@@ -261,7 +261,11 @@ func cmdProve(args []string) error {
 	failed := 0
 	for i, r := range rs {
 		if r.Proved {
-			fmt.Printf("  proved   %s (%s), kernel only, judged\n", r.Func, r.Theorem)
+			note := ""
+			if r.Certificate != nil && len(r.Certificate.Unrun) > 0 {
+				note = " (" + strings.Join(r.Certificate.Unrun, "; ") + ")"
+			}
+			fmt.Printf("  proved   %s (%s), kernel only, judged%s\n", r.Func, r.Theorem, note)
 		} else {
 			failed++
 			why := r.Error
