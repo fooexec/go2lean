@@ -87,7 +87,7 @@ macro_rules
                   | skip)
              | (simp [*]; done)))
       all_goals (try simp only [BitVec.sle, BitVec.slt, BitVec.ule, BitVec.ult, decide_eq_true_eq,
-        decide_eq_false_iff_not, Option.some.injEq, Val.int.injEq] at *)
+        decide_eq_false_iff_not, Option.some.injEq, Val.int.injEq, bigLit_eq] at *)
       all_goals (try grind)))
 
 end Go2Lean.GoSSA.WP

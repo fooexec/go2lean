@@ -9,6 +9,7 @@ package ir
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/fooexec/go2lean/internal/contract"
@@ -27,7 +28,21 @@ type IntVal struct {
 	Bits  string
 }
 
-func (v IntVal) Lean() string { return fmt.Sprintf("(.int %d %s#%d)", v.Width, v.Bits, v.Width) }
+func (v IntVal) Lean() string {
+	if bigConst(v.Bits) {
+		return fmt.Sprintf("(.int %d (bigLit %s#%d))", v.Width, v.Bits, v.Width)
+	}
+	return fmt.Sprintf("(.int %d %s#%d)", v.Width, v.Bits, v.Width)
+}
+
+// bigConst says whether a constant is written behind `bigLit` (2^16 or more):
+// the Lean kernel unfolds a large numeral that meets a variable one `succ` at a
+// time (#291), which `bigLit` hides from it. The pattern of a two's-complement
+// negative number is large too.
+func bigConst(bits string) bool {
+	n, ok := new(big.Int).SetString(bits, 10)
+	return ok && n.Cmp(big.NewInt(1<<16)) >= 0
+}
 
 type BoolVal bool
 
