@@ -135,7 +135,26 @@ On HEAD the two truncation specs also held 13 million libFuzzer runs each.
 The over-read is CVE-2023-53154, fixed in v1.7.18. As with the first
 chain, the spec for an old advisory found a later one. The specs that
 found it build a value from a small grammar and cut it at every length;
-the raw-byte specs never reached that check.
+the model's search with raw bytes never reached that check.
+
+**Control: libFuzzer on the same specs, on v1.7.17** (`-fuzz 60s
+-fuzz-confirmed`, which also fuzzes the specs the model search confirmed).
+The fuzzer finds the same over-read (`cJSON.c:786`, `parse_string`), and one
+more way to it:
+
+| spec | model search | libFuzzer |
+|---|---|---|
+| `parse_grammar_truncated` | confirmed, first trial | confirmed after 3,049 runs |
+| `parse_grammar_truncated_opts` | confirmed, first trial | confirmed after 3,888 runs |
+| `parse_with_length_opts_raw` (raw bytes) | held (all 240 inputs) | **confirmed after 395,703 runs** |
+| the other six | held or exhausted | held, 1.5M to 31M runs each |
+
+So the advisory's spec, once written, would have led a fuzzer to CVE-2023-53154
+just as well: the finding came from the spec the agent wrote from
+CVE-2019-11834, not from the model's search. The model's part here was to
+find it from the first trial and to say which specs it exhausted; the
+fuzzer was faster in wall-clock and also reached it through the raw-byte
+spec, where the model's exhaustive search of 240 inputs did not.
 
 **Floats were what made the second CVE reachable.** On the first run on
 v1.7.16, `insert_null_item` held, with 420 of 2,000 trials stuck. It

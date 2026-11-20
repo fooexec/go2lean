@@ -1,0 +1,87 @@
+[
+ {
+  "func": "ShlVar",
+  "name": "ShlVar_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Mul8",
+  "name": "Mul8_returns",
+  "post": "\u2203 r, ret = .int 8 r"
+ },
+ {
+  "func": "AndNot",
+  "name": "AndNot_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Or",
+  "name": "Or_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Div2",
+  "name": "Div2_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "IfSimple",
+  "name": "IfSimple_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "IfAnd",
+  "name": "IfAnd_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "TwoIfs",
+  "name": "TwoIfs_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "ThreeIfs",
+  "name": "ThreeIfs_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "ConstSmall",
+  "name": "ConstSmall_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Const32",
+  "name": "Const32_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Const40",
+  "name": "Const40_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Const50",
+  "name": "Const50_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "IfConst",
+  "name": "IfConst_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Const62Add",
+  "name": "Const62Add_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Cmp",
+  "name": "Cmp_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ },
+ {
+  "func": "Full",
+  "name": "Full_returns",
+  "post": "\u2203 r, ret = .int 64 r"
+ }
+]

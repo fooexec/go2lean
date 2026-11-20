@@ -29,7 +29,7 @@ under AddressSanitizer (C) is the judge.
 > correctness. Tried on 35 open-source projects it had never seen
 > ([runs](docs/eval/fifth-run.md)); it translates 72% of the standard
 > library's functions completely ([audit](docs/eval/std-audit.md)). It has
-> found 69 confirmed defects across 29 projects, 40 of them new
+> found 72 confirmed defects across 30 projects, 43 of them new
 > ([findings](docs/findings.md)). The Go line is the mature one; the C line
 > is a prototype that has found defects in cJSON and stb_image. See [limitations](docs/limitations.md) and
 > [validation](docs/validation.md) for scope and evidence.

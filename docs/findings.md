@@ -14,9 +14,9 @@ method. The drafts for the unreported defects are in
 [blog/upstream-reports.md](blog/upstream-reports.md), to be filed by
 hand.
 
-**69 defects in 29 projects** (as of 2026-11-18):
-- **40 new** (1 high, 10 medium, 17 low, 12 minor):
-  - 32 drafted, not yet filed;
+**72 defects in 30 projects** (as of 2026-11-19):
+- **43 new** (1 high, 10 medium, 20 low, 12 minor):
+  - 35 drafted, not yet filed;
   - 4 not drafted;
   - 1 filed;
   - 2 dropped as too minor;
@@ -25,7 +25,7 @@ hand.
 - **13 re-found from security advisories** or a known issue, all fixed
   upstream since.
 
-By severity: **7 high, 20 medium, 29 low, 13 minor**. The severity is
+By severity: **7 high, 20 medium, 32 low, 13 minor**. The severity is
 go2lean's own reading, not the project's (the advisories have their own
 scores):
 - **high**: an attacker's input breaks a security property (a spoofed
@@ -81,6 +81,9 @@ scores):
 | low | beego/beego | a route `/a/*.*` panics (index -1) on `GET /a` (a 500) | crash | agent spec (fuzzer) | draft | advisory specs |
 | low | beego/beego | `URLFor` writes query keys and values unescaped: `&` or `=` in a value changes the parameters | wrong result | agent spec | draft | advisory specs |
 | low | beego/beego | template `Substr` overflows on `start + length` (panic) | crash | agent spec | draft | advisory specs |
+| low | quic-go/quic-go | `http3`: a request or response with an empty `content-length` field is accepted and the field is dropped (`ContentLength` -1); `net/http` rejects it as an invalid Content-Length (RFC 9110 section 8.6) | wrong result | advisory spec (fuzzer) | draft | [quic-go](eval/quic-go.md) |
+| low | quic-go/quic-go | `http3`: a plain CONNECT request whose `:authority` has no port (`example.com`) is accepted; the authority-form is `host:port` (RFC 9114 section 4.4, RFC 9110 section 9.3.6) | wrong result | advisory spec (fuzzer) | draft | quic-go |
+| low | quic-go/quic-go | `http3`: a field value with leading or trailing whitespace (` text/html `) reaches `http.Request.Header` untrimmed; RFC 9110 section 5.5 says a recipient excludes it, and `net/http` does | wrong result | advisory spec (fuzzer) | draft | quic-go |
 | minor | Masterminds/semver | `!=*` and `!=X` behave like `!= 0.0.0` | wrong result | agent spec (fuzzer) | draft | semver |
 | minor | cenkalti/backoff | `ExponentialBackOff` with `Multiplier` 1 shrinks an interval above 2^53 ns | wrong result | agent spec | not drafted (minor) | thirteenth run |
 | minor | gobwas/glob | a `}` outside a group compiles as a literal | contract | agent spec | draft (minor) | glob |

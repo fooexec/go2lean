@@ -29,6 +29,9 @@ type Options struct {
 	Search      constraint.SearchOptions
 	MaxRepairs  int // rounds spent fixing specs the frontend rejected
 	ReportRound bool
+	// SpecsOnly searches only the properties of the specs the agent wrote,
+	// not the package's built-in ones (several hundred on a large package).
+	SpecsOnly bool
 	// Guidance is extra text for the proposal round: known bug classes,
 	// invariants from the issue tracker, functions to focus on.
 	Guidance string
@@ -157,7 +160,41 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 		return err
 	}
 
-	res, err := runRest(ws, env, report, spec, opts.Search, out)
+	// Seed gate: a spec that is false on the fuzzer's own seed input (the
+	// zero values of its parameters), before any search, checks nothing: it
+	// fails on every version, fixed ones too. It goes back to the agent with
+	// the failing input, as a spec the frontend rejected does.
+	for round := 0; round < opts.MaxRepairs; round++ {
+		// The specs become properties in the workspace, which the fuzz
+		// export reads.
+		if _, perr := pipeline.Propose(ws, report, io.Discard); perr != nil {
+			fmt.Fprintf(out, "  seed check: %v\n", perr)
+			break
+		}
+		results, _, ferr := fuzzexport.Run(ws, moduleDir, pkgPath, fuzzexport.Options{FuzzTime: time.Second})
+		if ferr != nil {
+			fmt.Fprintf(out, "  seed check: %v\n", ferr)
+			break
+		}
+		bad := seedFailures(results)
+		if len(bad) == 0 {
+			break
+		}
+		fmt.Fprintf(out, "== seed gate: %d spec(s) false on the fuzzer's seed input; asking the agent to revise (round %d)\n", len(bad), round+1)
+		resp, err := ask(systemPrompt, seedRepairPrompt(bad, spec))
+		if err != nil {
+			return err
+		}
+		next := extractGo(resp)
+		if next == "" {
+			break
+		}
+		if spec, report, err = install(next); err != nil {
+			return err
+		}
+	}
+
+	res, err := runRest(ws, env, report, spec, opts.Search, opts.SpecsOnly, out)
 	if err != nil {
 		return err
 	}
@@ -190,14 +227,14 @@ func Run(ctx context.Context, ws contract.Workspace, env pipeline.Env, pattern s
 		if _, report, err = install(revised); err != nil {
 			return err
 		}
-		if _, err := runRest(ws, env, report, revised, opts.Search, out); err != nil {
+		if _, err := runRest(ws, env, report, revised, opts.Search, opts.SpecsOnly, out); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runRest(ws contract.Workspace, env pipeline.Env, report *contract.ModelReport, spec string, so constraint.SearchOptions, out io.Writer) (*pipeline.Result, error) {
+func runRest(ws contract.Workspace, env pipeline.Env, report *contract.ModelReport, spec string, so constraint.SearchOptions, specsOnly bool, out io.Writer) (*pipeline.Result, error) {
 	fmt.Fprintln(out, "== Spec & search stage: properties")
 	props, err := pipeline.Propose(ws, report, out)
 	if err != nil {
@@ -227,6 +264,9 @@ func runRest(ws contract.Workspace, env pipeline.Env, report *contract.ModelRepo
 	res := &pipeline.Result{Report: report, Properties: props}
 	var cxs []*contract.Counterexample
 	for _, p := range props {
+		if specsOnly && p.Source != "agent" {
+			continue // the built-in properties of the package are not searched
+		}
 		cx, err := pipeline.Hunt(ws, env, p, so, out)
 		if errors.Is(err, pipeline.ErrStoppedForMemory) {
 			continue // reported in its line; -resume searches it again
@@ -479,4 +519,16 @@ func isReport(resp string) bool {
 		}
 	}
 	return false
+}
+
+// seedFailures returns the targets that fail before the fuzzer mutated
+// anything: its seed input already makes the spec false.
+func seedFailures(results []fuzzexport.Result) []fuzzexport.Result {
+	var bad []fuzzexport.Result
+	for _, r := range results {
+		if r.Status == "violated" && (r.Execs == "" || r.Execs == "0") {
+			bad = append(bad, r)
+		}
+	}
+	return bad
 }

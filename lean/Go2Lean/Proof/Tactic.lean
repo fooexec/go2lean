@@ -1,4 +1,5 @@
 import Go2Lean.Proof.WP
+import Lean.Elab.Tactic
 
 /-! Tactics for proofs over `Go2Lean.Proof.WP`: the block walking that is
 the same in every proof (issue #1). A proof names the function's lookup
@@ -23,6 +24,19 @@ namespace Go2Lean.GoSSA.WP
 
 open Lean Parser.Tactic
 open Go2Lean.SSA Go2Lean.GoSSA
+
+
+/-- `wp_bounded tac`: run `tac` with a small recursion depth, and treat running out of it
+(a runtime exception, which `first` and `try` do not catch) as an ordinary failure,
+with the state restored. -/
+syntax "wp_bounded " tactic : tactic
+elab_rules : tactic
+  | `(tactic| wp_bounded $t) => do
+    let s ← Lean.Elab.Tactic.saveState
+    tryCatchRuntimeEx
+      (withTheReader Lean.Core.Context (fun c => { c with maxRecDepth := 3000 })
+        (Lean.Elab.Tactic.evalTactic t))
+      (fun _ => do s.restore; throwError "wp_bounded: out of recursion depth")
 
 syntax "wp_simp" (" [" term,* "]")? : tactic
 macro_rules
@@ -53,8 +67,13 @@ macro_rules
       (← `(tactic| fail "wp_auto: no contract for this call"))
     `(tactic| (
       (try (apply wpPt_of_N; intro _))
+      -- `wp_step`'s `apply` first `whnf`s the goal: that evaluates a `match` on
+      -- concrete values (what makes a goal with literal inputs go on), but on
+      -- `BitVec.slt c (K - h)` with a large literal `K` it recurses on `K` one
+      -- `succ` at a time (#291). A bounded depth lets the first go through and
+      -- makes the second fail at once, so that `split` takes the `match`.
       repeat' (first
-        | wp_step $hf [$fs,*]
+        | (wp_bounded (wp_step $hf [$fs,*]))
         | split
         | (apply wpFun_mono
            rotate_left
@@ -68,7 +87,7 @@ macro_rules
                   | skip)
              | (simp [*]; done)))
       all_goals (try simp only [BitVec.sle, BitVec.slt, BitVec.ule, BitVec.ult, decide_eq_true_eq,
-        decide_eq_false_iff_not, Option.some.injEq, Val.int.injEq] at *)
+        decide_eq_false_iff_not, Option.some.injEq, Val.int.injEq, bigLit_eq] at *)
       all_goals (try grind)))
 
 end Go2Lean.GoSSA.WP

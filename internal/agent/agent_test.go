@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fooexec/go2lean/internal/contract"
+	"github.com/fooexec/go2lean/internal/fuzzexport"
 )
 
 func TestExtractGo(t *testing.T) {
@@ -181,5 +182,22 @@ func TestCompleteRetrying(t *testing.T) {
 	f = &flakyLLM{fails: llmAttempts}
 	if _, err := completeRetrying(context.Background(), f, "s", "u", io.Discard); err == nil || f.calls != llmAttempts {
 		t.Fatalf("every attempt fails: %v after %d calls", err, f.calls)
+	}
+}
+
+func TestSeedFailures(t *testing.T) {
+	rs := []fuzzexport.Result{
+		{Fuzz: "FuzzGo2Lean_A", Status: "violated", Execs: "0", Message: "go2lean: A is false"},
+		{Fuzz: "FuzzGo2Lean_B", Status: "violated", Execs: "154"},
+		{Fuzz: "FuzzGo2Lean_C", Status: "held"},
+		{Fuzz: "FuzzGo2Lean_D", Status: "violated"},
+	}
+	bad := seedFailures(rs)
+	if len(bad) != 2 || bad[0].Fuzz != "FuzzGo2Lean_A" || bad[1].Fuzz != "FuzzGo2Lean_D" {
+		t.Fatalf("seed failures %+v", bad)
+	}
+	p := seedRepairPrompt(bad[:1], "package x\n")
+	if !strings.Contains(p, "FuzzGo2Lean_A") || !strings.Contains(p, "Do not weaken the property") {
+		t.Fatalf("prompt %q", p)
 	}
 }

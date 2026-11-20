@@ -1073,3 +1073,44 @@ decodes to `..` can survive.
 Found with go2lean, which checks Go code against a model of its semantics
 and replays each finding as a `go test`.
 
+
+
+## quic-go/quic-go
+
+# Draft: three http3 validation gaps (not posted)
+
+*The project's AI policy (`AI-POLICY.md`) asks for AI use to be disclosed
+and for a short description in the reporter's own words, with how the
+library is used and how the issue affects the reporter. Rewrite this as
+such before filing. These are not security issues (`SECURITY.md`: a
+regular issue is fine for theoretical ones). Checked on `master` at
+`a02d451`.*
+
+**Title:** http3: a few inputs RFC 9110/9114 rule out are accepted
+
+Three header blocks that `requestFromHeaders` accepts (the first also
+`updateResponseFromHeaders`), shown with the `net/http` HTTP/1.1 result for
+the same field where it differs:
+
+```go
+// inside package http3, with qpack encoding of the fields
+base := []qpack.HeaderField{{":method","GET"},{":scheme","https"},{":authority","example.com"},{":path","/"}}
+
+// 1. empty content-length: err == nil, ContentLength == -1, no Content-Length header.
+//    net/http: "invalid empty Content-Length". RFC 9110 8.6: Content-Length = 1*DIGIT.
+requestFromHeaders(dec(append(base, qpack.HeaderField{Name: "content-length", Value: ""})), ...)
+
+// 2. plain CONNECT, :authority without a port: err == nil, req.Host == "example.com".
+//    RFC 9114 4.4 / RFC 9110 9.3.6: authority-form is host:port.
+requestFromHeaders(dec([]qpack.HeaderField{{":method","CONNECT"},{":authority","example.com"}}), ...)
+
+// 3. value with surrounding whitespace: req.Header["Content-Type"] == []string{" text/html "}.
+//    net/http: "text/html". RFC 9110 5.5: a recipient excludes it before evaluating the value.
+requestFromHeaders(dec(append(base, qpack.HeaderField{Name: "content-type", Value: " text/html "})), ...)
+```
+
+(1) is in `headers.go`: `if len(contentLengthStr) > 0 { ... }` skips the
+parse for an empty string. All three are low impact; the first matters if
+another hop frames the message by that field. Found by property specs
+written from the RFCs and the project's validation history, run under
+`go test -fuzz`.

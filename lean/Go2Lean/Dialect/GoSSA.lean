@@ -18,6 +18,20 @@ fill), negative signed shift counts panic.
 set_option maxHeartbeats 4000000
 namespace Go2Lean.GoSSA
 
+/-- A constant of 2^16 or more behind an opaque identity, in the models go2lean
+generates. The Lean kernel unfolds a numeral that meets a variable in `Nat.ble` (and
+`Nat.add`) one `succ` at a time (lean4#7386, lean4#8898), so a proof about
+`c + 4294967296#64` died with "deep recursion" while one about `c + 1000#64` did not
+(#291). The kernel cannot see through `bigLit`; `bigLit_eq` gives the constant back
+where a proof needs its value (`wp_auto` does at the end). The identity makes no
+difference to a run. -/
+opaque bigLitDef {α : Sort _} : { f : α → α // f = id } := ⟨id, rfl⟩
+
+def bigLit {α : Sort _} (a : α) : α := bigLitDef.1 a
+
+theorem bigLit_eq {α : Sort _} (a : α) : bigLit a = a := by
+  simp [bigLit, bigLitDef.2]
+
 open Go2Lean.SSA
 
 inductive Val where

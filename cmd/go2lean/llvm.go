@@ -29,6 +29,7 @@ func cmdLLVM(args []string) error {
 	lib := fs.String("lib", "", "more C files of the library, comma-separated globs, linked with the source (a spec file that includes the library's headers)")
 	cflags := fs.String("cflags", "", "flags for every compilation, comma-separated (-Iinclude,-DX=1)")
 	fuzzFor := fs.Duration("fuzz", 0, "run libFuzzer this long on each function the model search did not settle (e.g. 60s)")
+	fuzzConfirmed := fs.Bool("fuzz-confirmed", false, "with -fuzz: also fuzz the functions whose violation the model search confirmed (to compare the two)")
 	fs.Parse(args)
 	if !llvmfe.Available {
 		return errors.New("this go2lean was built without the LLVM frontend: rebuild with -tags llvm18 (or your LLVM version's tag)")
@@ -41,7 +42,7 @@ func cmdLLVM(args []string) error {
 		return err
 	}
 	ws := contract.Workspace{Root: *workspace}
-	opts := llvmhunt.Options{Trials: *trials, Seed: *seed, Fuel: *fuel, Engine: *engine, ExhaustLen: *exhaustLen, Init: -1, Internal: *internal, SpecsOnly: *specsOnly, Fuzz: *fuzzFor, Memory: *memory, CFlags: splitList(*cflags)}
+	opts := llvmhunt.Options{FuzzConfirmed: *fuzzConfirmed, Trials: *trials, Seed: *seed, Fuel: *fuel, Engine: *engine, ExhaustLen: *exhaustLen, Init: -1, Internal: *internal, SpecsOnly: *specsOnly, Fuzz: *fuzzFor, Memory: *memory, CFlags: splitList(*cflags)}
 	for _, pat := range splitList(*lib) {
 		ms, err := filepath.Glob(pat)
 		if err != nil || len(ms) == 0 {
