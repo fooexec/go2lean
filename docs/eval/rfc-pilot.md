@@ -43,10 +43,14 @@ prove them:
 - a shift by a symbolic count was not: `Proof/Simp.lean` had no lemma for
   `shl` and `shr`, so the step stopped at an unreduced match. Added
   (`dp_shl`, `dp_shr`); `ShlVar` is proved now;
-- a 64-bit constant of 2^32 or more is what is left: `wp_auto` stops with
-  "maximum recursion depth" while stepping (1000 is fine; also with
-  `maxRecDepth` at 1,000,000). The decoder compares with `1<<62 - win`, so it
-  stops there, and so does the packet number goal.
+- `wp_auto` stopped with "maximum recursion depth" on a comparison with a
+  large constant (1000 is fine, 2^32 is not): `wp_step`'s `apply` `whnf`s a
+  `match` on `BitVec.slt c (K - h)` and counts `K` down one `succ` at a
+  time. Found with Lean's diagnostics and fixed (`wp_bounded`, #291);
+- what is left is the Lean kernel, which stops with "deep recursion" on the
+  proof term of a function with a 64-bit constant of 2^32 or more, with the
+  same proof as the one that works for 1000. The decoder compares with
+  `1<<62 - win`, so the packet number goal is open on that (#291).
 
 So the link A to B is open for this function. Its model is loop-free and
 small, which is the case `prove` is meant for, so this is a limit of the
