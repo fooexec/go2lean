@@ -1,4 +1,5 @@
 import Go2Lean.Proof.WP
+import Lean.Elab.Tactic
 
 /-! Tactics for proofs over `Go2Lean.Proof.WP`: the block walking that is
 the same in every proof (issue #1). A proof names the function's lookup
@@ -23,6 +24,19 @@ namespace Go2Lean.GoSSA.WP
 
 open Lean Parser.Tactic
 open Go2Lean.SSA Go2Lean.GoSSA
+
+
+/-- `wp_bounded tac`: run `tac` with a small recursion depth, and treat running out of it
+(a runtime exception, which `first` and `try` do not catch) as an ordinary failure,
+with the state restored. -/
+syntax "wp_bounded " tactic : tactic
+elab_rules : tactic
+  | `(tactic| wp_bounded $t) => do
+    let s ← Lean.Elab.Tactic.saveState
+    tryCatchRuntimeEx
+      (withTheReader Lean.Core.Context (fun c => { c with maxRecDepth := 3000 })
+        (Lean.Elab.Tactic.evalTactic t))
+      (fun _ => do s.restore; throwError "wp_bounded: out of recursion depth")
 
 syntax "wp_simp" (" [" term,* "]")? : tactic
 macro_rules
@@ -59,7 +73,7 @@ macro_rules
       -- `succ` at a time (#291). A bounded depth lets the first go through and
       -- makes the second fail at once, so that `split` takes the `match`.
       repeat' (first
-        | (set_option maxRecDepth 3000 in wp_step $hf [$fs,*])
+        | (wp_bounded (wp_step $hf [$fs,*]))
         | split
         | (apply wpFun_mono
            rotate_left
