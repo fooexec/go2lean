@@ -29,19 +29,27 @@ type IntVal struct {
 }
 
 func (v IntVal) Lean() string {
-	if bigConst(v.Bits) {
+	if bigConst(v.Bits, v.Width) {
 		return fmt.Sprintf("(.int %d (bigLit %s#%d))", v.Width, v.Bits, v.Width)
 	}
 	return fmt.Sprintf("(.int %d %s#%d)", v.Width, v.Bits, v.Width)
 }
 
-// bigConst says whether a constant is written behind `bigLit` (2^16 or more):
-// the Lean kernel unfolds a large numeral that meets a variable one `succ` at a
-// time (#291), which `bigLit` hides from it. The pattern of a two's-complement
-// negative number is large too.
-func bigConst(bits string) bool {
+// bigConst says whether a constant is written behind `bigLit`: its signed value
+// is 2^16 or more in magnitude. The Lean kernel unfolds a large numeral that
+// meets a variable one `succ` at a time (#291), which `bigLit` hides from it.
+// Bits is a two's-complement pattern, so -1 is 2^w-1; a small negative number
+// is not large (proofs need its value, and it never gave the kernel trouble).
+func bigConst(bits string, width int) bool {
 	n, ok := new(big.Int).SetString(bits, 10)
-	return ok && n.Cmp(big.NewInt(1<<16)) >= 0
+	if !ok {
+		return false
+	}
+	if width > 0 && n.Cmp(new(big.Int).Lsh(big.NewInt(1), uint(width-1))) >= 0 {
+		n.Sub(n, new(big.Int).Lsh(big.NewInt(1), uint(width)))
+		n.Neg(n)
+	}
+	return n.Cmp(big.NewInt(1<<16)) >= 0
 }
 
 type BoolVal bool
