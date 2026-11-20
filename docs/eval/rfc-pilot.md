@@ -53,11 +53,13 @@ prove them:
   `bigLit` (an opaque identity around large constants in the generated
   models) avoids; the one-operation functions with large constants are proved
   now;
-- what is left is the proof term of the decoder's own shape (`Full` in
-  `examples/proofs-limits`: 22 instructions, three returns): the kernel runs
-  out of memory on it, because `wp_simp` copies every instruction's state
-  update into the term. So the packet number goal is open on the size of the
-  term (#291).
+- the decoder's own shape (`Full` in `examples/proofs-limits`) ran Lean's kernel
+  out of memory because of `a & ^mask`, which is a `bnot` and an `and` in the
+  model; as one `andNot` (what the frontend writes now) the kernel accepts it.
+  What is left is the judge: nanoda needs more than 13.9 GB for this proof and
+  is killed on a 16 GB machine, so it is not "proved" under the all-checkers
+  rule. The packet number goals (the two quantifier-free pieces of B) are the
+  same shape and not yet run (#291).
 
 So the link A to B is open for this function. Its model is loop-free and
 small, which is the case `prove` is meant for, so this is a limit of the

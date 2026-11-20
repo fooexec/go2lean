@@ -13,11 +13,11 @@ several `if`s with `return`, and constants of every size (`ConstSmall` to
 `Const62Add`, `IfConst`, `Cmp`).
 
 `Full` (the shape of quic-go's `DecodePacketNumber`: 22 instructions, three
-returns, a shift, masks and two comparisons with `1<<62`) is open: Lean's kernel
-stops with "excessive memory consumption" on its proof term. The term grows
-with the number of instructions, because `wp_simp` copies the state update of
-every instruction into it; a two-instruction function already has a proof term
-of 70 MB when printed. That is what is left of #291.
+returns, a shift, masks and two comparisons with `1<<62`) is accepted by Lean's
+kernel, lean4lean, con-leche and con-ron, and not judged: nanoda needs more than
+13.9 GB for its 6,608 declarations and the machine's cgroup kills it (exit
+137). The judge requires every checker, so `Full` counts as open, for memory,
+not for a fault in the proof.
 
 What was wrong, and what was done (#291):
 - `Proof/Simp.lean` had no lemma for shifts (`dp_shl`, `dp_shr`).
@@ -26,6 +26,14 @@ What was wrong, and what was done (#291):
   large `K` down one `succ` at a time. `wp_auto` now runs `wp_step` under
   `wp_bounded` (a small depth, the runtime exception caught), so that `split`
   takes the `match`; goals on concrete values still go through `wp_step`.
+- `a & ^m` is two instructions in the model (`bnot`, `and`), and Lean's kernel
+  ran out of memory on the proof of a function that has them, while the same
+  value as the one instruction `a &^ m` is accepted (found by bisecting `Full`;
+  straight-line code of 24 instructions, branches and large constants are not
+  the cause). The frontend now writes `a & ^b` as one `andNot` when the `^b` has
+  no other use (`TestAndNotFold`). Why the pair is too much for the kernel is
+  not known: a stack of the kernel shows it in `is_def_eq`
+  (`lazy_delta_reduction`), not which constant.
 - The Lean kernel stopped with "deep recursion" on a proof term that has a
   numeral of 2^32 or more next to a variable (lean4#7386, lean4#8898): it
   unfolds the numeral one `succ` at a time. A constant whose signed value is
