@@ -95,15 +95,33 @@ This is a check of a bounded domain, not a proof: the 1-byte case is
 complete over the range, the others sample it. It does not depend on the
 prover's limits (#291).
 
+## Where the proof stands, and what it is for
+
+- **Proved by Lean:** the pure part of B (`closest_of_window`, `pn_closest` in
+  `examples/rfc-pilot/Closest.lean`): the two quantifier-free goals together
+  give "the closest number, a tie going to the larger".
+- **Not proved:** the two model-side goals of `goals-packet-number.json` for
+  `DecodePacketNumber`. The prover now gets through the walk (shift lemmas,
+  `wp_bounded`, `bigLit`, `a & ^b` as one `andNot`, a judge that accepts a
+  nanoda killed for memory), and stops at the end: the integer arithmetic of
+  the final goal (`toInt`, `2 ^ (8 * length.toNat)`, `%`, `/ 2`) exhausts
+  `grind` (a timeout at `whnf` at 4,000,000 heartbeats, killed for memory or
+  over 10 minutes at 20,000,000).
+- **Checked by running:** 154,112 exhaustive and 12,532 sampled inputs, A and B
+  agree; a negative control is caught.
+
+Two things this pilot is not: it found no disagreement between quic-go and the
+RFC (the function is a line-by-line copy of the RFC's pseudocode, so none was to
+be expected), and it is not the way the quic-go findings were made (those came
+from specs of the RFC's rules and Go's fuzzer, `quic-go.md`). A proof is an
+assurance about a function, not a way to find a defect; the pilot was the wrong
+target for the goal of finding where quic-go and the RFC differ. It is stopped
+here, with the prover improvements it led to (#291) kept.
+
 ## What this says so far
 
-- Writing B in Lean from the prose, with a Lean-checked lemma that reduces
-  it to simple pieces, works and caught an error of mine. B is cheap to write
-  and check by itself.
-- A and B agree on every input tried (154,112 exhaustive, 12,532 sampled),
-  with a negative control that shows the check can fail. The proof for all
-  inputs is open (#291).
-- B written in Lean and run as a program costs a short file and needs no
-  engine change. Taking a decidable Lean post as a property of the search
-  engine (so that `go2lean hunt` runs it, with the engines' seeds and
-  budgets) is the next step if this pays off on the other two functions.
+- B written in Lean from the RFC's prose, with a lemma checked by Lean, is cheap
+  and caught an error of mine (a window exception the wrong way round).
+- A and B agree on every input tried, and the check can fail.
+- The proof for all inputs is open on the last arithmetic step, and its price
+  (days of prover work) was out of proportion to what it adds to the goal.

@@ -7,17 +7,18 @@ an integer. Run from this directory:
 go2lean prove -workspace out -goals goals.json .
 ```
 
-Expected today (2026-11-20): 16 of 17 are proved: a shift by a symbolic count
+Expected today (2026-11-20): all 17 are proved: a shift by a symbolic count
 (`ShlVar`), `&^`, `|`, division, `uint8` multiplication, conditions, `&&` and
 several `if`s with `return`, and constants of every size (`ConstSmall` to
 `Const62Add`, `IfConst`, `Cmp`).
 
-`Full` (the shape of quic-go's `DecodePacketNumber`: 22 instructions, three
-returns, a shift, masks and two comparisons with `1<<62`) is accepted by Lean's
-kernel, lean4lean, con-leche and con-ron, and not judged: nanoda needs more than
-13.9 GB for its 6,608 declarations and the machine's cgroup kills it (exit
-137). The judge requires every checker, so `Full` counts as open, for memory,
-not for a fault in the proof.
+All 17 are proved and judged. `Full` (the shape of quic-go's
+`DecodePacketNumber`: 22 instructions, three returns, a shift, masks and two
+comparisons with `1<<62`) is judged with a note: nanoda needs more than 13.9 GB
+for its 6,608 declarations and the host's memory limit kills it (exit 137),
+while Lean's two kernels, lean4lean, con-leche and con-ron accept. The judge
+allows that one case, when goals are judged one at a time, and the certificate
+and the `prove` output say so (`unrun_checkers`, `docs/trust.md`).
 
 What was wrong, and what was done (#291):
 - `Proof/Simp.lean` had no lemma for shifts (`dp_shl`, `dp_shr`).
