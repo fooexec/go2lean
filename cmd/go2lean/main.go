@@ -40,6 +40,8 @@ func main() {
 		err = cmdRank(os.Args[2:])
 	case "agent":
 		err = cmdAgent(os.Args[2:])
+	case "zorya":
+		err = cmdZorya(os.Args[2:])
 	case "symexec":
 		err = cmdSymexec(os.Args[2:])
 	case "advisory":

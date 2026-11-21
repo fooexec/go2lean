@@ -255,6 +255,7 @@ go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-ur
                 [-repairs n] [-report] <package>
 go2lean advisory [-o file] [-llm ...] <GHSA-id|CVE-id>   draft a catalog property (docs/specs) from a published advisory (OSV)
 go2lean symexec [-module dir] [-func names] [-replay=false] [-maxlen n] [-loop n] [-depth n] <package>   bounded symbolic execution (needs z3)
+go2lean zorya  run|replay [-dir zorya] [-ghidra dir] [-seed aaaa] [-results f.json] <binary>   concolic execution of a compiled program, reports replayed
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]
                 [-rounds n] [-lean-tools] [-paranoid] [-deps] [-out proofs.json] <package>
 ```
