@@ -3,7 +3,7 @@
 A harness that checks what a QUIC implementation does with frames RFC 9000
 forbids, on a real connection. The attacker is a client (or a server) built
 from a scratch copy of the implementation with one extra method that queues
-raw frame bytes (`hook/attack_hook.go`); the endpoint under test is an
+raw frame bytes (`hook/attack_hook.go.txt`, kept as text so the root module does not build it); the endpoint under test is an
 unmodified checkout of the same revision, built separately
 (`victim/main.go`). Each rule in `attacker/main.go` is one RFC sentence:
 the frames to send and the connection error the receiver must close with.

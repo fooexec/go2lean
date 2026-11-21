@@ -11,7 +11,7 @@ git -C "$QG" worktree prune
 for d in clean attack; do
   git -C "$QG" worktree add -q --detach "$W/$d" "$REV"
 done
-cp "$HERE/hook/attack_hook.go" "$W/attack/zz_attack_hook.go"
+cp "$HERE/hook/attack_hook.go.txt" "$W/attack/zz_attack_hook.go"
 echo "revision $(git -C "$QG" rev-parse --short "$REV")"
 (cd "$HERE/victim" && go mod tidy -e >/dev/null 2>&1; go build -o "$W/victim" .)
 (cd "$HERE/attacker" && go mod tidy -e >/dev/null 2>&1; go build -o "$W/attacker" .)
