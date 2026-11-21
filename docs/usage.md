@@ -254,6 +254,7 @@ go2lean run     [-workspace out] [-v] [-nil-inputs] [-deps=false] [-generics=fal
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking]
                 [-repairs n] [-report] <package>
 go2lean advisory [-o file] [-llm ...] <GHSA-id|CVE-id>   draft a catalog property (docs/specs) from a published advisory (OSV)
+go2lean symexec [-module dir] [-func names] [-replay=false] [-maxlen n] [-loop n] [-depth n] <package>   bounded symbolic execution (needs z3)
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]
                 [-rounds n] [-lean-tools] [-paranoid] [-deps] [-out proofs.json] <package>
 ```
@@ -376,6 +377,24 @@ writes runs only in [bubblewrap](https://github.com/containers/bubblewrap)
 certificates say so. `-out` saves the
 proofs that worked, which `prove -goals` checks again without the agent
 ([results](eval/proof-agent.md)).
+
+## Symbolic execution
+
+`go2lean symexec <package>` explores functions of integers, booleans and
+slices of integers with a bounded symbolic executor over `go/ssa` and Z3: it
+collects the path condition of every path (loops up to `-loop` visits of a
+block, default `-maxlen`+2; calls inlined to `-depth`; slice parameters up to
+`-maxlen` elements), asks Z3 whether an index, division, slice-bound or
+explicit panic is reachable on it, and runs the inputs of each answer on the
+real function (`-replay`, a generated test in the package). It needs `z3` on
+`PATH` (`apt install z3`). Anything the executor does not model (a call
+without a body, a struct, a map, an allocation) becomes an unconstrained
+value, so a path marked `[approximate path]` can give a candidate that does
+not reproduce; the replay is the judge. Only panics in files of the module
+are reported. It finds inputs that fuzzing reaches with difficulty (a hash
+that must match, linear equations over two fields): see
+[symbolic execution](eval/symexec.md) for the benchmark and for what it does
+not do.
 
 ## On a real module
 
