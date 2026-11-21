@@ -257,6 +257,9 @@ func outcome(c *quic.Conn) (code int, detail string) {
 func main() {
 	addr := flag.String("addr", "127.0.0.1:4433", "server address")
 	only := flag.String("only", "", "comma-separated rule ids (default: all)")
+	hookRules := flag.Bool("hookrules", false, "instead of the frame table: packet rules that need the attacker to change packets it builds")
+	amp := flag.Bool("amp", false, "instead of the frame table: the anti-amplification limit (RFC 9000 section 8)")
+	packets := flag.Bool("packets", false, "instead of the frame table: the packet-level rules, raw datagrams to a server")
 	fuzzN := flag.Int("fuzz", 0, "instead of the rule table: this many connections, each with a random sequence of frames; reports INTERNAL_ERROR and unknown error codes")
 	seed := flag.Int64("seed", 1, "seed of -fuzz")
 	role := flag.String("role", "client", "client: attack a server at -addr; server: listen on -addr and attack the clients that connect")
@@ -266,6 +269,15 @@ func main() {
 		if id != "" {
 			want[id] = true
 		}
+	}
+	if *amp {
+		os.Exit(runAmplification(*addr))
+	}
+	if *hookRules {
+		os.Exit(runHookRules(*addr))
+	}
+	if *packets {
+		os.Exit(runPackets(*addr))
 	}
 	if *fuzzN > 0 {
 		os.Exit(fuzz(*addr, *fuzzN, *seed))

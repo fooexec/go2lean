@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -36,7 +37,19 @@ func main() {
 		client(*dialAddr)
 		return
 	}
-	ln, err := quic.ListenAddr(*addr, &tls.Config{Certificates: []tls.Certificate{selfSigned()}, NextProtos: []string{"conf"}}, &quic.Config{MaxIdleTimeout: 10 * time.Second})
+	udpAddr, err := net.ResolveUDPAddr("udp", *addr)
+	if err != nil {
+		panic(err)
+	}
+	pc, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		panic(err)
+	}
+	// A stateless reset key makes the server answer unattributable packets with Stateless Resets.
+	var key quic.StatelessResetKey
+	rand.Read(key[:])
+	tr := &quic.Transport{Conn: pc, StatelessResetKey: &key}
+	ln, err := tr.Listen(&tls.Config{Certificates: []tls.Certificate{selfSigned()}, NextProtos: []string{"conf"}}, &quic.Config{MaxIdleTimeout: 10 * time.Second})
 	if err != nil {
 		panic(err)
 	}

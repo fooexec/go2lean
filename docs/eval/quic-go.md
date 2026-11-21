@@ -167,6 +167,20 @@ never crashed or hung the server and never produced a code RFC 9000 does
 not define; the only INTERNAL_ERROR was the conflicting sequence number
 above, found again.
 
+Packet-level rules, on the same revision (all agree): ten raw-datagram
+rules (version negotiation for an unsupported version at 1200 bytes with
+the connection IDs swapped and without the offered version; unsupported
+version below 1200 bytes, over-long connection IDs, a Version Negotiation
+packet, a 20-byte short header packet and a cleared Fixed Bit all dropped;
+Stateless Resets of at least 21 and under three times the trigger, one byte
+shorter than triggers of 43 bytes or fewer, and no loop on a reply to a
+reset); reserved header bits set on a 1-RTT and on an Initial packet end in
+PROTOCOL_VIOLATION; a packet with the Key Phase bit flipped and sealed with
+the current keys is discarded and the connection goes on; and the
+anti-amplification limit holds for a client that never answers (the server
+sent 0.75 times what it received) and on a new path it cannot validate
+(1.0 times).
+
 So the connection layer agrees with RFC 9000 on everything the table can
 express with raw frames; the differences are error codes. What the table
 does not reach: packet-level rules (reserved bits, empty packets, header

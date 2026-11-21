@@ -12,6 +12,9 @@ for d in clean attack; do
   git -C "$QG" worktree add -q --detach "$W/$d" "$REV"
 done
 cp "$HERE/hook/attack_hook.go.txt" "$W/attack/zz_attack_hook.go"
+# One call at the start of encryptPacket (packet_packer.go) runs AttackPreSeal.
+sed -i '/^func (p \*packetPacker) encryptPacket(/a\	if AttackPreSeal != nil {\n\t\tAttackPreSeal(raw, int(payloadOffset), int(pnLen))\n\t}' "$W/attack/packet_packer.go"
+grep -q AttackPreSeal "$W/attack/packet_packer.go" || { echo "could not patch packet_packer.go"; exit 1; }
 echo "revision $(git -C "$QG" rev-parse --short "$REV")"
 (cd "$HERE/victim" && go mod tidy -e >/dev/null 2>&1; go build -o "$W/victim" .)
 (cd "$HERE/attacker" && go mod tidy -e >/dev/null 2>&1; go build -o "$W/attacker" .)
@@ -33,6 +36,6 @@ VP=$!
 trap 'kill $VP 2>/dev/null; git -C "$QG" worktree remove --force "$W/clean"; git -C "$QG" worktree remove --force "$W/attack"' EXIT
 sleep 1
 RSS0=$(ps -o rss= -p $VP | tr -d ' ')
-"$W/attacker" -addr 127.0.0.1:$PORT ${ONLY:+-only $ONLY} ${FUZZ:+-fuzz $FUZZ -seed ${SEED:-1}} || true
+"$W/attacker" -addr 127.0.0.1:$PORT ${ONLY:+-only $ONLY} ${FUZZ:+-fuzz $FUZZ -seed ${SEED:-1}} ${PACKETS:+-packets} ${HOOKRULES:+-hookrules} ${AMP:+-amp} || true
 echo "server memory: ${RSS0} KiB before, $(ps -o rss= -p $VP 2>/dev/null | tr -d ' ') KiB after"
 if ! kill -0 $VP 2>/dev/null; then echo "THE SERVER DIED:"; tail -n 30 "$W/victim.log"; fi
