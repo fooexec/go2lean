@@ -1,6 +1,7 @@
 package quic
 
 import (
+	"github.com/quic-go/quic-go/internal/handshake"
 	"github.com/quic-go/quic-go/internal/protocol"
 )
 
@@ -25,3 +26,7 @@ func (c *Conn) AttackSendRaw(b []byte) {
 // header (all its bits are protected by header protection), raw[payloadOffset:]
 // the plaintext payload. The function may change bytes in place.
 var AttackPreSeal func(raw []byte, payloadOffset, pnLen int)
+
+// AttackSetTransportParams sets a function that rewrites the encoded
+// transport parameters this endpoint sends in the TLS handshake.
+func AttackSetTransportParams(f func([]byte) []byte) { handshake.AttackTransportParams = f }

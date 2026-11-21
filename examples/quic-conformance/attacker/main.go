@@ -258,6 +258,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:4433", "server address")
 	only := flag.String("only", "", "comma-separated rule ids (default: all)")
 	hookRules := flag.Bool("hookrules", false, "instead of the frame table: packet rules that need the attacker to change packets it builds")
+	tpRules := flag.Bool("tprules", false, "instead of the frame table: the transport parameter rules (RFC 9000 sections 7.4, 18.2)")
 	amp := flag.Bool("amp", false, "instead of the frame table: the anti-amplification limit (RFC 9000 section 8)")
 	packets := flag.Bool("packets", false, "instead of the frame table: the packet-level rules, raw datagrams to a server")
 	fuzzN := flag.Int("fuzz", 0, "instead of the rule table: this many connections, each with a random sequence of frames; reports INTERNAL_ERROR and unknown error codes")
@@ -269,6 +270,12 @@ func main() {
 		if id != "" {
 			want[id] = true
 		}
+	}
+	if *tpRules {
+		if *role == "server" {
+			os.Exit(runServerTPRules(*addr))
+		}
+		os.Exit(runTPRules(*addr))
 	}
 	if *amp {
 		os.Exit(runAmplification(*addr))

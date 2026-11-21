@@ -181,6 +181,20 @@ anti-amplification limit holds for a client that never answers (the server
 sent 0.75 times what it received) and on a new path it cannot validate
 (1.0 times).
 
+Transport parameters (the attacker rewrites the encoded parameters it
+sends in the handshake): 17 rules for what a server does with a client's
+(a repeated parameter, server-only parameters, `max_udp_payload_size`,
+`ack_delay_exponent`, `max_ack_delay`, `active_connection_id_limit` and
+stream counts out of range, a missing or wrong `initial_source_connection_id`,
+a truncated block; and the valid edge cases and an unknown parameter) and 8
+for what a client does with a server's (missing or wrong
+`original_destination_connection_id` and `initial_source_connection_id`,
+`retry_source_connection_id` without a Retry, a short reset token, a
+preferred address with a zero-length ID). All 25 agree.
+
+In total 105 rules against `90eebba`: 100 agree, 5 differ, all in the error
+code of a MAY or an ambiguous case, listed above.
+
 So the connection layer agrees with RFC 9000 on everything the table can
 express with raw frames; the differences are error codes. What the table
 does not reach: packet-level rules (reserved bits, empty packets, header
