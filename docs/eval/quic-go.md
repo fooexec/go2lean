@@ -136,10 +136,10 @@ does: an attacking endpoint, built from a copy of quic-go with a method that
 queues raw frame bytes, completes a handshake with an unmodified quic-go
 and sends the frames of one RFC 9000 sentence; the table records the error
 the RFC requires and the harness compares it with the error the receiver
-closes with. 45 rules with the attacker as a client and 10 with the
+closes with. 46 rules with the attacker as a client and 10 with the
 attacker as a server, on master `90eebba`:
 
-- **50 of 55 agree**: frame types and encodings, stream state and limits,
+- **51 of 56 agree**: frame types and encodings, stream state and limits,
   final sizes, flow control at both levels, connection ID rules, ACK
   validity, client-only frames (NEW_TOKEN, HANDSHAKE_DONE), CRYPTO bounds,
   and the valid cases that must not close the connection.
@@ -192,7 +192,7 @@ for what a client does with a server's (missing or wrong
 `retry_source_connection_id` without a Retry, a short reset token, a
 preferred address with a zero-length ID). All 25 agree.
 
-In total 105 rules against `90eebba`: 100 agree, 5 differ, all in the error
+In total 96 rules against `90eebba`: 91 agree, 5 differ, all in the error
 code of a MAY or an ambiguous case, listed above.
 
 So the connection layer agrees with RFC 9000 on everything the table can
