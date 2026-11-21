@@ -128,6 +128,51 @@ What came out of it:
   it is left open. The second round of the agent was cut short by the
   environment, so its revised specs were fuzzed by hand.
 
+## RFC 9000 rules on a live connection (2026-11-21)
+
+The component specs above cannot see how a whole connection reacts to a
+frame. [`examples/quic-conformance`](../../examples/quic-conformance/README.md)
+does: an attacking endpoint, built from a copy of quic-go with a method that
+queues raw frame bytes, completes a handshake with an unmodified quic-go
+and sends the frames of one RFC 9000 sentence; the table records the error
+the RFC requires and the harness compares it with the error the receiver
+closes with. 45 rules with the attacker as a client and 10 with the
+attacker as a server, on master `90eebba`:
+
+- **50 of 55 agree**: frame types and encodings, stream state and limits,
+  final sizes, flow control at both levels, connection ID rules, ACK
+  validity, client-only frames (NEW_TOKEN, HANDSHAKE_DONE), CRYPTO bounds,
+  and the valid cases that must not close the connection.
+- **5 differ**:
+  1. A NEW_CONNECTION_ID that uses an already held sequence number for a
+     different connection ID (or a different stateless reset token) closes
+     the connection with **INTERNAL_ERROR** (`conn_id_manager.go`,
+     `addConnectionID` returns a plain `fmt.Errorf`). RFC 9000 section
+     19.15 allows PROTOCOL_VIOLATION here (a MAY); INTERNAL_ERROR tells the
+     peer the receiver failed locally. Reproduced three times. Low.
+  2. A NEW_CONNECTION_ID that repeats a connection ID under a different
+     sequence number, or one sequence number for two IDs after a Retire
+     Prior To, is accepted (MAY, so allowed).
+  3. A CRYPTO frame whose end offset passes 2^62-1 closes with
+     CRYPTO_BUFFER_EXCEEDED (0x0d); section 19.6 names FRAME_ENCODING_ERROR
+     or PROTOCOL_VIOLATION. quic-go checks its 16 KiB buffer first, which
+     the same RFC allows for data it cannot buffer; ambiguous.
+  4. A DATAGRAM frame when the extension was not negotiated closes with
+     FRAME_ENCODING_ERROR; RFC 9221 section 4 requires PROTOCOL_VIOLATION.
+     `frame_parser.go` says it is deliberate.
+
+The same attacker can also send random frame sequences (`FUZZ=n`): 2,050
+connections over six seeds, half the frames valid and half edge values,
+never crashed or hung the server and never produced a code RFC 9000 does
+not define; the only INTERNAL_ERROR was the conflicting sequence number
+above, found again.
+
+So the connection layer agrees with RFC 9000 on everything the table can
+express with raw frames; the differences are error codes. What the table
+does not reach: packet-level rules (reserved bits, empty packets, header
+protection, key update), path migration, Retry and version negotiation,
+which need the attacker to control whole packets.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
