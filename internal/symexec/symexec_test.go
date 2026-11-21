@@ -19,7 +19,7 @@ func TestBench(t *testing.T) {
 	}
 	var all []Finding
 	got := map[string]bool{}
-	for _, fn := range pkg.Functions() {
+	for _, fn := range pkg.Functions(true) {
 		fs, err := Explore(fn, Options{MaxLen: 24, Root: pkg.Root()})
 		if err != nil {
 			t.Fatalf("%s: %v", fn.Name(), err)

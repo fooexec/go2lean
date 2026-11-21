@@ -2,6 +2,7 @@ package symexec
 
 import (
 	"fmt"
+	"go/token"
 	"go/types"
 	"os"
 	"os/exec"
@@ -40,13 +41,15 @@ func Load(dir, pattern string) (*Package, error) {
 	return &Package{Dir: dir, Pkg: pkgs[0], SSA: ssapkgs[0], Prog: prog}, nil
 }
 
-// Functions are the package-level functions (exported or not) whose
-// parameters the executor supports, by name.
-func (p *Package) Functions() []*ssa.Function {
+// Functions are the package-level functions whose parameters the executor
+// supports, exported ones only unless unexported is set: an unexported
+// function may rely on what its callers guarantee, and a panic that breaks
+// that is not reachable from the API.
+func (p *Package) Functions(unexported bool) []*ssa.Function {
 	var out []*ssa.Function
 	for _, m := range p.SSA.Members {
 		fn, ok := m.(*ssa.Function)
-		if !ok || len(fn.Blocks) == 0 || fn.Name() == "init" {
+		if !ok || len(fn.Blocks) == 0 || fn.Name() == "init" || (!unexported && !token.IsExported(fn.Name())) {
 			continue
 		}
 		okp := true

@@ -39,18 +39,31 @@ The four that only `symexec` found are B01, B05, B06 and B07. B08 and B12 need
 
 ## On real code
 
-- quic-go `quicvarint`, `internal/protocol`, `internal/wire`: the executor
-  reaches the explicit panics for out-of-range values that the functions
-  document (`Append` for values above 2^62) and negative lengths passed as
-  `int` (`ParseShortHeader` with `connIDLen = -18`): reproduced, and not
-  defects, since no caller passes them. Candidates through calls the executor
-  does not model (the random position in `GetGreasedVersions`, the library
-  code under `GenerateConnectionID`) did not reproduce.
-- snappy `Decode`, `Encode`: 83 paths of `Decode`, no reproduced panic.
+First run, every function with supported parameters, unexported included:
+quic-go `quicvarint`, `internal/protocol`, `internal/wire`, and snappy. The
+reproduced panics were the explicit ones that the functions document
+(`Append` for values above 2^62), negative lengths passed as `int`
+(`ParseShortHeader` with `connIDLen = -18`), and, in lz4's `lz4block` and
+`s2`, about twenty panics of unexported helpers (`writeSequence`, `emitCopy16`,
+`runLength`) given a destination that is too small: they break a precondition
+that the callers keep. Those are not defects, and they decided the default:
+only exported functions are explored, the unexported ones through the calls
+the exported ones make (`-unexported` brings the others back).
 
-So far it has found no defect in real code that the other engines missed.
-What it adds is a class of inputs, and the benchmark says the class is not
-small for the engines already here.
+Second run, exported functions only, call depth 5:
+
+| library, package | functions explored | reproduced panics | defect |
+|---|---|---|---|
+| snappy | `Decode`, `Encode`, `DecodedLen`, `MaxEncodedLen` | 0 | no |
+| lz4 `internal/lz4block` | block (de)compression | `Put` with a buffer of an invalid size: documented `panic` | no |
+| klauspost/compress `s2` | encode, decode, index | 0 (9 candidates through unmodelled calls, none reproduced) | no |
+| protobuf-go `encoding/protowire` | `Consume*`, `Append*` | 0 (8 candidates on recursion, none reproduced) | no |
+| miekg/dns | `UnpackDomainName`, `UnpackRR` and the rest | a negative offset (`off = -2^63`) panics in both | no: the caller passes the offset, a negative one is a misuse |
+
+Nothing reachable from untrusted input, in libraries that are fuzzed
+continuously. The executor works; whether the class of inputs it adds
+(equations a fuzzer cannot solve) occurs in code like this is not settled by
+this: five parsers and codecs had none that it reached.
 
 ## Zorya, on compiled binaries (2026-11-21)
 
@@ -83,7 +96,10 @@ support, and calls into the runtime and the standard library. What it costs is
 the setup (Ghidra 11.3.1, pyhidra, GDB with ptrace, binutils headers, `libz3`,
 a Rust build) and minutes per target.
 
-To run it: build Zorya (`make -C external/pcode-generator all`, then
+`go2lean zorya run -dir <checkout> -ghidra <dir> <binary>` runs it and runs
+the binary on every report (`go2lean zorya replay` does the replay for a
+results file you already have): a report is `PANICS`, `does not panic`, or
+`not replayed` when the input needs a zero byte. To run it by hand: build Zorya (`make -C external/pcode-generator all`, then
 `cargo build --release` with `binutils-dev libz3-dev clang`), unpack Ghidra,
 `pip install pyhidra`, and
 

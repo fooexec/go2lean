@@ -16,6 +16,7 @@ func cmdSymexec(args []string) error {
 	fs := flag.NewFlagSet("symexec", flag.ExitOnError)
 	module := fs.String("module", ".", "directory of the Go module")
 	only := fs.String("func", "", "comma-separated function names (default: every supported function)")
+	unexp := fs.Bool("unexported", false, "also explore unexported functions (their panics may be unreachable from the API)")
 	replay := fs.Bool("replay", true, "run the inputs of each finding on the real function")
 	loop := fs.Int("loop", 0, "visits of one block on a path (default 6)")
 	depth := fs.Int("depth", 0, "inlined call depth (default 3)")
@@ -35,7 +36,7 @@ func cmdSymexec(args []string) error {
 		}
 	}
 	var all []symexec.Finding
-	for _, fn := range pkg.Functions() {
+	for _, fn := range pkg.Functions(*unexp) {
 		if len(want) > 0 && !want[fn.Name()] {
 			continue
 		}
