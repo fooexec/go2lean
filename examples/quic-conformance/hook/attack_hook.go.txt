@@ -1,6 +1,7 @@
 package quic
 
 import (
+	"github.com/quic-go/quic-go/internal/handshake"
 	"github.com/quic-go/quic-go/internal/protocol"
 )
 
@@ -18,3 +19,14 @@ func (c *Conn) AttackSendRaw(b []byte) {
 	c.framer.QueueControlFrame(attackRaw(append([]byte(nil), b...)))
 	c.scheduleSending()
 }
+
+// AttackPreSeal, if set, is called with every packet the endpoint builds,
+// after the header and the payload are written and before the packet is
+// encrypted and header protection is applied. raw[0] is the first byte of the
+// header (all its bits are protected by header protection), raw[payloadOffset:]
+// the plaintext payload. The function may change bytes in place.
+var AttackPreSeal func(raw []byte, payloadOffset, pnLen int)
+
+// AttackSetTransportParams sets a function that rewrites the encoded
+// transport parameters this endpoint sends in the TLS handshake.
+func AttackSetTransportParams(f func([]byte) []byte) { handshake.AttackTransportParams = f }

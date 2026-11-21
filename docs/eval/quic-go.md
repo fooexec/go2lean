@@ -136,10 +136,10 @@ does: an attacking endpoint, built from a copy of quic-go with a method that
 queues raw frame bytes, completes a handshake with an unmodified quic-go
 and sends the frames of one RFC 9000 sentence; the table records the error
 the RFC requires and the harness compares it with the error the receiver
-closes with. 45 rules with the attacker as a client and 10 with the
+closes with. 46 rules with the attacker as a client and 10 with the
 attacker as a server, on master `90eebba`:
 
-- **50 of 55 agree**: frame types and encodings, stream state and limits,
+- **51 of 56 agree**: frame types and encodings, stream state and limits,
   final sizes, flow control at both levels, connection ID rules, ACK
   validity, client-only frames (NEW_TOKEN, HANDSHAKE_DONE), CRYPTO bounds,
   and the valid cases that must not close the connection.
@@ -166,6 +166,34 @@ connections over six seeds, half the frames valid and half edge values,
 never crashed or hung the server and never produced a code RFC 9000 does
 not define; the only INTERNAL_ERROR was the conflicting sequence number
 above, found again.
+
+Packet-level rules, on the same revision (all agree; the migration case is open): ten raw-datagram
+rules (version negotiation for an unsupported version at 1200 bytes with
+the connection IDs swapped and without the offered version; unsupported
+version below 1200 bytes, over-long connection IDs, a Version Negotiation
+packet, a 20-byte short header packet and a cleared Fixed Bit all dropped;
+Stateless Resets of at least 21 and under three times the trigger, one byte
+shorter than triggers of 43 bytes or fewer, and no loop on a reply to a
+reset); reserved header bits set on a 1-RTT and on an Initial packet end in
+PROTOCOL_VIOLATION; a packet with the Key Phase bit flipped and sealed with
+the current keys is discarded and the connection goes on; and the
+anti-amplification limit holds for a client that never answers (the server
+sent 0.75 times what it received). The same limit on a new path is checked
+further (migration rules, not yet published).
+
+Transport parameters (the attacker rewrites the encoded parameters it
+sends in the handshake): 17 rules for what a server does with a client's
+(a repeated parameter, server-only parameters, `max_udp_payload_size`,
+`ack_delay_exponent`, `max_ack_delay`, `active_connection_id_limit` and
+stream counts out of range, a missing or wrong `initial_source_connection_id`,
+a truncated block; and the valid edge cases and an unknown parameter) and 8
+for what a client does with a server's (missing or wrong
+`original_destination_connection_id` and `initial_source_connection_id`,
+`retry_source_connection_id` without a Retry, a short reset token, a
+preferred address with a zero-length ID). All 25 agree.
+
+In total 96 rules against `90eebba`: 91 agree, 5 differ, all in the error
+code of a MAY or an ambiguous case, listed above.
 
 So the connection layer agrees with RFC 9000 on everything the table can
 express with raw frames; the differences are error codes. What the table
