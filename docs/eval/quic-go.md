@@ -201,6 +201,32 @@ does not reach: packet-level rules (reserved bits, empty packets, header
 protection, key update), path migration, Retry and version negotiation,
 which need the attacker to control whole packets.
 
+## Stream state machines and concurrency (2026-11-21)
+
+The earlier model searches on quic-go did not target the places where the
+model might be strongest: state machines and goroutine interleavings. A first
+try: a guidance file with RFC 9000 section 3 (the send and receive stream
+states, final size, completion once, blocked `Write` and `Read` woken by
+every event that should wake them) and `go2lean agent -specs-only` on the
+root package. The agent wrote three sequence specs with a small reference
+state machine inside each (`SeqSendStream`, `SeqRecvStream`,
+`SeqReadUnblocks`). Go's fuzzer, 60 s on the real code: all three held. The
+model's counterexamples were all the model's: two spurious and one
+inconclusive (the model's schedule did not reproduce).
+
+One cause was a frontend rule, fixed in this change: a pointer to a struct of
+another package that has unexported fields and a constructor (`wire.StreamFrame`,
+`wire.GetStreamFrame`) was treated as an opaque handle, so `f.Data = ...`
+on a frame the model had just taken from the pool was dropped as a store into
+a handle. A pointer the model built itself (an allocation, the result of a
+modelled function, a pointer loaded from a field of an object the model
+owns) is no longer a handle; a handle passed in or returned by an unmodelled
+call still is. `SeqSendStream` is no longer spurious. `SeqRecvStream` still
+is (a havoc site in the receive path) and `SeqReadUnblocks` stays
+inconclusive. The three specs also kill few mutants (2, 6 and 2 of 24), so
+they check little; that, not the model, is the next thing to improve before
+claiming that the stream state machines are right.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
