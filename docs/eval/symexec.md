@@ -65,6 +65,24 @@ continuously. The executor works; whether the class of inputs it adds
 (equations a fuzzer cannot solve) occurs in code like this is not settled by
 this: five parsers and codecs had none that it reached.
 
+### More targets (2026-11-21)
+
+go-git (`plumbing/format/packfile`: `PatchDelta` explored 1344 paths with no
+panic; `DiffDelta` gave one candidate that did not reproduce), go-git
+`pktline`, `idxfile` and `utils/binary`, and xz `lzma`: no candidate at all.
+The reason is the surface: most exported functions of a parser take an
+`io.Reader` or a struct, and `symexec` only takes integers, booleans and
+slices of integers, so the libraries that are the likeliest to have input
+gated by a checksum or a length field expose almost nothing to it. A harness
+for Zorya that wraps the API (`pktline.NewScanner(bytes.NewReader(arg))`)
+ran 5.5 minutes and stopped with "the pointer is concretely zero, execution
+halted" (a limit of its emulation of the Go runtime), reporting nothing.
+
+Going further needs `symexec` to accept an `io.Reader` backed by a symbolic
+slice and structs with integer and slice fields, which means modelling
+`bytes.Reader`, field loads and stores, and calls through interfaces: days of
+work, for a class of inputs that the five libraries above did not contain.
+
 ## Zorya, on compiled binaries (2026-11-21)
 
 [Zorya](https://github.com/Ledger-Donjon/zorya) (Ledger Donjon, Apache-2.0, v0.0.5)
