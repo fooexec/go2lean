@@ -52,6 +52,48 @@ So far it has found no defect in real code that the other engines missed.
 What it adds is a class of inputs, and the benchmark says the class is not
 small for the engines already here.
 
+## Zorya, on compiled binaries (2026-11-21)
+
+[Zorya](https://github.com/Ledger-Donjon/zorya) (Ledger Donjon, Apache-2.0, v0.0.5)
+is a concolic executor for compiled x86-64 programs, Go among them: it
+captures the state of the running binary with GDB, lifts the code to Ghidra's
+P-Code, makes `os.Args` symbolic, executes with Z3, and reports inputs that
+reach a panic. It runs the real machine code, so nothing is modelled: structs,
+strings, maps and the runtime are as the compiler made them. Tried on the same
+benchmark with a one-line harness per function (`os.Args[1]` split into the
+parameters, built with `-ldflags -X` to select the function):
+
+| | Zorya | `symexec` |
+|---|---|---|
+| time per target | about 2 minutes (GDB dump, P-Code, Ghidra pass, exploration) | about 1 second |
+| B01 hash | input found, reproduces (the same `0x18cc4a9f`) | found |
+| B05 magic number | input found, reproduces | found |
+| B06, B07, B10 | the input satisfies the first equation only; the second condition fails, no panic | found |
+| crashme (its own example) | found in 90 s | n/a |
+| quic-go frame loop (`FrameParser`, 24-byte input) | 2 reports in 4 minutes, both on the error return of `ParseType`; neither input panics | no panic reached |
+
+So Zorya takes a branch to its panic block and reports the input of that
+branch, without carrying on to the rest of the path condition: B06, B07 and
+B10 give inputs that do not panic, and every report has to be replayed on the
+binary. A path through an error return that the runtime also reaches for a
+panic counts as one (`ParseType`, frame_parser.go:69). The input comes through
+`argv`, so it cannot hold a zero byte. What it adds is the real program:
+functions with struct, string or pointer parameters, which `symexec` does not
+support, and calls into the runtime and the standard library. What it costs is
+the setup (Ghidra 11.3.1, pyhidra, GDB with ptrace, binutils headers, `libz3`,
+a Rust build) and minutes per target.
+
+To run it: build Zorya (`make -C external/pcode-generator all`, then
+`cargo build --release` with `binutils-dev libz3-dev clang`), unpack Ghidra,
+`pip install pyhidra`, and
+
+    GHIDRA_INSTALL_DIR=... ZORYA_DIR=... scripts/zorya <binary> --lang go --compiler gc \
+      --thread-scheduling all-threads --mode main --arg <n bytes> \
+      --negate-path-exploration --plugin none
+
+`results/FOUND_SAT_STATE.txt` lists the inputs. Run each on the binary
+before believing it.
+
 ## What it does not do
 
 - Parameters are integers, booleans and slices of integers. A struct, a
