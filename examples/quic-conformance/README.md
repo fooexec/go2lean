@@ -13,6 +13,7 @@ The table is written from the RFC text, not from quic-go's code.
 examples/quic-conformance/run.sh <quic-go checkout> [revision]      # attacker is a client
 ROLE=server examples/quic-conformance/run.sh <quic-go checkout>     # attacker is a server
 ONLY=R05c,R25 PORT=4500 examples/quic-conformance/run.sh <checkout> # a subset
+FUZZ=400 SEED=3 examples/quic-conformance/run.sh <checkout>         # random frame sequences
 ```
 
 Output is one line per rule: `ok`, or `DIFF` with the RFC's strength
@@ -20,6 +21,11 @@ Output is one line per rule: `ok`, or `DIFF` with the RFC's strength
 error, and the receiver's message. The checkout needs Go 1.26 and git
 worktrees; nothing is changed in it. Results for quic-go are in
 [docs/eval/quic-go.md](../../docs/eval/quic-go.md).
+
+`FUZZ=n` replaces the table by n connections, each sent a random sequence of
+frames (half of them valid, half with edge values). The oracle: the receiver
+never answers with INTERNAL_ERROR or a code RFC 9000 does not define, never
+crashes, and its memory is printed before and after.
 
 To add a rule, add an entry to `rules()` (client attacks server) or
 `serverRules()` (server attacks client); build frames with the helpers

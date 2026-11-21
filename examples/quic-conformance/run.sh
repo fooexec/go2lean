@@ -32,5 +32,7 @@ fi
 VP=$!
 trap 'kill $VP 2>/dev/null; git -C "$QG" worktree remove --force "$W/clean"; git -C "$QG" worktree remove --force "$W/attack"' EXIT
 sleep 1
-"$W/attacker" -addr 127.0.0.1:$PORT ${ONLY:+-only $ONLY} || true
+RSS0=$(ps -o rss= -p $VP | tr -d ' ')
+"$W/attacker" -addr 127.0.0.1:$PORT ${ONLY:+-only $ONLY} ${FUZZ:+-fuzz $FUZZ -seed ${SEED:-1}} || true
+echo "server memory: ${RSS0} KiB before, $(ps -o rss= -p $VP 2>/dev/null | tr -d ' ') KiB after"
 if ! kill -0 $VP 2>/dev/null; then echo "THE SERVER DIED:"; tail -n 30 "$W/victim.log"; fi

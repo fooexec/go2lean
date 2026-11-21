@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"math/big"
+	mrand "math/rand"
 	"net"
 	"os"
 	"sort"
@@ -256,6 +257,8 @@ func outcome(c *quic.Conn) (code int, detail string) {
 func main() {
 	addr := flag.String("addr", "127.0.0.1:4433", "server address")
 	only := flag.String("only", "", "comma-separated rule ids (default: all)")
+	fuzzN := flag.Int("fuzz", 0, "instead of the rule table: this many connections, each with a random sequence of frames; reports INTERNAL_ERROR and unknown error codes")
+	seed := flag.Int64("seed", 1, "seed of -fuzz")
 	role := flag.String("role", "client", "client: attack a server at -addr; server: listen on -addr and attack the clients that connect")
 	flag.Parse()
 	want := map[string]bool{}
@@ -263,6 +266,9 @@ func main() {
 		if id != "" {
 			want[id] = true
 		}
+	}
+	if *fuzzN > 0 {
+		os.Exit(fuzz(*addr, *fuzzN, *seed))
 	}
 	rs := rules()
 	var ln *quic.Listener
@@ -378,4 +384,142 @@ func serverRules() []rule {
 		{"S09", "9000 19.4", "RESET_STREAM for a stream the receiver can only send on (client-initiated unidirectional stream 2)", streamStateError, "", func(c *quic.Conn, s func(...[]byte)) { s(resetStream(2, 0, 0)) }},
 		{"S10", "9000 12.4", "a frame type that is not defined", frameEncodingError, "", func(c *quic.Conn, s func(...[]byte)) { s(vi(0x21)) }},
 	}
+}
+
+var edge = []uint64{0, 1, 2, 3, 4, 5, 7, 8, 9, 16, 100, 255, 256, 1000, 4000, 1 << 14, 1 << 20, 1 << 30, 1 << 40, 1<<60 - 1, 1 << 60, 1<<60 + 1, maxVarint - 1, maxVarint}
+
+// fuzz sends a random sequence of frames on each of n connections and reports
+// the ones the receiver answers with INTERNAL_ERROR or a code RFC 9000 does
+// not define: input from a peer is never an internal fault.
+func fuzz(addr string, n int, seed int64) int {
+	rng := mrand.New(mrand.NewSource(seed))
+	pick := func() uint64 { return edge[rng.Intn(len(edge))] }
+	sid := func() uint64 {
+		if rng.Intn(3) == 0 {
+			return pick()
+		}
+		return uint64(rng.Intn(14)) // streams around the ones that exist
+	}
+	cidb := func() []byte {
+		l := []int{0, 1, 4, 8, 20, 21}[rng.Intn(6)]
+		b := make([]byte, l)
+		rng.Read(b)
+		return b
+	}
+	nextSeq := uint64(100)
+	safe := func() []byte {
+		switch rng.Intn(9) {
+		case 0:
+			nextSeq++
+			return newCID(nextSeq, 0, []byte{byte(nextSeq), byte(rng.Intn(256)), 1, 2, 3, 4, 5, 6})
+		case 1:
+			return retireCID(uint64(rng.Intn(3)))
+		case 2:
+			return stream(uint64(4*rng.Intn(3)), uint64(rng.Intn(200)), []byte("some stream data"), rng.Intn(8) == 0)
+		case 3:
+			return maxData(uint64(1<<20 + rng.Intn(1<<20)))
+		case 4:
+			return maxStreamData(uint64(4*rng.Intn(3)), uint64(1<<20+rng.Intn(1<<20)))
+		case 5:
+			return cat(vi(0x1a), pad(8, byte(rng.Intn(256))))
+		case 6:
+			return stopSending(uint64(4*rng.Intn(3)), uint64(rng.Intn(5)))
+		case 7:
+			return resetStream(uint64(4*rng.Intn(3)+4), 0, uint64(rng.Intn(10)))
+		default:
+			return maxStreams(rng.Intn(2) == 0, uint64(100+rng.Intn(100)))
+		}
+	}
+	gen := func() []byte {
+		if rng.Intn(2) == 0 {
+			return safe()
+		}
+		switch rng.Intn(24) {
+		case 0:
+			return retireCID(pick())
+		case 1:
+			return newCID(pick(), pick(), cidb())
+		case 2:
+			return maxStreams(rng.Intn(2) == 0, pick())
+		case 3:
+			return streamsBlocked(rng.Intn(2) == 0, pick())
+		case 4:
+			return resetStream(sid(), pick(), pick())
+		case 5:
+			return stopSending(sid(), pick())
+		case 6:
+			return maxStreamData(sid(), pick())
+		case 7:
+			return maxData(pick())
+		case 8:
+			d := make([]byte, rng.Intn(40))
+			rng.Read(d)
+			return stream(sid(), pick(), d, rng.Intn(3) == 0)
+		case 9:
+			return ack(pick(), pick(), pick()%8, pick())
+		case 10:
+			return crypto(pick(), []byte("x"))
+		case 11:
+			return vi(0x01)
+		case 12:
+			return vi(0x14, pick())
+		case 13:
+			return vi(0x15, sid(), pick())
+		case 14:
+			return cat(vi(0x1a), pad(8, byte(rng.Intn(256))))
+		case 15:
+			return cat(vi(0x1b), pad(8, byte(rng.Intn(256))))
+		case 16:
+			return cat(vi(0x07, 3), []byte("tok"))
+		case 17:
+			return vi(0x1e)
+		case 18:
+			return cat(vi(0x1c, pick(), pick(), 0))
+		case 19:
+			return vi(pick() % 0x40)
+		case 20:
+			return cat(vi(0x30), []byte("dg"))
+		case 21:
+			b := make([]byte, 1+rng.Intn(12))
+			rng.Read(b)
+			return b
+		case 22:
+			return cat(vi(0x2, pick(), pick(), 1, pick()), vi(pick(), pick()))
+		default:
+			return stream(sid(), pick()%64, []byte("data"), false)
+		}
+	}
+	bad := 0
+	hist := map[string]int{}
+	for i := 0; i < n; i++ {
+		c, err := dial(addr)
+		if err != nil {
+			fmt.Printf("fuzz %d: dial failed: %v (is the server still running?)\n", i, err)
+			return 1
+		}
+		var frames [][]byte
+		for k, m := 0, 1+rng.Intn(10); k < m; k++ {
+			f := gen()
+			frames = append(frames, f)
+			c.AttackSendRaw(f)
+			time.Sleep(time.Duration(rng.Intn(15)) * time.Millisecond)
+		}
+		code, detail := outcome(c)
+		hist[name(code)]++
+		known := code == alive || (code >= 0 && code <= 0x11) || (code >= 0x100 && code <= 0x1ff) || code >= 1000
+		if code == 1 || !known {
+			bad++
+			hex := ""
+			for _, f := range frames {
+				hex += fmt.Sprintf(" %x", f)
+			}
+			fmt.Printf("fuzz %d: %s %s; frames:%s\n", i, name(code), detail, hex)
+		}
+		c.CloseWithError(0, "")
+	}
+	fmt.Printf("fuzz: %d connections, %d reported; outcomes %v\n", n, bad, hist)
+	if bad > 0 {
+		return 1
+	}
+	return 0
 }
