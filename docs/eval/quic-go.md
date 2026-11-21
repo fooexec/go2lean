@@ -161,7 +161,7 @@ attacker as a server, on master `90eebba`:
      FRAME_ENCODING_ERROR; RFC 9221 section 4 requires PROTOCOL_VIOLATION.
      `frame_parser.go` says it is deliberate.
 
-The same attacker can also send random frame sequences (`FUZZ=n`): 1,900
+The same attacker can also send random frame sequences (`FUZZ=n`): 2,050
 connections over six seeds, half the frames valid and half edge values,
 never crashed or hung the server and never produced a code RFC 9000 does
 not define; the only INTERNAL_ERROR was the conflicting sequence number
