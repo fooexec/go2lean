@@ -167,7 +167,7 @@ never crashed or hung the server and never produced a code RFC 9000 does
 not define; the only INTERNAL_ERROR was the conflicting sequence number
 above, found again.
 
-Packet-level rules, on the same revision (all agree): ten raw-datagram
+Packet-level rules, on the same revision (all agree; the migration case is open): ten raw-datagram
 rules (version negotiation for an unsupported version at 1200 bytes with
 the connection IDs swapped and without the offered version; unsupported
 version below 1200 bytes, over-long connection IDs, a Version Negotiation
@@ -178,8 +178,8 @@ reset); reserved header bits set on a 1-RTT and on an Initial packet end in
 PROTOCOL_VIOLATION; a packet with the Key Phase bit flipped and sealed with
 the current keys is discarded and the connection goes on; and the
 anti-amplification limit holds for a client that never answers (the server
-sent 0.75 times what it received) and on a new path it cannot validate
-(1.0 times).
+sent 0.75 times what it received). The same limit on a new path is checked
+further (migration rules, not yet published).
 
 Transport parameters (the attacker rewrites the encoded parameters it
 sends in the handshake): 17 rules for what a server does with a client's
