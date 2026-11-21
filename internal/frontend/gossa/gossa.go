@@ -10731,12 +10731,59 @@ func isForeignOpaqueStruct(pkg *types.Package, t types.Type) bool {
 func (t *fnState) intoHandle(addr ssa.Value) bool {
 	switch a := addr.(type) {
 	case *ssa.FieldAddr:
-		if pt, ok := a.X.Type().Underlying().(*types.Pointer); ok && isHandle(funcPkg(t.f), pt.Elem()) {
+		if pt, ok := a.X.Type().Underlying().(*types.Pointer); ok && isHandle(funcPkg(t.f), pt.Elem()) && !t.builtByModel(a.X, 0) {
 			return true
 		}
 		return t.intoHandle(a.X)
 	case *ssa.IndexAddr:
 		return t.intoHandle(a.X)
+	}
+	return false
+}
+
+// builtByModel says whether the pointer v is an object the model itself
+// built in this function: an allocation, or the result of a call whose
+// function the model compiled (a pool's getter, a constructor in the
+// module). Its fields are data the model holds, so a store into one is
+// kept; a handle that a caller passes in, or that an unmodelled call
+// returns, stays opaque.
+func (t *fnState) builtByModel(v ssa.Value, depth int) bool {
+	if depth > 8 {
+		return false
+	}
+	switch x := v.(type) {
+	case *ssa.Alloc:
+		return true
+	case *ssa.Call:
+		callee := x.Call.StaticCallee()
+		if callee == nil {
+			return false
+		}
+		if _, ok := t.prog.ids[callee]; ok {
+			return true
+		}
+		// a function of a sibling package the model translates
+		_, ok := t.prog.xrefs[callee.String()]
+		return ok
+	case *ssa.Phi:
+		for _, e := range x.Edges {
+			if !t.builtByModel(e, depth+1) {
+				return false
+			}
+		}
+		return len(x.Edges) > 0
+	case *ssa.ChangeType:
+		return t.builtByModel(x.X, depth+1)
+	case *ssa.UnOp:
+		// A pointer loaded from a field of an object the model owns (a
+		// struct of this package or of the module, not a handle): the
+		// model stored it there.
+		if x.Op == token.MUL {
+			switch x.X.(type) {
+			case *ssa.FieldAddr, *ssa.IndexAddr:
+				return !t.intoHandle(x.X)
+			}
+		}
 	}
 	return false
 }
