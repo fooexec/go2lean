@@ -290,7 +290,27 @@ among the events), `s.nextFrameReserved` (line 408, no write through a
 limiter) and `!s.finSent` at line 461 (the earlier branch returns first, so
 the mutant is probably equivalent); the spec kills none of those natively
 either. What makes the model-level mutation miss the killable ones is not
-found; it is tracked as an issue.
+found; it is tracked as an issue (#305).
+
+### The spec extended to the reset and limiter paths (2026-11-22)
+
+The surviving mutants also showed the spec drove neither the reset path
+(`resetErr`, `reliableOffset`) nor writes through a limiter
+(`nextFrameReserved`). An agent round extended `SeqSendStreamFlowControl`
+with `CancelWrite`, a STOP_SENDING frame, RESET_STREAM_AT with a reliable
+boundary, `WriteWithLimit`, and the acknowledgement and loss of popped
+frames. The outcome, again, was no defect in quic-go: the send stream holds
+on the reset path too. The extension instead exposed a bug in the spec's own
+completion rule — a stream whose application called `Close` before a
+STOP_SENDING arrived completes once (`isNewlyCompleted` takes the
+`finishedWriting` branch), and the spec expected zero. The agent restated the
+rule as "a reset stream completes if the application flagged the cancellation
+or closed the stream", but the container reclaimed the run before the
+revision finished, so there is no committed extended spec yet. Two
+conclusions stand: the send state machine agrees with the RFC-derived model
+on every path tried, and a strong state-machine spec is still hard to get
+right in one or two agent rounds — each round so far has debugged the spec,
+not the package.
 
 ## What this says
 
