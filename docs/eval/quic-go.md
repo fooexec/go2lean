@@ -227,6 +227,32 @@ inconclusive. The three specs also kill few mutants (2, 6 and 2 of 24), so
 they check little; that, not the model, is the next thing to improve before
 claiming that the stream state machines are right.
 
+### Stronger send-side spec (2026-11-22)
+
+The surviving mutants of the first three stream specs pointed at what they
+did not drive: flow-control windows of a few bytes, a frame budget that cuts
+a frame, STREAM_DATA_BLOCKED, two streams on one connection window. A second
+agent round, with the survivors listed in the guidance and one spec asked for
+(the first attempt, three specs at once, ran out of output tokens in thinking;
+`-thinking=false` and one spec worked), wrote `SeqSendStreamFlow`: two send
+streams, windows and budgets chosen by the events, a reference model of
+delivered offsets, windows, FIN and blocked frames.
+
+- **One deviation, reproduced on master `81d1aff7`**: `SendStream.popStreamFrame`
+  returns a FIN-only frame whatever `maxBytes` is. After `Close()` with
+  nothing written, `popStreamFrame(0)` returns a 3-byte STREAM frame with the
+  FIN, and marks the FIN sent. Its comment says "maxBytes is the maximum
+  length this frame (including frame header) will have." The only caller
+  (`framer.AppendStreamFrames`) pops only when the room is at least
+  `MinStreamFrameSize`, 128 bytes, so no packet overruns today; it is a broken
+  contract, not a defect a peer can reach.
+- The revised spec, with the budget floor raised past that case, still
+  returned false on real Go for an input the fuzzer found. Tracing it: the
+  spec's own helper reuses one variable for the budget and for the window
+  update, so the second stream's window was set to the last budget. A bug of
+  the spec, not of quic-go; the run stopped before the agent's repair round,
+  so there is no corrected version yet.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
