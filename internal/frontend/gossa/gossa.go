@@ -1784,6 +1784,15 @@ var modelledTime = map[string]bool{
 	"time.appendInt": true, "time.appendNano": true, "time.digitsLen": true, "time.fmtInt": true,
 	"time.nextStdChunk": true, "time.separator": true, "time.startsWithLowerCase": true,
 	"time.stdFracSecond": true, "time.isDigit[string]": true,
+	// Duration accessors: a Duration is an int64 of nanoseconds, so these
+	// compute exactly on the value (quic-go's RTT estimator, RFC 9002 5/6.2,
+	// stores every reading through Nanoseconds; an unmodelled call made the
+	// smoothed RTT havoc and its sequence spec's counterexample spurious).
+	"(time.Duration).Nanoseconds": true, "(time.Duration).Microseconds": true,
+	"(time.Duration).Milliseconds": true, "(time.Duration).Seconds": true,
+	"(time.Duration).Minutes": true, "(time.Duration).Hours": true,
+	"(time.Duration).Truncate": true, "(time.Duration).Round": true,
+	"(time.Duration).Abs": true, "time.lessThanHalf": true,
 }
 
 // modelledNet are the functions of package net translated from source
