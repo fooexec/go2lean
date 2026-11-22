@@ -266,14 +266,19 @@ fixed now (a result of a call to a modelled function is built by the model,
 whichever result it is), and the model agrees with Go on this spec: no
 counterexample, no spurious one.
 
-The spec still kills 1 of 24 mutants of the send path, although it checks a
-lot: the survivors are the same branches of `popNewStreamFrameForPacket`,
-the flow controllers and `getDataForWriting`. Either the random sequences
-(up to ten events, kinds and sizes drawn uniformly) rarely reach a state in
-which a flipped branch changes an observable result, or the mutation pass
-does not see the spec's `recover`-based failures. I have not told which; it
-is the open question before this spec can be said to cover the send state
-machine.
+The spec still kills 1 of 24 mutants of the send path in go2lean's mutation
+pass (the survivors are branches of `popNewStreamFrameForPacket`, the flow
+controllers and `getDataForWriting`). Two things I tried to explain it:
+a hand-made mutant of the real code (`finSent` never set, so the FIN is sent
+again) makes the spec false on 54% of 20000 random sequences run natively in
+Go, and the original code on none, so the spec is not weak against that kind
+of change; an unlimited search budget gives the same 1 of 24, and replacing
+the spec's `recover`-based failures by a flag gives 2 of 24, so neither the
+time per mutant nor the `recover` is the cause. What is left is the mutants
+themselves (a negated branch of the model may be equivalent for this spec's
+inputs, or the model mutant may not be what the source-level one is). I have
+not compared one surviving mutant natively; until then the score says little
+about this spec in either direction.
 
 ## What this says
 
