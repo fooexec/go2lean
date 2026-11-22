@@ -253,6 +253,33 @@ delivered offsets, windows, FIN and blocked frames.
   the spec, not of quic-go; the run stopped before the agent's repair round,
   so there is no corrected version yet.
 
+### The send-side spec, repaired (2026-11-22)
+
+Asked again with the spec bug named, the agent wrote `SeqSendStreamFlowControl`
+(two send streams on one connection window; windows of a few bytes; budgets
+of 24 to 60 bytes; every failure is a `check` with a message, recovered into
+`false`). Go's fuzzer, 90 s on the real code: held, 2.8M runs. The model's
+counterexample was spurious again, from another case of the handle rule: a
+frame returned with a bool by `popNewStreamFrame` is one result of a call
+that returns several, and was still treated as an opaque handle. That is
+fixed now (a result of a call to a modelled function is built by the model,
+whichever result it is), and the model agrees with Go on this spec: no
+counterexample, no spurious one.
+
+The spec still kills 1 of 24 mutants of the send path in go2lean's mutation
+pass (the survivors are branches of `popNewStreamFrameForPacket`, the flow
+controllers and `getDataForWriting`). Two things I tried to explain it:
+a hand-made mutant of the real code (`finSent` never set, so the FIN is sent
+again) makes the spec false on 54% of 20000 random sequences run natively in
+Go, and the original code on none, so the spec is not weak against that kind
+of change; an unlimited search budget gives the same 1 of 24, and replacing
+the spec's `recover`-based failures by a flag gives 2 of 24, so neither the
+time per mutant nor the `recover` is the cause. What is left is the mutants
+themselves (a negated branch of the model may be equivalent for this spec's
+inputs, or the model mutant may not be what the source-level one is). I have
+not compared one surviving mutant natively; until then the score says little
+about this spec in either direction.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
