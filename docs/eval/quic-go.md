@@ -253,6 +253,28 @@ delivered offsets, windows, FIN and blocked frames.
   the spec, not of quic-go; the run stopped before the agent's repair round,
   so there is no corrected version yet.
 
+### The send-side spec, repaired (2026-11-22)
+
+Asked again with the spec bug named, the agent wrote `SeqSendStreamFlowControl`
+(two send streams on one connection window; windows of a few bytes; budgets
+of 24 to 60 bytes; every failure is a `check` with a message, recovered into
+`false`). Go's fuzzer, 90 s on the real code: held, 2.8M runs. The model's
+counterexample was spurious again, from another case of the handle rule: a
+frame returned with a bool by `popNewStreamFrame` is one result of a call
+that returns several, and was still treated as an opaque handle. That is
+fixed now (a result of a call to a modelled function is built by the model,
+whichever result it is), and the model agrees with Go on this spec: no
+counterexample, no spurious one.
+
+The spec still kills 1 of 24 mutants of the send path, although it checks a
+lot: the survivors are the same branches of `popNewStreamFrameForPacket`,
+the flow controllers and `getDataForWriting`. Either the random sequences
+(up to ten events, kinds and sizes drawn uniformly) rarely reach a state in
+which a flipped branch changes an observable result, or the mutation pass
+does not see the spec's `recover`-based failures. I have not told which; it
+is the open question before this spec can be said to cover the send state
+machine.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five

@@ -10774,6 +10774,9 @@ func (t *fnState) builtByModel(v ssa.Value, depth int) bool {
 		return len(x.Edges) > 0
 	case *ssa.ChangeType:
 		return t.builtByModel(x.X, depth+1)
+	case *ssa.Extract:
+		// one result of a call that returns several (a frame and a bool)
+		return t.builtByModel(x.Tuple, depth+1)
 	case *ssa.UnOp:
 		// A pointer loaded from a field of an object the model owns (a
 		// struct of this package or of the module, not a handle): the
