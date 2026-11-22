@@ -312,6 +312,21 @@ on every path tried, and a strong state-machine spec is still hard to get
 right in one or two agent rounds — each round so far has debugged the spec,
 not the package.
 
+### The receive side (2026-11-22)
+
+A spec for the receive stream (`SeqReceiveStreamRFC`, driving
+`ReceiveStream.handleStreamFrame` and `Read` over `frame_sorter.go`): STREAM
+frames at arbitrary offsets, overlapping and duplicate, with FIN; Reads of
+every size; RESET_STREAM and CancelRead; two streams on one connection
+window. Reference model: the contiguous prefix as a byte array, the highest
+offset, the final size, a reset flag. Go's fuzzer, 90 s on the real code:
+held, 2.8M runs. The model gave one spurious counterexample (model false,
+real true) from a havoc site the receive path reaches, not from the spec.
+So the receive state machine, like the send side, agrees with the
+RFC-derived model on every sequence tried; no defect. The run was first
+killed by the container's disk filling during the Lean build (the per-run
+workspaces are about 1 GB each); rerun after freeing space, it completed.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
