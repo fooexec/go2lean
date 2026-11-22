@@ -346,11 +346,13 @@ issue (#305). The function is eight lines; the spec kills a mutant that
 inverts the send condition (`!= 1` to `== 1`) on a one-packet sequence when
 run natively in Go, and the original holds. go2lean's model-level mutation
 pass, with an unlimited budget and the exhaustive engine certifying the
-original, still reports that mutant (and two others that change the counter
-or the branch) as survivors: 1 of 4. So the under-reporting is not about
-sequence length or search budget; it is in how the mutation is applied to
-or run against the model. The eight-line function makes it tractable to
-debug.
+original, at first reported that mutant (and two others) as survivors: 1 of
+4. The cause (#305, fixed): the mutation pass ran each mutant with `check`
+and no alternative havoc draws, so a mutant whose refuting run reads a havoc
+value (here the `sendPacket` closure call) returned `specUnknown` instead of
+a refutation and was counted as a survivor. The random search passes those
+draws (#84) and confirms the refutation; the mutation pass now does the
+same. With the fix this spec kills 4 of 4.
 
 ## What this says
 

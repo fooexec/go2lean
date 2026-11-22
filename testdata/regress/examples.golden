@@ -87,7 +87,7 @@ confirmed conc_queue_takeonce_newqueue_nopanic
 exhausted conc_racycount_nohang
 confirmed conc_racycount_nopanic
 confirmed conc_readwhilewriting_nopanic
-exhausted mut=0/1 conc_seqconctally_sequence
+exhausted mut=1/1 conc_seqconctally_sequence
 confirmed conc_seqconctallyracy_sequence
 exhausted conc_snapshotatomic_nopanic
 confirmed conc_snapshotracy_nopanic
