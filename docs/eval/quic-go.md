@@ -327,6 +327,31 @@ RFC-derived model on every sequence tried; no defect. The run was first
 killed by the container's disk filling during the Lean build (the per-run
 workspaces are about 1 GB each); rerun after freeing space, it completed.
 
+### Connection close: the closing state (2026-11-22)
+
+RFC 9000 10.2.1 and 21.1: in the closing state an endpoint retransmits
+CONNECTION_CLOSE in response to received packets, at a rate that cannot
+amplify. `closedLocalConn.handlePacket` (`closed_conn.go`) does this with a
+power-of-two backoff (it sends only when its packet counter has a single
+set bit). A hand-written spec `SeqClosedConnRateLimit` drives it with a
+sequence of received packets and checks, against an independent counter,
+that a send happens exactly on the 1st, 2nd, 4th, 8th, ... packet, that the
+count is monotone, never exceeds the packets received, and stays at most
+`floor(log2 n) + 1`. It holds: exhaustive over 27931 inputs, and Go's
+fuzzer 61 s (1.4M runs). No defect; the closing-state retransmit is
+rate-limited as the RFC requires.
+
+This spec is also a minimal reproducer of the mutation under-reporting
+issue (#305). The function is eight lines; the spec kills a mutant that
+inverts the send condition (`!= 1` to `== 1`) on a one-packet sequence when
+run natively in Go, and the original holds. go2lean's model-level mutation
+pass, with an unlimited budget and the exhaustive engine certifying the
+original, still reports that mutant (and two others that change the counter
+or the branch) as survivors: 1 of 4. So the under-reporting is not about
+sequence length or search budget; it is in how the mutation is applied to
+or run against the model. The eight-line function makes it tractable to
+debug.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
