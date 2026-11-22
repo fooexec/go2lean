@@ -1202,13 +1202,19 @@ def mutate (p : GoSSA.Prog) (prop : Property) (fids : List Nat) (gens : List Gen
       let tseed := (mixHash (UInt64.ofNat seed) (UInt64.ofNat trial)).toNat
       let or := oracleOf pf extra tseed
       let h := havocOf tseed p.havocWidths
+      -- Alternative havoc draws, as the random search uses (#84): a spec
+      -- that returns false after reading a havoc value is a refutation only
+      -- when the other draws give it too. Without them, a mutant whose
+      -- refuting run happens to read havoc (an unmodelled call on its path)
+      -- is classified specUnknown and wrongly counted as a survivor (#305).
+      let alts := [havocOf (tseed + 7919) p.havocWidths, havocOf (tseed + 104729) p.havocWidths]
       let (args, g', heap) := genArgs pf extra g gens pool table allowNil base
       g := g'
-      let (o, _, _) := check pm or h prop args fuel heap
+      let (o, _, _) := check pm or h prop args fuel heap alts
       if o.refutes prop then
         -- The original need not pass on that input: a target that panics
         -- there (moot for a postcondition) still told the mutant apart.
-        let (o0, _, _) := check p or h prop args fuel heap
+        let (o0, _, _) := check p or h prop args fuel heap alts
         if !(o0.refutes prop) then
           hit := some trial
           break
