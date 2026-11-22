@@ -276,9 +276,21 @@ of change; an unlimited search budget gives the same 1 of 24, and replacing
 the spec's `recover`-based failures by a flag gives 2 of 24, so neither the
 time per mutant nor the `recover` is the cause. What is left is the mutants
 themselves (a negated branch of the model may be equivalent for this spec's
-inputs, or the model mutant may not be what the source-level one is). I have
-not compared one surviving mutant natively; until then the score says little
-about this spec in either direction.
+inputs, or the model mutant may not be what the source-level one is). I then
+compared surviving mutants natively. The survivors' blocks map to source
+lines of `send_stream.go` (the model's block index is go/ssa's block index).
+Mutating the source and running the spec on 20000 random sequences in Go:
+`s.nextFrame != nil` flipped (line 416, a "ne to eq" survivor) makes the spec
+false on 54% of the sequences, the negated `TryAddBytesSent` check (line 439)
+on 54%, `if s.writeLimited` negated (line 387) on 85%, none of them by a
+panic. So the mutation pass reports survivors that the spec kills. Three
+other survivors are real gaps of the spec: `s.resetErr` and
+`reliableOffset` (line 413, no `CancelWrite`, STOP_SENDING or RESET_STREAM_AT
+among the events), `s.nextFrameReserved` (line 408, no write through a
+limiter) and `!s.finSent` at line 461 (the earlier branch returns first, so
+the mutant is probably equivalent); the spec kills none of those natively
+either. What makes the model-level mutation miss the killable ones is not
+found; it is tracked as an issue.
 
 ## What this says
 
