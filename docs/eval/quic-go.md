@@ -35,10 +35,24 @@ asks for disclosure and for a report in the reporter's own words.
 | `http3`, round 3 (RFC 9114 frames, SETTINGS, GOAWAY, PRIORITY_UPDATE, capsules; complete rule set) | 11, then 11 revised | 3 counterexamples, all spurious (a `closeConn` closure the model does not know) | **1 spec violated** (reserved SETTINGS identifiers), the rest held, 1.0M to 2.1M runs each |
 | `qpack` v0.6.0 (RFC 9204/7541: integers, static table, Huffman, field sections, encoder round trip) | 6 | 1 counterexample, spurious (stuck in `Decoder.at`) | 2 violated, both specs stronger than the RFC (non-minimal and over-long integer encodings), 4 held |
 | `internal/protocol` (packet numbers against RFC 9000 A.3 and its example, stream IDs, connection IDs, versions) | 29 | held | held, 1.1M to 5.4M runs each |
-| `internal/utils` (RTT estimator against RFC 9002 5.3 and A.7, PTO) | 4 | held | held, 1.5M to 2.2M runs each |
+| `internal/utils` (RTT estimator against RFC 9002 5.3 and A.7, PTO) | 4 | held (the RFC-9002 sequence spec was first spurious; see below) | held, 1.5M to 2.2M runs each |
 | `internal/congestion` (Reno window against RFC 9002 7, pacer, hybrid slow start) | 4 | held | held, 1.8M to 2.5M runs each |
 | `internal/wire` (frame round trips and lengths, ACK ranges, transport parameters, headers) | 40 | held | 38 held; 2 violated, both specs' own (below) |
 | root package (frame sorter against a byte array, stream flow control, token store) | 4 | held | held, 1.5M to 1.6M runs each |
+
+The `internal/utils` RTT sequence spec (`SeqRTTMatchesRFC9002`, RFC 9002 §5
+and §6.2.1) at first produced a spurious counterexample: the estimator
+stores every reading through `(time.Duration).Nanoseconds`, which the model
+did not translate, so the smoothed RTT and mean deviation became havoc and
+the model's "violation" was a choice Go does not make. A `Duration` is an
+`int64` of nanoseconds, so these accessors (`Nanoseconds`, `Microseconds`,
+`Milliseconds`, `Seconds`, `Minutes`, `Hours`, `Truncate`, `Round`, `Abs`)
+are now translated from source and compute exactly. The sequence spec then
+holds with no spurious counterexample and a 19 of 19 mutation score: every
+op and branch mutation of `UpdateRTT` is caught, so the RFC-9002 RTT and PTO
+arithmetic is pinned down, not merely unviolated. This is the model's time
+line (#59) reaching the duration arithmetic the RFC algorithms are written
+in, rather than havocking at the package boundary.
 
 The three violations of round 2 are all inputs quic-go accepts and the RFC
 rules out (reproduced by hand on `a02d451`, with the same field sent to
