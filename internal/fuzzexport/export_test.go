@@ -208,6 +208,9 @@ type go2leanEv struct {
 func SeqWideIsSmall(x uint64, y int32) bool { return x < 1<<40 }
 
 // go2lean:sequence Before
+func SeqNoInput() bool { return Before("a", "b") }
+
+// go2lean:sequence Before
 func SeqAllKinds(a int8, b uint16, c float32, d float64, e bool, f string, g []byte, h int, evs []go2leanEv) bool {
 	return true
 }
@@ -217,8 +220,9 @@ func SeqAllKinds(a int8, b uint16, c float32, d float64, e bool, f string, g []b
 	src, targets, skipped, err := Export(root, "github.com/fooexec/go2lean/examples/strs", overlay, []Spec{
 		{Property: "p_wide", Kind: contract.KindSequence, Spec: "SeqWideIsSmall"},
 		{Property: "p_kinds", Kind: contract.KindSequence, Spec: "SeqAllKinds"},
+		{Property: "p_none", Kind: contract.KindSequence, Spec: "SeqNoInput"},
 	})
-	if err != nil || len(targets) != 2 || len(skipped) != 0 {
+	if err != nil || len(targets) != 3 || len(skipped) != 0 {
 		t.Fatalf("err %v targets %v skipped %v", err, targets, skipped)
 	}
 	if n := strings.Count(src, "f.Add("); n < 2*(1+len(boundaries)) {
@@ -235,13 +239,19 @@ func SeqAllKinds(a int8, b uint16, c float32, d float64, e bool, f string, g []b
 	for _, c := range []struct {
 		fuzz string
 		fail bool
-	}{{"FuzzGo2Lean_SeqWideIsSmall", true}, {"FuzzGo2Lean_SeqAllKinds", false}} {
+	}{{"FuzzGo2Lean_SeqWideIsSmall", true}, {"FuzzGo2Lean_SeqAllKinds", false}, {"FuzzGo2Lean_SeqNoInput", false}} {
 		cmd := exec.Command("go", "test", "-run=^"+c.fuzz+"$", ".")
 		cmd.Dir = sdir
 		out, err := cmd.CombinedOutput()
 		if (err != nil) != c.fail || (c.fail && !strings.Contains(string(out), "go2lean: SeqWideIsSmall is false")) {
 			t.Errorf("%s on the seeds: failed=%v, want %v\n%s", c.fuzz, err != nil, c.fail, out)
 		}
+	}
+	// A spec of no argument fuzzes too (Go rejects a fuzz function of none).
+	cmd := exec.Command("go", "test", "-run=^$", "-fuzz=^FuzzGo2Lean_SeqNoInput$", "-fuzztime=1s", ".")
+	cmd.Dir = sdir
+	if out, err := cmd.CombinedOutput(); err != nil && !timedOut(string(out)) {
+		t.Errorf("fuzzing a spec of no argument: %v\n%s", err, out)
 	}
 }
 
