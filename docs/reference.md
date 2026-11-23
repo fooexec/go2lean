@@ -42,7 +42,7 @@ Construct-by-construct detail: [docs/semantics.md](../docs/semantics.md).
 - `regexp` with constant patterns, and patterns built at run time (common Perl syntax); `fmt.Sprintf` with `%s %d %v %t` 🟡 otherwise; `reflect` `ValueOf` `IsZero` `Kind` `IsNil`
 - `sync/atomic` integer types and functions (`LoadInt32`, `AddInt64`, `CompareAndSwapUint32`, ...)
 - anthropic-sdk-go and openai-go JSON unions, `Message.Accumulate` (under `-deps`)
-- 🟡 `math/rand` (any value in range), clocks, environment, I/O, network (havoc)
+- 🟡 `math/rand` (any value in range), clocks, environment, I/O (havoc); networking on loopback: TCP (`net.Listen`, `net.Dial`, `net.Pipe`) and UDP (`net.ListenPacket`, `net.Dial("udp", ...)`); real sockets, `net.ListenUDP` and the resolver stay havoc
 
 On tingly-box (7539 functions and methods, including agent-written specs)
 this models 7112 (2025 completely); most of the 427 rejected are test

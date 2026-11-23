@@ -110,6 +110,7 @@ exhausted counter_new_nopanic
 confirmed divzero_avg_nopanic
 proved divzero_ratio_nopanic
 exhausted errs_apierror_error_nopanic
+exhausted_assuming errs_status_nohang
 exhausted_assuming errs_status_nopanic
 confirmed floats_bucket_nopanic
 exhausted floats_clamp_nopanic
@@ -252,6 +253,7 @@ exhausted overflow_sum_nohang
 exhausted overflow_sum_nopanic
 confirmed overflow_sum_specsum
 exhausted portable_budget_nopanic
+exhausted portable_count_nohang
 exhausted portable_count_nopanic
 exhausted_havoc portable_digit_nopanic
 exhausted portable_drain_nohang
@@ -350,6 +352,17 @@ exhausted strs_tokenprefix_nopanic
 confirmed tables_half_nopanic
 exhausted tables_known_nopanic
 confirmed tables_share_nopanic
+exhausted udp_echoserver_step_newechoserver_nopanic
+exhausted udp_newechoserver_nopanic
+exhausted udp_newstickyserver_nopanic
+exhausted udp_recorder_readfrom_nopanic
+none udp_recorder_writeto_nopanic
+exhausted udp_repliestosender_nohang
+exhausted udp_repliestosender_nopanic
+exhausted udp_reply_nopanic
+exhausted mut=14/14 udp_seqechorepliestosender_sequence
+confirmed udp_seqstickyrepliestosender_sequence
+exhausted udp_stickyserver_step_newstickyserver_nopanic
 exhausted xpkg_bounded_nopanic
 exhausted xpkg_bounded_specboundedinrange
 confirmed xpkg_money_amount_perscale_newamount_nopanic
