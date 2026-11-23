@@ -241,6 +241,35 @@ dropped connection) is tried twice more. Every prompt and response is
 written to `out/agent/<package>/`, and the report lands in `out/agent/<package>/report.md`. A
 revised spec file in the report round triggers one more pass.
 
+## Mining the evidence
+
+`go2lean mine` collects what a project records about itself, and what similar
+projects published, as the evidence its properties are drafted from (#315).
+It is the first step of the mined-properties pipeline: an LLM step reads the
+evidence next, drafts properties and specs, and calibrates each spec on the
+revisions before and after the fix it came from. Collecting is
+deterministic and uses no LLM.
+
+```sh
+go2lean mine -o evidence.json -similar crates.io:quiche,crates.io:quinn-proto,crates.io:s2n-quic ../quic-go
+```
+
+It writes `evidence.json`. Each item has a kind, a reference, a title, a
+bounded text, the project's files it concerns, and, when it records a fix,
+the revisions without and with it (`before`, `after`). The kinds:
+
+| kind | where from | before / after |
+|---|---|---|
+| `advisory` | OSV, for the module and each `-similar` project (a Go module path, or `ecosystem:name`). One item per advisory: the GHSA id, with its CVE, `GO-` and `RUSTSEC-` ids as aliases | the fix commit named in its references, else the first fixed version (the target's own advisories only) |
+| `commit` | the git history: commits whose message names a fix, a crash, a bound, a protocol rule or a security issue, and which change non-test Go code; not those that fix the build, the tests, the docs, the logs or the interop runner. With the start of the diff | the parent, and the commit |
+| `rfc` | every RFC section the code's comments cite ("RFC 9000, Section 13.2", "Section 13.2 of RFC 9000"), with the places that cite it and the section's text from rfc-editor.org (kept in `-rfc-cache`) | none |
+| `doc` | the normative sentences (must, never, at most, returns an error if, panics if, ...) of the package and exported declaration doc comments, and the README's (must, shall, never, rejected) | none |
+
+`-offline` skips OSV and the RFC texts; the citations are still listed. On
+quic-go (7489 commits) the run takes about 6 seconds and gives 30 advisories
+(8 of quic-go's own, 22 of quiche, quinn and s2n-quic), 323 commits, 53 RFC
+sections (40 with their text) and 66 doc sentences.
+
 ## Commands
 
 ```text
@@ -254,6 +283,7 @@ go2lean run     [-workspace out] [-v] [-nil-inputs] [-deps=false] [-generics=fal
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking]
                 [-repairs n] [-report] <package>
 go2lean advisory [-o file] [-llm ...] <GHSA-id|CVE-id>   draft a catalog property (docs/specs) from a published advisory (OSV)
+go2lean mine    [-o evidence.json] [-similar p,...] [-offline] [-max-commits n] [dir]   collect the evidence properties are drafted from (below)
 go2lean symexec [-module dir] [-func names] [-unexported] [-replay=false] [-maxlen n] [-loop n] [-depth n] <package>   bounded symbolic execution (needs z3)
 go2lean zorya  run|replay [-dir zorya] [-ghidra dir] [-seed aaaa] [-results f.json] <binary>   concolic execution of a compiled program, reports replayed
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]

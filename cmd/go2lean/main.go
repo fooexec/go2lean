@@ -46,6 +46,8 @@ func main() {
 		err = cmdSymexec(os.Args[2:])
 	case "advisory":
 		err = cmdAdvisory(os.Args[2:])
+	case "mine":
+		err = cmdMine(os.Args[2:])
 	case "fuzz":
 		err = cmdFuzz(os.Args[2:])
 	case "prove":
@@ -84,6 +86,7 @@ func usage() {
   go2lean rank    [-workspace out]                 order confirmed verdicts by how plausible their input is (tiers 1-4)
   go2lean summary [-workspace out]                 all verdicts and proofs of a workspace as Markdown
   go2lean advisory [-o file] <GHSA-id|CVE-id>      draft a catalog property from an advisory (OSV)
+  go2lean mine [-o evidence.json] [-similar p,...] [-offline] [dir]   collect the evidence specs are drafted from: advisories, fix commits, cited RFC sections, doc contracts
   go2lean agent   [-workspace out] [-llm claude|mock:<file>] <package>
                                                   agent: propose spec-in-Go properties, run, report
   go2lean llvm    [-workspace out] <file.c|.ll|.bc> C / LLVM IR: model every function, search for UB,
