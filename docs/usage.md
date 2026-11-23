@@ -270,6 +270,38 @@ quic-go (7489 commits) the run takes about 6 seconds and gives 30 advisories
 (8 of quic-go's own, 22 of quiche, quinn and s2n-quic), 323 commits, 53 RFC
 sections (40 with their text) and 66 doc sentences.
 
+## Drafting candidate properties
+
+`go2lean propose` reads the evidence and asks an LLM for candidate
+properties (#315 P2): each one is a sentence a reader can check, stated as
+the harm (with the mechanism the evidence names as one of the input classes
+a search should combine), with an oracle independent of the code, a kind
+(security, correctness or conformance), a priority, and the project
+functions a spec for it drives.
+
+```sh
+go2lean propose -llm claude-code -evidence evidence.json -o candidates.json ../quic-go
+go2lean propose -kinds advisory,commit -limit 50 ...   # a part of the evidence
+```
+
+The evidence goes ten items to a call. Each call lists the functions of the
+packages the items concern, and the package index for items that name no
+file (another project's advisory). A target that does not exist is
+dropped; a candidate none of whose targets exist, but whose packages do,
+gets one more call with those packages' functions listed, since a name
+guessed from another implementation's advisory is usually close
+(`connection` for `Conn`). A candidate keeps the revisions of the first
+evidence item that records a fix, for the calibration step. Duplicates are
+merged; the list is sorted by priority, security first. `candidates.json`
+also lists what was dropped and why.
+
+On quic-go's 30 advisories (three calls and their repairs, about 3 minutes
+with `-llm claude-code`) it gave 22 candidates; for example, that the stream
+reassembly buffer stays bounded however a peer fragments its data (from a
+quinn advisory, on `frameSorter.Push`), or that a frame cannot implicitly
+open a stream past the advertised limit (from s2n-quic, on
+`streamsMap.AcceptStream`).
+
 ## Commands
 
 ```text
@@ -284,6 +316,7 @@ go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-ur
                 [-repairs n] [-report] <package>
 go2lean advisory [-o file] [-llm ...] <GHSA-id|CVE-id>   draft a catalog property (docs/specs) from a published advisory (OSV)
 go2lean mine    [-o evidence.json] [-similar p,...] [-offline] [-max-commits n] [dir]   collect the evidence properties are drafted from (below)
+go2lean propose [-evidence evidence.json] [-o candidates.json] [-llm ...] [-kinds k,...] [-limit n] [dir]   candidate properties from the evidence (below)
 go2lean symexec [-module dir] [-func names] [-unexported] [-replay=false] [-maxlen n] [-loop n] [-depth n] <package>   bounded symbolic execution (needs z3)
 go2lean zorya  run|replay [-dir zorya] [-ghidra dir] [-seed aaaa] [-results f.json] <binary>   concolic execution of a compiled program, reports replayed
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]
