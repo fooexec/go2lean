@@ -8,6 +8,7 @@ testmathrandv2ranges exhausted_havoc  # #256: the draws are havoc in the documen
 testmethodexprvalueviapointer spurious oracle_holds_in_real_run havoc  # (*T).M of a value method: the thunk dereferences the pointer first, not followed (gomarkdown's rules are pointer methods)
 testnetlistendialecho exhausted_havoc  # sampled: a round trip through Accept and a pipe has more schedules than the exhaustive engine runs (#126)
 testnetpipewriteread exhausted_havoc  # sampled: a pipe's selects give more schedules than the exhaustive engine runs (#122)
+testnetudpdeadlinewakes exhausted_havoc  # sampled: a read woken by a deadline another goroutine sets has more schedules than the exhaustive engine runs (UDP in netloop)
 testpoolfieldnew exhausted_assuming  # by design: Get on a field pool calls its New, objects Put back are not modelled (#214)
 testpoolfieldnonew exhausted_assuming  # by design: Get on a field pool without New gives nil, objects Put back are not modelled (#214)
 testpoolgetfromnew exhausted_assuming  # by design: Get gives New, objects Put back are not modelled (#105)

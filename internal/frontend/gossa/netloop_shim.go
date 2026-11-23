@@ -18,8 +18,9 @@ const netloopPath = "go2lean/netloop"
 var netloopSrc string
 
 // netloopCalls are the net functions whose calls go to the loopback model
-// instead (#126).
-var netloopCalls = map[string]string{"net.Listen": "Listen", "net.Dial": "Dial"}
+// instead (#126): stream listeners and connections, and UDP sockets
+// (net.ListenPacket, net.Dial of a "udp" network).
+var netloopCalls = map[string]string{"net.Listen": "Listen", "net.Dial": "Dial", "net.ListenPacket": "ListenPacket"}
 
 // osmodelPath is the import path the environment and temporary-directory
 // model is checked under.
@@ -61,9 +62,10 @@ var (
 var shimPaths = map[string]bool{netloopPath: true, osmodelPath: true, randmodelPath: true}
 
 // addNetLoop adds the loopback model (package netloop) to a program that
-// calls net.Listen or net.Dial, and makes those calls call it: a listener
-// in a table, a connection a net.Pipe pair through its backlog. Both ends
-// are then the program's own code over channels.
+// calls net.Listen, net.Dial or net.ListenPacket, and makes those calls call
+// it: a listener in a table, a connection a net.Pipe pair through its
+// backlog, a UDP socket a queue of datagrams under its port. Both ends are
+// then the program's own code over channels.
 func addNetLoop(sprog *ssa.Program) error {
 	return addShim(sprog, "net", netloopCalls, nil, netloopPath, netloopSrc)
 }

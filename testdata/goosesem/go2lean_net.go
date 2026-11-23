@@ -150,3 +150,156 @@ func testNetListenFreshPorts() bool {
 	differ := a.Addr().String() != b.Addr().String()
 	return differ && a.Close() == nil && b.Close() == nil
 }
+
+// UDP on loopback: net.ListenPacket and net.Dial("udp", ...) (netloop).
+
+// A datagram sent by a connected client reaches the server, which sees the
+// client's address and answers it.
+func testNetUDPEcho() bool {
+	s, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		return false
+	}
+	c, err := net.Dial("udp", s.LocalAddr().String())
+	if err != nil {
+		return false
+	}
+	if n, err := c.Write([]byte("abc")); n != 3 || err != nil {
+		return false
+	}
+	b := make([]byte, 16)
+	n, from, err := s.ReadFrom(b)
+	if err != nil || n != 3 || string(b[:n]) != "abc" || from.String() != c.LocalAddr().String() {
+		return false
+	}
+	if _, err := s.WriteTo([]byte("xy"), from); err != nil {
+		return false
+	}
+	n, err = c.Read(b)
+	return err == nil && n == 2 && string(b[:2]) == "xy" && c.Close() == nil && s.Close() == nil
+}
+
+// Datagrams keep their boundaries and their order.
+func testNetUDPBoundaries() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	c, _ := net.Dial("udp", s.LocalAddr().String())
+	c.Write([]byte("ab"))
+	c.Write([]byte("cde"))
+	b := make([]byte, 16)
+	n1, _, err1 := s.ReadFrom(b)
+	first := string(b[:n1])
+	n2, _, err2 := s.ReadFrom(b)
+	ok := err1 == nil && err2 == nil && first == "ab" && string(b[:n2]) == "cde"
+	return ok && c.Close() == nil && s.Close() == nil
+}
+
+// A read into a shorter buffer gets the start of the datagram; the rest is
+// discarded, and the next read gets the next datagram.
+func testNetUDPTruncate() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	c, _ := net.Dial("udp", s.LocalAddr().String())
+	c.Write([]byte("hello"))
+	c.Write([]byte("w"))
+	b := make([]byte, 2)
+	n1, _, err1 := s.ReadFrom(b)
+	first := string(b[:n1])
+	n2, _, err2 := s.ReadFrom(b)
+	ok := err1 == nil && err2 == nil && n1 == 2 && first == "he" && n2 == 1 && b[0] == 'w'
+	return ok && c.Close() == nil && s.Close() == nil
+}
+
+// The addresses are *net.UDPAddr, as the kernel's.
+func testNetUDPAddrType() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	c, _ := net.Dial("udp", s.LocalAddr().String())
+	c.Write([]byte{1})
+	_, from, err := s.ReadFrom(make([]byte, 1))
+	la, ok1 := s.LocalAddr().(*net.UDPAddr)
+	fa, ok2 := from.(*net.UDPAddr)
+	ok := err == nil && ok1 && ok2 && la.Port != 0 && fa.Port == c.LocalAddr().(*net.UDPAddr).Port &&
+		s.LocalAddr().Network() == "udp" && fa.IP.String() == "127.0.0.1"
+	return ok && c.Close() == nil && s.Close() == nil
+}
+
+// Sending to a port nothing is bound to succeeds: the datagram is lost.
+func testNetUDPWriteToNowhere() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	gone, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	to := gone.LocalAddr()
+	gone.Close()
+	n, err := s.WriteTo([]byte("x"), to)
+	return n == 1 && err == nil && s.Close() == nil
+}
+
+// A read on a closed socket, and a second Close, fail with net.ErrClosed.
+func testNetUDPClosed() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	if s.Close() != nil {
+		return false
+	}
+	_, _, err := s.ReadFrom(make([]byte, 1))
+	return errors.Is(err, net.ErrClosed) && errors.Is(s.Close(), net.ErrClosed)
+}
+
+// A read deadline in the past fails a read at once with a timeout; cleared,
+// the next read gets the datagram.
+func testNetUDPDeadline() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	if s.SetReadDeadline(time.Now().Add(-time.Second)) != nil {
+		return false
+	}
+	_, _, err := s.ReadFrom(make([]byte, 1))
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		return false
+	}
+	s.SetReadDeadline(time.Time{})
+	c, _ := net.Dial("udp", s.LocalAddr().String())
+	c.Write([]byte{9})
+	b := make([]byte, 1)
+	n, _, err := s.ReadFrom(b)
+	return err == nil && n == 1 && b[0] == 9 && c.Close() == nil && s.Close() == nil
+}
+
+// A deadline set while a read waits ends that read (how a server stops
+// its read loop).
+func testNetUDPDeadlineWakes() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	done := make(chan error)
+	go func() {
+		_, _, err := s.ReadFrom(make([]byte, 1))
+		done <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	s.SetReadDeadline(time.Now())
+	err := <-done
+	return errors.Is(err, os.ErrDeadlineExceeded) && s.Close() == nil
+}
+
+// Close ends a read that waits.
+func testNetUDPCloseWakes() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	done := make(chan error)
+	go func() {
+		_, _, err := s.ReadFrom(make([]byte, 1))
+		done <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	s.Close()
+	return errors.Is(<-done, net.ErrClosed)
+}
+
+// Two sockets cannot share a port; a connected socket reads only its peer.
+func testNetUDPPorts() bool {
+	s, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	_, err := net.ListenPacket("udp", s.LocalAddr().String())
+	if err == nil {
+		return false
+	}
+	c, _ := net.Dial("udp", s.LocalAddr().String())
+	other, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	other.WriteTo([]byte("no"), c.LocalAddr())
+	s.WriteTo([]byte("ok"), c.LocalAddr())
+	b := make([]byte, 4)
+	n, err := c.Read(b)
+	return err == nil && string(b[:n]) == "ok" && c.Close() == nil && s.Close() == nil && other.Close() == nil
+}

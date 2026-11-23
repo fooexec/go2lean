@@ -641,6 +641,36 @@ func SeqTestNetPipeWriteRead() bool { return testNetPipeWriteRead() }
 // go2lean:sequence testNetSplitHostPort
 func SeqTestNetSplitHostPort() bool { return testNetSplitHostPort() }
 
+// go2lean:sequence testNetUDPAddrType
+func SeqTestNetUDPAddrType() bool { return testNetUDPAddrType() }
+
+// go2lean:sequence testNetUDPBoundaries
+func SeqTestNetUDPBoundaries() bool { return testNetUDPBoundaries() }
+
+// go2lean:sequence testNetUDPCloseWakes
+func SeqTestNetUDPCloseWakes() bool { return testNetUDPCloseWakes() }
+
+// go2lean:sequence testNetUDPClosed
+func SeqTestNetUDPClosed() bool { return testNetUDPClosed() }
+
+// go2lean:sequence testNetUDPDeadline
+func SeqTestNetUDPDeadline() bool { return testNetUDPDeadline() }
+
+// go2lean:sequence testNetUDPDeadlineWakes
+func SeqTestNetUDPDeadlineWakes() bool { return testNetUDPDeadlineWakes() }
+
+// go2lean:sequence testNetUDPEcho
+func SeqTestNetUDPEcho() bool { return testNetUDPEcho() }
+
+// go2lean:sequence testNetUDPPorts
+func SeqTestNetUDPPorts() bool { return testNetUDPPorts() }
+
+// go2lean:sequence testNetUDPTruncate
+func SeqTestNetUDPTruncate() bool { return testNetUDPTruncate() }
+
+// go2lean:sequence testNetUDPWriteToNowhere
+func SeqTestNetUDPWriteToNowhere() bool { return testNetUDPWriteToNowhere() }
+
 // go2lean:sequence testNetipAddrPort
 func SeqTestNetipAddrPort() bool { return testNetipAddrPort() }
 
@@ -892,6 +922,15 @@ func SeqTestSliceOps() bool { return testSliceOps() }
 
 // go2lean:sequence testSliceRef
 func SeqTestSliceRef() bool { return testSliceRef() }
+
+// go2lean:sequence testSliceToArrayCopies
+func SeqTestSliceToArrayCopies() bool { return testSliceToArrayCopies() }
+
+// go2lean:sequence testSliceToArrayEmpty
+func SeqTestSliceToArrayEmpty() bool { return testSliceToArrayEmpty() }
+
+// go2lean:sequence testSliceToArrayShortPanics
+func SeqTestSliceToArrayShortPanics() bool { return testSliceToArrayShortPanics() }
 
 // go2lean:sequence testSlicesSortFunc
 func SeqTestSlicesSortFunc() bool { return testSlicesSortFunc() }

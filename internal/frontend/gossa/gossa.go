@@ -1797,8 +1797,9 @@ var modelledTime = map[string]bool{
 
 // modelledNet are the functions of package net translated from source
 // (#122): net.Pipe, an in-memory connection over channels, a mutex and
-// time.AfterFunc deadlines, and the host:port helpers, which are string
-// code. The rest of net (sockets, the resolver) stays unmodelled.
+// time.AfterFunc deadlines, the host:port helpers, which are string code,
+// and the string of a UDP address. The rest of net (sockets, the resolver)
+// stays unmodelled; loopback sockets are netloop's.
 var modelledNet = map[string]bool{
 	"net.Pipe": true, "net.makePipeDeadline": true, "net.isClosedChan": true,
 	"(*net.pipeDeadline).set": true, "(*net.pipeDeadline).wait": true,
@@ -1810,6 +1811,11 @@ var modelledNet = map[string]bool{
 	"(*net.pipe).SetWriteDeadline": true, "(*net.pipe).Close": true,
 	"(*net.OpError).Unwrap": true,
 	"net.SplitHostPort":     true, "net.JoinHostPort": true, "(*net.AddrError).Error": true,
+	// The addresses of the UDP model (netloop): their strings, through
+	// net/netip, which is translated whole.
+	"(*net.UDPAddr).String": true, "(*net.UDPAddr).Network": true, "net.ipEmptyString": true,
+	"(net.IP).String": true, "(net.IP).appendTo": true, "(net.IP).To4": true, "net.isZeros": true,
+	"net.hexString": true,
 }
 
 // modelledFunc says whether a function of a standard-library package that
@@ -3688,6 +3694,61 @@ func (t *fnState) structHavoc(dst ir.Var, st *types.Struct, site, reason, goHint
 	return true
 }
 
+// maxSliceToArray is the longest array a slice conversion copies element by
+// element.
+const maxSliceToArray = 64
+
+// sliceToArray lowers (*[N]T)(s) when the pointer is only loaded through,
+// as the conversion to an array value [N]T(s) compiles (netip's
+// AddrFromSlice: AddrFrom4([4]byte(slice))): a fresh array holding the
+// slice's first N elements. Go panics when len(s) < N, before reading any
+// element; indexing element N-1 first does the same. A pointer that is
+// stored through or passed on aliases the slice's array, which a copy does
+// not, and stays unsupported.
+func (t *fnState) sliceToArray(x *ssa.SliceToArrayPointer) error {
+	arr, ok := x.Type().Underlying().(*types.Pointer).Elem().Underlying().(*types.Array)
+	if !ok || arr.Len() > maxSliceToArray {
+		return fmt.Errorf("unsupported instruction %T", x)
+	}
+	for _, r := range *x.Referrers() {
+		if u, ok := r.(*ssa.UnOp); !ok || u.Op != token.MUL {
+			if _, dbg := r.(*ssa.DebugRef); !dbg {
+				return fmt.Errorf("unsupported instruction %T (the pointer is used other than loaded)", x)
+			}
+		}
+	}
+	zero, ok := zeroVal(x.Type().Underlying().(*types.Pointer).Elem())
+	if !ok {
+		return fmt.Errorf("unsupported instruction %T (element type %s)", x, arr.Elem())
+	}
+	s, err := t.val(x.X)
+	if err != nil {
+		return err
+	}
+	n := int(arr.Len())
+	idx := func(i int) ir.Var {
+		v := t.fresh()
+		t.emit(ir.Instr{Dst: v, Op: ir.Const{V: ir.IntVal{Width: 64, Bits: strconv.Itoa(i)}}})
+		a := t.fresh()
+		t.emit(ir.Instr{Dst: a, Op: ir.Simple("indexAddr"), Args: []ir.Var{s, v}})
+		return a
+	}
+	if n > 0 {
+		idx(n - 1) // the length check
+	}
+	es := make([]ir.Var, n)
+	for i := range es {
+		es[i] = t.fresh()
+		t.emit(ir.Instr{Dst: es[i], Op: ir.Simple("loadPath"), Args: []ir.Var{idx(i)}})
+	}
+	a := t.fresh()
+	t.emit(ir.Instr{Dst: a, Op: ir.Simple("mkArr"), Args: es})
+	p := t.def(x)
+	t.emit(ir.Instr{Dst: p, Op: ir.Alloc{Zero: zero}})
+	t.emit(ir.Instr{Dst: t.fresh(), Op: ir.Simple("storePath"), Args: []ir.Var{p, a}})
+	return nil
+}
+
 func (t *fnState) instr(b *ssa.BasicBlock, in ssa.Instruction) error {
 	switch x := in.(type) {
 	case *ssa.Phi, *ssa.DebugRef:
@@ -3945,6 +4006,8 @@ func (t *fnState) instr(b *ssa.BasicBlock, in ssa.Instruction) error {
 		// A failing single-result assertion panics in Go; the model assumes
 		// it succeeds and havocs the result, so that panic is not found.
 		return t.havoc(x, "type assertion (assumed to succeed)", "opaque-assert", "")
+	case *ssa.SliceToArrayPointer:
+		return t.sliceToArray(x)
 	case *ssa.Index:
 		// Index covers arrays and, in recent go/ssa, strings.
 		a, err := t.val(x.X)
