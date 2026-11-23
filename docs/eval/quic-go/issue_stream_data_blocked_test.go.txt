@@ -1,0 +1,91 @@
+package quic
+
+import "github.com/quic-go/quic-go/internal/protocol"
+
+// go2lean:sequence SendStream.popNewStreamFrameForPacket
+// SeqStreamDataBlockedReported: candidate c050. When a stream has data to send
+// but its stream-level send credit is exhausted (including an initial limit of
+// zero), the sender emits STREAM_DATA_BLOCKED carrying the current limit, once
+// per limit. Also: sent data never exceeds the window and arrives in order and
+// intact. Events: write, MAX_STREAM_DATA, pop a frame for a packet of a given
+// size, close.
+func SeqStreamDataBlockedReported(initialWindow uint16, events []uint32) bool {
+	cfc := newConnectionFlowController(1<<20, 1<<20, nil, nil, nil)
+	cfc.UpdateSendWindow(1 << 40)
+	id := StreamID(4)
+	window := uint64(initialWindow % 512)
+	fc := newStreamFlowController(id, cfc, 1<<20, 1<<20, protocol.ByteCount(window), nil, nil)
+	conn := &Conn{framer: newFramer(cfc), sendingScheduled: make(chan struct{}, 1)}
+	s := &SendStream{
+		streamID:       id,
+		sender:         conn,
+		flowController: fc,
+		writeChan:      make(chan struct{}, 1),
+		writeOnce:      make(chan struct{}, 1),
+		ctxCancel:      func(error) {},
+	}
+	var written, sent uint64
+	closed := false
+	reported := make(map[uint64]bool)
+	for _, e := range events {
+		kind := e % 4
+		arg := e >> 2
+		switch kind {
+		case 0:
+			n := uint64(arg%200) + 1
+			if closed || written-sent+n > 1400 {
+				continue
+			}
+			p := make([]byte, n)
+			for i := range p {
+				p[i] = byte(written + uint64(i))
+			}
+			m, err := s.Write(p)
+			if err != nil || uint64(m) != n {
+				return false
+			}
+			written += n
+		case 1:
+			lim := uint64(arg % 1024)
+			s.updateSendWindow(protocol.ByteCount(lim))
+			if lim > window {
+				window = lim
+			}
+		case 2:
+			maxBytes := uint64(arg % 300)
+			sf, blocked, _ := s.popStreamFrame(protocol.ByteCount(maxBytes), Version1)
+			if sf.Frame != nil {
+				if uint64(sf.Frame.Offset) != sent {
+					return false
+				}
+				for i, b := range sf.Frame.Data {
+					if b != byte(sent+uint64(i)) {
+						return false
+					}
+				}
+				sent += uint64(len(sf.Frame.Data))
+			}
+			if sent > written || sent > window {
+				return false
+			}
+			if blocked != nil {
+				if blocked.StreamID != id || uint64(blocked.MaximumStreamData) != window {
+					return false
+				}
+				if reported[window] {
+					return false
+				}
+				reported[window] = true
+			}
+			if maxBytes >= 64 && written > sent && sent >= window && !reported[window] {
+				return false
+			}
+		case 3:
+			if !closed {
+				s.Close()
+				closed = true
+			}
+		}
+	}
+	return true
+}

@@ -612,6 +612,36 @@ the model only. `slices.overlaps` is now modelled exactly (`sliceOverlap`,
 six sem-diff tests), and the spec holds: 2000 trials, 17 of 24 mutants
 caught.
 
+## Open issues and pull requests (2026-11-23)
+
+`go2lean mine` now reads the project's tracker (#315 P5). On quic-go, 300
+merged pull requests and 146 open issues gave 166 `pr` and 24 `issue`
+items. `propose` drafted 112 candidates from them: 98 from pull requests,
+with the fix revisions to calibrate on, and 14 from open issues, which
+may still describe a defect.
+
+The agent ran on three of the open-issue candidates, on master `cb08e8f`.
+
+| issue | candidate property | result |
+|---|---|---|
+| #2654, app-data PTO set in the past | the loss detection or probe timeout is never before the last ack-eliciting send | held (2000 trials; 5 of 24 mutants fail the spec). The sent packet handler alone does not set the timer in the past |
+| #4174, no DATA_BLOCKED or STREAM_DATA_BLOCKED when the peer's limit is 0 | a stream with data queued and its send credit exhausted, including an initial limit of 0, reports STREAM_DATA_BLOCKED with the limit, once per limit | **violated, confirmed**: with an initial window of 0 and 23 bytes written, a pop with room for 123 bytes sends nothing and reports nothing |
+| #2113, stateless reset attacks | a reset closes a connection only on the token of a peer connection ID still active | held |
+
+The #4174 result is the defect upstream fixed in `bbaf7610` (#6301, "send
+STREAM_DATA_BLOCKED when the peer's stream limit is 0"), merged just after
+`cb08e8f`. The agent wrote the spec from the issue, not from the fix, and
+the spec calibrates on it:
+
+| revision | result |
+|---|---|
+| `bbaf7610^` | violated at random trial 281 |
+| `bbaf7610` | held: 50000 random trials |
+
+The spec is
+[issue_stream_data_blocked_test.go.txt](quic-go/issue_stream_data_blocked_test.go.txt).
+The DATA_BLOCKED half of #4174 (the connection-level limit) is still open.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
