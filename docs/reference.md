@@ -89,7 +89,7 @@ Completion is counted in items; ✅ done, 🚧 in progress, ⬜ not started.
 - ✅ Proofs over all inputs in the pipeline for `no_panic` on integer and bool functions, each with its trust base (10 on the examples, all kernel-checked), and, through the weakest precondition, for specs and integer slices of loop-free functions (5 more on the examples, each judged by Lean's comparator)
 - ✅ Sequence specs (`go2lean:sequence`): properties of a sequence of calls, bounded model checking over short sequences
 - ✅ Spec mutation check: each spec that held is run against mutants of the code under test; a spec no mutant fails is flagged as checking nothing
-- ✅ Specs as Go fuzz targets (`go2lean fuzz`, and in `agent`): the same properties searched by `go test -fuzz` on the real code
+- ✅ Specs as Go fuzz targets (`go2lean fuzz`, and in `agent`): the same properties searched by `go test -fuzz` on the real code, from a seed corpus of boundary and uniformly random values (#290)
 - ✅ Go fuzz targets (`FuzzXxx`) read as specs (`go2lean run`, `-fuzz-specs`): a project with fuzz targets needs no spec writing
 - 🚧 Proofs of postconditions: `go2lean prove` states a function's contract from a postcondition and proves loop-free functions alone; loops by an agent that writes the invariants under the kernel's check (10 of 10 goals, nested loops and bubble sort included, [eval](../docs/eval/proof-agent.md)) or by hand (up to insertion sort); a Go spec can be the postcondition; every proof judged by Lean's comparator in a sandbox, with a certificate ([trust](trust.md), [#22](https://github.com/fooexec/go2lean/issues/22))
 - 🚧 `init` functions and package state (stores an `init` makes on every path, since 2026-10-23); floats ✅ (#148)

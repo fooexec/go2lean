@@ -17,8 +17,11 @@ package fuzzexport
 import (
 	"fmt"
 	"go/types"
+	"hash/fnv"
 	"maps"
+	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -307,13 +310,14 @@ func (g *gen) target(s Spec) (string, error) {
 			return "", fmt.Errorf("spec %s takes %d parameters, the target %d and %d results", s.Spec, ssig.Params().Len(), nIn, nRes)
 		}
 	}
-	var fuzzParams, setup, args []string
+	var fuzzParams, setup, args, kinds []string
 	usesData := false
 	for i := 0; i < nIn; i++ {
 		t := ssig.Params().At(i).Type()
 		v := fmt.Sprintf("p%d", i)
 		args = append(args, v)
 		if a := fuzzArg(t); a != "" {
+			kinds = append(kinds, a)
 			fuzzParams = append(fuzzParams, fmt.Sprintf("a%d %s", i, a))
 			setup = append(setup, fmt.Sprintf("%s := %s(a%d)", v, g.typeStr(t), i))
 			continue
@@ -327,9 +331,14 @@ func (g *gen) target(s Spec) (string, error) {
 	}
 	if usesData {
 		fuzzParams = append(fuzzParams, "go2leanData []byte")
+		kinds = append(kinds, "data")
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "// %s checks property %s.\nfunc %s(f *testing.F) {\n\tf.Fuzz(func(t *testing.T, %s) {\n", fuzzName(s.Spec), s.Property, fuzzName(s.Spec), strings.Join(fuzzParams, ", "))
+	fmt.Fprintf(&b, "// %s checks property %s.\nfunc %s(f *testing.F) {\n", fuzzName(s.Spec), s.Property, fuzzName(s.Spec))
+	for _, seed := range seeds(s.Spec, kinds) {
+		fmt.Fprintf(&b, "\tf.Add(%s)\n", seed)
+	}
+	fmt.Fprintf(&b, "\tf.Fuzz(func(t *testing.T, %s) {\n", strings.Join(fuzzParams, ", "))
 	if usesData {
 		// _ = r: a decoder of a type with nothing to fill does not read it.
 		b.WriteString("\t\tr := &go2leanFuzzReader{b: go2leanData}\n\t\t_ = r\n")
@@ -370,4 +379,187 @@ func spread(sig *types.Signature, args []string) []string {
 	out := append([]string{}, args...)
 	out[len(out)-1] += "..."
 	return out
+}
+
+// Seeds (#290). Go's fuzzer starts from its corpus and mutates it; from an
+// empty corpus it seldom reaches values far from zero, and on quic-go it
+// held, over millions of runs, two specs that half or a twentieth of all
+// uniformly random inputs violate. Every target therefore starts from: all
+// zeros; each boundary in turn for every scalar at once (1, -1, the
+// maximum and the minimum, 2^31, 2^32, 2^62, 2^63, with all-0xff decoder
+// bytes); and eight uniformly random inputs over the full width, drawn from
+// the spec's name so that an export is reproducible.
+
+// boundaries are the integers each scalar takes in turn.
+var boundaries = []string{"1", "-1", "max", "max-1", "min", "1<<31", "1<<32", "1<<62", "1<<63"}
+
+// nRandomSeeds is how many uniformly random inputs a target starts from.
+const nRandomSeeds = 8
+
+// seeds are the f.Add argument lists for a target whose fuzz parameters
+// have these kinds (fuzzArg's, or "data" for the decoder's bytes).
+func seeds(spec string, kinds []string) []string {
+	if len(kinds) == 0 {
+		return nil
+	}
+	var out []string
+	row := func(f func(kind string) string) {
+		var vs []string
+		for _, k := range kinds {
+			vs = append(vs, f(k))
+		}
+		out = append(out, strings.Join(vs, ", "))
+	}
+	row(func(k string) string { return zeroLit(k) })
+	for _, bnd := range boundaries {
+		row(func(k string) string { return boundaryLit(k, bnd) })
+	}
+	h := fnv.New64a()
+	h.Write([]byte(spec))
+	rng := rand.New(rand.NewSource(int64(h.Sum64())))
+	for i := 0; i < nRandomSeeds; i++ {
+		row(func(k string) string { return randomLit(k, rng) })
+	}
+	// Drop repeated rows (a target of only bools has few distinct ones).
+	seen := map[string]bool{}
+	var uniq []string
+	for _, r := range out {
+		if !seen[r] {
+			seen[r] = true
+			uniq = append(uniq, r)
+		}
+	}
+	return uniq
+}
+
+func zeroLit(k string) string {
+	switch k {
+	case "bool":
+		return "false"
+	case "string":
+		return `""`
+	case "[]byte", "data":
+		return "[]byte(nil)"
+	}
+	return k + "(0)"
+}
+
+// width and signedness of an integer kind.
+func intKind(k string) (bits int, signed, ok bool) {
+	switch k {
+	case "int", "int64":
+		return 64, true, true
+	case "int8":
+		return 8, true, true
+	case "int16":
+		return 16, true, true
+	case "int32", "rune":
+		return 32, true, true
+	case "uint", "uint64":
+		return 64, false, true
+	case "uint8", "byte":
+		return 8, false, true
+	case "uint16":
+		return 16, false, true
+	case "uint32":
+		return 32, false, true
+	}
+	return 0, false, false
+}
+
+// boundaryLit is the boundary b for a scalar of kind k, clamped to what k
+// holds; a non-integer takes a value of the same spirit.
+func boundaryLit(k, b string) string {
+	if bits, signed, ok := intKind(k); ok {
+		var max, min uint64
+		if signed {
+			max = 1<<(bits-1) - 1
+		} else {
+			max = 1<<(bits-1) - 1 + 1<<(bits-1)
+		}
+		var v string
+		switch b {
+		case "max":
+			v = strconv.FormatUint(max, 10)
+		case "max-1":
+			v = strconv.FormatUint(max-1, 10)
+		case "min":
+			if signed {
+				v = "-" + strconv.FormatUint(1<<(bits-1), 10)
+			} else {
+				v = "0"
+			}
+		case "-1":
+			if signed {
+				v = "-1"
+			} else {
+				v = strconv.FormatUint(max, 10)
+			}
+		case "1":
+			v = "1"
+		default: // 1<<n
+			n, _ := strconv.Atoi(strings.TrimPrefix(b, "1<<"))
+			if n >= bits || (signed && n >= bits-1) {
+				v = strconv.FormatUint(max, 10)
+			} else {
+				v = strconv.FormatUint(min+1<<n, 10)
+			}
+		}
+		return k + "(" + v + ")"
+	}
+	switch k {
+	case "bool":
+		return "true"
+	case "string":
+		return strconv.Quote(strings.Repeat("\xff", 32))
+	case "[]byte", "data":
+		return "[]byte(" + strconv.Quote(strings.Repeat("\xff", 64)) + ")"
+	case "float64":
+		return map[string]string{"1": "1.0", "-1": "-1.0", "max": "go2leanMath.MaxFloat64", "min": "-go2leanMath.MaxFloat64"}[b] + floatDefault(b)
+	case "float32":
+		return "float32(" + map[string]string{"1": "1.0", "-1": "-1.0", "max": "go2leanMath.MaxFloat32", "min": "-go2leanMath.MaxFloat32"}[b] + floatDefault(b) + ")"
+	}
+	return zeroLit(k)
+}
+
+// floatDefault fills the boundaries a float has no literal for.
+func floatDefault(b string) string {
+	switch b {
+	case "1", "-1", "max", "min":
+		return ""
+	}
+	return "2147483648.5"
+}
+
+func randomLit(k string, rng *rand.Rand) string {
+	if bits, signed, ok := intKind(k); ok {
+		u := rng.Uint64()
+		if bits < 64 {
+			u &= 1<<bits - 1
+		}
+		if signed {
+			v := int64(u<<(64-bits)) >> (64 - bits) // sign-extended
+			return k + "(" + strconv.FormatInt(v, 10) + ")"
+		}
+		return k + "(" + strconv.FormatUint(u, 10) + ")"
+	}
+	switch k {
+	case "bool":
+		return strconv.FormatBool(rng.Intn(2) == 1)
+	case "string":
+		return strconv.Quote(string(randBytes(rng, 1+rng.Intn(32))))
+	case "[]byte", "data":
+		return "[]byte(" + strconv.Quote(string(randBytes(rng, 64))) + ")"
+	case "float64":
+		return "go2leanMath.Float64frombits(" + strconv.FormatUint(rng.Uint64(), 10) + ")"
+	case "float32":
+		return "go2leanMath.Float32frombits(" + strconv.FormatUint(uint64(rng.Uint32()), 10) + ")"
+	}
+	return zeroLit(k)
+}
+
+func randBytes(rng *rand.Rand, n int) []byte {
+	b := make([]byte, n)
+	rng.Read(b)
+	return b
 }
