@@ -127,7 +127,9 @@ func TestOutcomes(t *testing.T) {
 	if err := ws.WriteTarget(&contract.Target{ID: "t4", Func: "SeqE"}); err != nil {
 		t.Fatal(err)
 	}
-	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p2", Summary: "random: none in 2000 trials"})
+	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p2", Summary: "random: none in 2000 trials (0 out of fuel, 0 moot/stuck); spec checked 2000, vacuous 0 []"})
+	// Every run out of fuel: nothing was checked.
+	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p4", Summary: "random: none in 563 trials (563 out of fuel, 0 moot/stuck)"})
 	for i, st := range []contract.VerdictStatus{contract.VerdictConfirmed, contract.VerdictSpurious} {
 		id := []string{"cx1", "cx3"}[i]
 		ws.WriteCounterexample(&contract.Counterexample{ID: id, Property: []string{"p1", "p3"}[i]})
@@ -136,10 +138,10 @@ func TestOutcomes(t *testing.T) {
 	got := Outcomes(ws, []string{"SeqA", "SeqB", "SpecC", "SeqD", "SeqE"})
 	want := map[string]Result{
 		"SeqA":  {Outcome: OutViolated},
-		"SeqB":  {Outcome: OutHeld, Search: "random: none in 2000 trials"},
+		"SeqB":  {Outcome: OutHeld, Search: "random: none in 2000 trials (0 out of fuel, 0 moot/stuck); spec checked 2000, vacuous 0 []"},
 		"SpecC": {Outcome: OutSpurious},
 		"SeqD":  {Outcome: OutNotRun},
-		"SeqE":  {Outcome: OutHeld},
+		"SeqE":  {Outcome: OutUnknown, Search: "random: none in 563 trials (563 out of fuel, 0 moot/stuck)"},
 	}
 	for s, w := range want {
 		if got[s] != w {

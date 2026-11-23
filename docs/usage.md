@@ -322,7 +322,8 @@ For each candidate the spec file names that records a fix, it checks the
 two revisions out in git worktrees, copies the spec file into the package,
 runs `go2lean run -specs-only` and reads each spec's result: violated
 (a counterexample the replay confirmed), spurious, held (with the hunt
-summary: what the search covered), no build, not run. A bug a fix
+summary: what the search covered), unknown (no counterexample, but every
+run ran out of fuel, so nothing was checked), no build, not run. A bug a fix
 removed is often rare, so the run's search is larger than `run`'s
 default (`-run-flags`, by default `-trials 50000 -budget 600
 -mutate=false`). The results go to `calibration.json`.

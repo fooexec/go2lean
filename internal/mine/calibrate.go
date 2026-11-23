@@ -28,6 +28,7 @@ const (
 	OutHeld     = "held"     // no counterexample
 	OutNoBuild  = "no build" // the spec file does not build at this revision
 	OutNotRun   = "not run"  // no property of the spec at this revision
+	OutUnknown  = "unknown"  // no counterexample, but no input checked to the end (out of fuel)
 )
 
 // Calibration is the result for one candidate.
@@ -213,6 +214,10 @@ func lastLines(s string, n int) string {
 	return strings.Join(ls, "\n")
 }
 
+// checked: a search summary that saw the spec through on some input. A
+// search all of whose runs ran out of fuel checked nothing: no hold.
+var checked = regexp.MustCompile(`spec checked [1-9]|exhaustive: holds|proved`)
+
 // Outcomes reads the result of each spec from a workspace a run wrote.
 func Outcomes(ws contract.Workspace, specs []string) map[string]Result {
 	props, _ := ws.Properties()
@@ -237,6 +242,9 @@ func Outcomes(ws contract.Workspace, specs []string) map[string]Result {
 				r := Result{Outcome: OutHeld}
 				if h := ws.HuntRecord(p.ID); h != nil {
 					r.Search = h.Summary
+					if !checked.MatchString(h.Summary) {
+						r.Outcome = OutUnknown
+					}
 				}
 				res[s] = r
 			}
