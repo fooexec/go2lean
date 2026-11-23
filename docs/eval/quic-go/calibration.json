@@ -1,0 +1,24 @@
+[
+  {
+    "candidate": "c001",
+    "specs": [
+      "SeqSentPacketHandlerPathProbesNoPanic"
+    ],
+    "before_rev": "b90058aba5f65f48e0e150c89bbaa21a72dda4de^",
+    "after_rev": "b90058aba5f65f48e0e150c89bbaa21a72dda4de",
+    "at_before": {
+      "SeqSentPacketHandlerPathProbesNoPanic": {
+        "outcome": "violated",
+        "search": "random: found at trial 5215"
+      }
+    },
+    "at_after": {
+      "SeqSentPacketHandlerPathProbesNoPanic": {
+        "outcome": "held",
+        "search": "random: none in 50000 trials (0 out of fuel, 0 moot/stuck); spec checked 50000, vacuous 0 []; the package initializers read 2 havoc values (fixed for every trial); exhaustive: stopped by the 600s budget after 354109 of 1615420 inputs"
+      }
+    },
+    "passed": true,
+    "why": "violated before the fix, holds after"
+  }
+]

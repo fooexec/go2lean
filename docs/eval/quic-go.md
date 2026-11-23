@@ -520,6 +520,30 @@ every ACK to reset the PTO count. RFC 9002 A.7's `OnAckReceived` returns
 before `pto_count = 0` when the ACK newly acknowledges nothing, and quic-go
 does the same; the spec was corrected, not the package.
 
+## Calibration on quic-go's own advisories (2026-11-23)
+
+`go2lean calibrate` (#315 P3) checks that a spec written for a fixed bug
+is violated before the fix and holds after it. The first case is the
+probe-packet panic, GHSA-j972-j939-p2v3, fixed in `b90058ab` (candidate
+c001 of `go2lean propose` on quic-go's advisories). The spec,
+[calibrate_ackhandler_test.go.txt](quic-go/calibrate_ackhandler_test.go.txt),
+drives the sent packet handler through up to 8 operations: sends, path
+probes, loss detection timeouts and ACKs naming any of the first 8 packets,
+with the clock moved by 0, 100 ms, 500 ms or 1.5 s after each.
+
+| revision | result |
+|---|---|
+| `b90058ab^` | violated: the model finds a nil dereference at random trial 5215; the replay confirms it (`packet.go:29`) |
+| `b90058ab` | held: 50000 random trials, 354109 inputs searched exhaustively in the 600 s budget |
+
+Run's default 2000 trials held before the fix too; plain Go, calling the
+spec on random inputs, panics at about the 9000th. This is why calibrate
+runs a larger search by default. The results are in
+[calibration.json](quic-go/calibration.json). The QPACK header limit fix
+(GHSA-g754-hx8w-x2g6) cannot be calibrated this way: it adds a parameter
+to `requestFromHeaders`, so one spec file does not build on both
+revisions.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
