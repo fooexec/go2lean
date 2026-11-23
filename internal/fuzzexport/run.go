@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,10 +44,15 @@ type Result struct {
 	Corpus string `json:"corpus,omitempty"`
 	// Reproduce says how to rerun it in the package.
 	Reproduce string `json:"reproduce,omitempty"`
+	// Seed is the seed corpus entry that failed ("seed#3"), when the spec
+	// was false before the fuzzer mutated anything; Input is then that
+	// entry's f.Add arguments. seed#0 is all zeros.
+	Seed string `json:"seed,omitempty"`
 }
 
 var (
 	failingRe = regexp.MustCompile(`Failing input written to (testdata/fuzz/\S+)`)
+	seedRe    = regexp.MustCompile(`failure while testing seed corpus entry: \S+/(seed#(\d+))`)
 	reportRe  = regexp.MustCompile(`(go2lean: \S+ is false|panic: .*)`)
 	execsRe   = regexp.MustCompile(`execs: (\d+)`)
 )
@@ -129,9 +135,19 @@ func Run(ws contract.Workspace, root, pkg string, opts Options) ([]Result, []Ski
 		if m := execsRe.FindAllStringSubmatch(out, -1); len(m) > 0 {
 			r.Execs = m[len(m)-1][1]
 		}
+		sm := seedRe.FindStringSubmatch(out)
 		switch m := failingRe.FindStringSubmatch(out); {
 		case err != nil:
 			r.Status, r.Message = "error", err.Error()
+		case m == nil && sm != nil && reportRe.MatchString(out):
+			// A seed corpus entry (#290) made the spec false: Go reports
+			// it without writing a corpus file.
+			r.Status, r.Seed = "violated", sm[1]
+			n, _ := strconv.Atoi(sm[2])
+			r.Input = seedArgs(src, t.Fuzz, n)
+			r.Message = failureMessage(out)
+			r.Reproduce = fmt.Sprintf("copy %s into %s, then: go test -run='%s/%s' %s",
+				filepath.Join(ws.Root, "fuzz", FileName), dir, t.Fuzz, sm[1], pkg)
 		case m != nil:
 			r.Status = "violated"
 			rel := strings.TrimPrefix(m[1], "testdata/fuzz/")
@@ -189,4 +205,25 @@ func pkgDir(root, pkg string) (string, error) {
 		return "", fmt.Errorf("go list %s: %v", pkg, err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// seedArgs is the argument list of the n-th f.Add of target fuzz in the
+// generated source.
+func seedArgs(src, fuzz string, n int) string {
+	i := strings.Index(src, "func "+fuzz+"(f *testing.F) {")
+	if i < 0 {
+		return ""
+	}
+	k := 0
+	for _, l := range strings.Split(src[i:], "\n")[1:] {
+		l = strings.TrimSpace(l)
+		if !strings.HasPrefix(l, "f.Add(") {
+			break
+		}
+		if k == n {
+			return strings.TrimSuffix(strings.TrimPrefix(l, "f.Add("), ")")
+		}
+		k++
+	}
+	return ""
 }

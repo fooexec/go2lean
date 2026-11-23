@@ -186,11 +186,14 @@ func TestCompleteRetrying(t *testing.T) {
 }
 
 func TestSeedFailures(t *testing.T) {
+	// Only the all-zero seed makes a spec suspect; a boundary or random
+	// seed's failure (seed#11) is a finding, as one the fuzzer mutates to.
 	rs := []fuzzexport.Result{
-		{Fuzz: "FuzzGo2Lean_A", Status: "violated", Execs: "0", Message: "go2lean: A is false"},
+		{Fuzz: "FuzzGo2Lean_A", Status: "violated", Seed: "seed#0", Message: "go2lean: A is false"},
 		{Fuzz: "FuzzGo2Lean_B", Status: "violated", Execs: "154"},
 		{Fuzz: "FuzzGo2Lean_C", Status: "held"},
-		{Fuzz: "FuzzGo2Lean_D", Status: "violated"},
+		{Fuzz: "FuzzGo2Lean_D", Status: "violated", Seed: "seed#0"},
+		{Fuzz: "FuzzGo2Lean_E", Status: "violated", Seed: "seed#11"},
 	}
 	bad := seedFailures(rs)
 	if len(bad) != 2 || bad[0].Fuzz != "FuzzGo2Lean_A" || bad[1].Fuzz != "FuzzGo2Lean_D" {

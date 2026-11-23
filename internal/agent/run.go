@@ -521,12 +521,15 @@ func isReport(resp string) bool {
 	return false
 }
 
-// seedFailures returns the targets that fail before the fuzzer mutated
-// anything: its seed input already makes the spec false.
+// seedFailures returns the targets false on the all-zero seed (seed#0):
+// a spec false on the zero values of its parameters checks nothing. The
+// other seeds (boundaries, random values, #290) are inputs like any the
+// fuzzer finds: a spec false on them may have found a defect, and is
+// reported, not revised.
 func seedFailures(results []fuzzexport.Result) []fuzzexport.Result {
 	var bad []fuzzexport.Result
 	for _, r := range results {
-		if r.Status == "violated" && (r.Execs == "" || r.Execs == "0") {
+		if r.Status == "violated" && r.Seed == "seed#0" {
 			bad = append(bad, r)
 		}
 	}
