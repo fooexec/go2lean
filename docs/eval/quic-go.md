@@ -539,10 +539,7 @@ with the clock moved by 0, 100 ms, 500 ms or 1.5 s after each.
 Run's default 2000 trials held before the fix too; plain Go, calling the
 spec on random inputs, panics at about the 9000th. This is why calibrate
 runs a larger search by default. The results are in
-[calibration.json](quic-go/calibration.json). The QPACK header limit fix
-(GHSA-g754-hx8w-x2g6) cannot be calibrated this way: it adds a parameter
-to `requestFromHeaders`, so one spec file does not build on both
-revisions.
+[calibration.json](quic-go/calibration.json).
 
 The second case is the control frame queue (GHSA-c33x-xqrf-c478, fixed in
 `4a99b816`, candidate c003): a peer's frames make the endpoint queue
@@ -562,6 +559,25 @@ fuel, and calibrate counted that as a hold. Two things were wrong. The
 model's slice bound was 16384 elements, and a queue past it ended the run
 like fuel; the bound is now 2^20. And a search that checked no input to
 the end is now `unknown`, not held.
+
+The third is the QPACK header limit (GHSA-g754-hx8w-x2g6, fixed in
+`5b2d2129`, candidate c004). The fix adds a size limit parameter to
+`requestFromHeaders`, so one spec file cannot build on both revisions;
+`-spec-before` gives a second file, with the same spec written against the
+old signature. The spec ([after](quic-go/calibrate_qpack_test.go.txt),
+[before](quic-go/calibrate_qpack_before_test.go.txt)) decodes a request
+of n fields of vlen bytes and checks that a field section over a limit of
+1024 (RFC 9114, Section 4.2.2: name, value and 32 per field) is rejected.
+
+| revision | result |
+|---|---|
+| `5b2d2129^` | violated at random trial 10 |
+| `5b2d2129` | held: 50000 random trials, 5041 inputs exhaustively |
+
+All three of quic-go's own advisories whose fix is in reach of the model
+calibrate. The others need a connection driven through a TLS handshake
+(GHSA-3q6m, GHSA-47m2), a path (GHSA-ppxx), or a Linux socket option
+(GHSA-px8v).
 
 ## Candidates from other implementations' advisories, by the agent (2026-11-23)
 
