@@ -19,6 +19,7 @@ func cmdCalibrate(args []string) error {
 	cands := fs.String("candidates", "candidates.json", "the candidates go2lean propose wrote")
 	spec := fs.String("spec", "", "the spec file, in the package it checks; its specs name their candidate (\"candidate c001\") in their doc comments")
 	out := fs.String("o", "calibration.json", "write the results here (- for stdout)")
+	specBefore := fs.String("spec-before", "", "the spec file for the revision before the fix, when the fix changed a signature the specs call: the same specs, written against the code before it (installed under -spec's name)")
 	scratch := fs.String("scratch", "", "directory for the worktrees (default: a temporary one)")
 	runFlags := fs.String("run-flags", "-trials 50000 -budget 600 -mutate=false", "flags for go2lean run on each revision (space-separated): a bug a fix removed is often rare, so the default search is larger than run's")
 	fs.Parse(args)
@@ -62,7 +63,7 @@ func cmdCalibrate(args []string) error {
 		}
 		defer os.RemoveAll(dir)
 	}
-	cals, err := mine.Calibrate(absMod, pkg, absSpec, p.Candidates, mine.GoRunner(bin, strings.Fields(*runFlags)...), dir)
+	cals, err := mine.Calibrate(absMod, pkg, absSpec, *specBefore, p.Candidates, mine.GoRunner(bin, strings.Fields(*runFlags)...), dir)
 	passed := 0
 	for _, c := range cals {
 		mark := "FAIL"

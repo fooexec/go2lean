@@ -83,8 +83,12 @@ func SpecsByCandidate(specFile string) (map[string][]string, error) {
 
 // Calibrate checks the specs of specFile written for the candidates that
 // record a fix, on worktrees of module at the revisions before and after
-// it; pkg is the package directory relative to the module.
-func Calibrate(module, pkg, specFile string, cs []Candidate, run Runner, scratch string) ([]Calibration, error) {
+// it; pkg is the package directory relative to the module. beforeFile, if
+// not empty, is the spec file for the revision before the fix: the same
+// specs, written against the code as it was there, for a fix that changed
+// the signature of a function the specs call. It is installed under
+// specFile's name.
+func Calibrate(module, pkg, specFile, beforeFile string, cs []Candidate, run Runner, scratch string) ([]Calibration, error) {
 	byCand, err := SpecsByCandidate(specFile)
 	if err != nil {
 		return nil, err
@@ -92,6 +96,21 @@ func Calibrate(module, pkg, specFile string, cs []Candidate, run Runner, scratch
 	src, err := os.ReadFile(specFile)
 	if err != nil {
 		return nil, err
+	}
+	beforeSrc := src
+	if beforeFile != "" {
+		byCandBefore, err := SpecsByCandidate(beforeFile)
+		if err != nil {
+			return nil, err
+		}
+		for id, specs := range byCand {
+			if !sameSet(specs, byCandBefore[id]) {
+				return nil, fmt.Errorf("%s names specs %v for candidate %s, %s names %v: the two files must have the same specs", specFile, specs, id, beforeFile, byCandBefore[id])
+			}
+		}
+		if beforeSrc, err = os.ReadFile(beforeFile); err != nil {
+			return nil, err
+		}
 	}
 	var out []Calibration
 	for _, c := range cs {
@@ -106,7 +125,11 @@ func Calibrate(module, pkg, specFile string, cs []Candidate, run Runner, scratch
 			before = c.After + "^"
 		}
 		for i, rev := range []string{before, c.After} {
-			res, err := runAt(module, pkg, filepath.Base(specFile), src, rev, specs, run, filepath.Join(scratch, fmt.Sprintf("%s-%d", c.ID, i)))
+			code := src
+			if i == 0 {
+				code = beforeSrc
+			}
+			res, err := runAt(module, pkg, filepath.Base(specFile), code, rev, specs, run, filepath.Join(scratch, fmt.Sprintf("%s-%d", c.ID, i)))
 			if err != nil {
 				return out, fmt.Errorf("calibrate %s at %s: %w", c.ID, rev, err)
 			}
@@ -120,6 +143,19 @@ func Calibrate(module, pkg, specFile string, cs []Candidate, run Runner, scratch
 		out = append(out, cal)
 	}
 	return out, nil
+}
+
+// sameSet: a and b hold the same names.
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, x := range a {
+		if !contains(b, x) {
+			return false
+		}
+	}
+	return true
 }
 
 // judge: passed when some spec is violated before the fix and every spec

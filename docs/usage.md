@@ -262,10 +262,21 @@ the revisions without and with it (`before`, `after`). The kinds:
 |---|---|---|
 | `advisory` | OSV, for the module and each `-similar` project (a Go module path, or `ecosystem:name`). One item per advisory: the GHSA id, with its CVE, `GO-` and `RUSTSEC-` ids as aliases | the fix commit named in its references, else the first fixed version (the target's own advisories only) |
 | `commit` | the git history: commits whose message names a fix, a crash, a bound, a protocol rule or a security issue, and which change non-test Go code; not those that fix the build, the tests, the docs, the logs or the interop runner. With the start of the diff | the parent, and the commit |
+| `pr` | the project's merged pull requests on GitHub that fix something (by their words or a bug label), with the text of the issues they close. A pull request whose commit is also a `commit` item is folded into it (the commit gains its words and the alias `#N`) | the parent of its commit, and the commit (a squash merge's `(#N)`) |
+| `issue` | the project's open issues that report a bug (a bug or security label, or a title that names a crash, a bound or a fix): a defect the code may still have | none |
 | `rfc` | every RFC section the code's comments cite ("RFC 9000, Section 13.2", "Section 13.2 of RFC 9000"), with the places that cite it and the section's text from rfc-editor.org (kept in `-rfc-cache`) | none |
 | `doc` | the normative sentences (must, never, at most, returns an error if, panics if, ...) of the package and exported declaration doc comments, and the README's (must, shall, never, rejected) | none |
 
-`-offline` skips OSV and the RFC texts; the citations are still listed. On
+The issues and pull requests come from GitHub's search API, for the
+origin remote's repository or `-github-repo owner/name` (`GITHUB_TOKEN`
+raises the rate limit; `-max-issues` bounds each search), or from a file of
+its results (`-github-json`, as `gh api --paginate search/issues -f q='repo:R
+is:pr is:merged'` writes them). On quic-go, 300 merged pull requests and
+146 open issues gave 166 `pr` items (162 matched to their commit, 51 folded
+into `commit` items) and 24 `issue` items.
+
+`-offline` skips OSV, the RFC texts and the GitHub search; the citations
+are still listed, and a `-github-json` file is still read. On
 quic-go (7489 commits) the run takes about 6 seconds and gives 30 advisories
 (8 of quic-go's own, 22 of quiche, quinn and s2n-quic), 323 commits, 53 RFC
 sections (40 with their text) and 66 doc sentences.
@@ -328,10 +339,11 @@ removed is often rare, so the run's search is larger than `run`'s
 default (`-run-flags`, by default `-trials 50000 -budget 600
 -mutate=false`). The results go to `calibration.json`.
 
-A spec has to build on both revisions: a fix that changes the signature
-of the function a spec calls (quic-go's QPACK header limit added a
-parameter to `requestFromHeaders`) needs a spec through a function both
-revisions have.
+A spec has to build on both revisions. When the fix changed the signature
+of a function the spec calls (quic-go's QPACK header limit added a
+parameter to `requestFromHeaders`), `-spec-before <file>` gives the spec
+file for the revision before the fix: the same specs, by name, written
+against the code as it was. It is installed under `-spec`'s name there.
 
 On quic-go's probe-packet panic (GHSA-j972-j939-p2v3, fixed in
 `b90058ab`), a sequence spec over sent packets, path probes, ACKs and loss
@@ -353,9 +365,9 @@ go2lean run     [-workspace out] [-v] [-nil-inputs] [-deps=false] [-generics=fal
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking] [-candidates candidates.json] [-candidate-ids ids]
                 [-repairs n] [-report] <package>
 go2lean advisory [-o file] [-llm ...] <GHSA-id|CVE-id>   draft a catalog property (docs/specs) from a published advisory (OSV)
-go2lean mine    [-o evidence.json] [-similar p,...] [-offline] [-max-commits n] [dir]   collect the evidence properties are drafted from (below)
+go2lean mine    [-o evidence.json] [-similar p,...] [-github-repo o/n] [-github-json f] [-offline] [-max-commits n] [dir]   collect the evidence properties are drafted from (below)
 go2lean propose [-evidence evidence.json] [-o candidates.json] [-llm ...] [-kinds k,...] [-limit n] [dir]   candidate properties from the evidence (below)
-go2lean calibrate -spec <file> [-candidates candidates.json] [-o calibration.json] [-run-flags "..."] [module]   each spec violated before its candidate's fix, held after (above)
+go2lean calibrate -spec <file> [-spec-before <file>] [-candidates candidates.json] [-o calibration.json] [-run-flags "..."] [module]   each spec violated before its candidate's fix, held after (above)
 go2lean symexec [-module dir] [-func names] [-unexported] [-replay=false] [-maxlen n] [-loop n] [-depth n] <package>   bounded symbolic execution (needs z3)
 go2lean zorya  run|replay [-dir zorya] [-ghidra dir] [-seed aaaa] [-results f.json] <binary>   concolic execution of a compiled program, reports replayed
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]

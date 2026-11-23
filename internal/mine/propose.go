@@ -84,6 +84,8 @@ const proposeSystem = `You read evidence about a Go project and propose properti
 Evidence kinds:
 - advisory: a published security advisory, of this project or of a similar one (another implementation of the same protocol, possibly in another language). The property is the guarantee the advisory shows was missing.
 - commit: a commit of this project that fixed a defect. The property is the guarantee the fix establishes: it must fail on the code before the commit and hold after it.
+- pr: a merged pull request of this project that fixed a defect, with the issues it closes. As for a commit: the property must fail before the fix and hold after it.
+- issue: an open issue of this project that reports a bug. Nothing has fixed it; the property is the guarantee the report says is broken, so a spec for it may fail on the current code.
 - rfc: a section of an RFC the code cites. The properties are the section's MUST / MUST NOT / SHOULD rules that the citing code implements.
 - doc: a sentence of the project's documentation that states a contract.
 
