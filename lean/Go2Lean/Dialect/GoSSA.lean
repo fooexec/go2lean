@@ -370,6 +370,10 @@ inductive Op where
   | appendSlice (zero : Val)
   /-- `copy(dst, src)`: copies `min len` elements, yields the count. -/
   | copySlice
+  /-- `slices.overlaps(a, b)` (the aliasing check of `slices.Insert` and
+  `Replace`, which compares element addresses through `unsafe`): the two
+  slices share a backing array and their index ranges intersect. -/
+  | sliceOverlap
   /-- `p == nil` style comparisons go through `eq`/`ne`; this reads `p == nil`. -/
   | isNil
   -- strings
@@ -4338,6 +4342,12 @@ def denote (or : Oracle) (heap : Heap Val) : Op → List Val → Res (Val × Hea
         let heap := heap.set! ref .unit
         .ok (.int 64 (BitVec.ofNat 64 n), heap.set! ref (.arrA (writeAtA es off.toNat (ts.take n))))
       | _ => .panic .modelStuck
+    | _, _ => .panic .modelStuck
+  | .sliceOverlap, [a, b] =>
+    match a, b with
+    | .slice ra oa la _, .slice rb ob lb _ =>
+      let (oa, la, ob, lb) := (oa.toNat, la.toNat, ob.toNat, lb.toNat)
+      .ok (.bool (ra != 0 && ra == rb && la > 0 && lb > 0 && oa < ob + lb && ob < oa + la), heap)
     | _, _ => .panic .modelStuck
   | .conc c, args => denoteConc heap c args
   | .chanMake zero, [cap] =>
