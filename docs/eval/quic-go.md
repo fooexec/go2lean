@@ -34,11 +34,11 @@ asks for disclosure and for a report in the reporter's own words.
 | `http3`, round 2 (history and the QPACK advisory) | 7 | 3 counterexamples, all spurious | **3 specs violated**, 3 held (size limits, trailers, plain CONNECT with a port) |
 | `http3`, round 3 (RFC 9114 frames, SETTINGS, GOAWAY, PRIORITY_UPDATE, capsules; complete rule set) | 11, then 11 revised | 3 counterexamples, all spurious (a `closeConn` closure the model does not know) | **1 spec violated** (reserved SETTINGS identifiers), the rest held, 1.0M to 2.1M runs each |
 | `qpack` v0.6.0 (RFC 9204/7541: integers, static table, Huffman, field sections, encoder round trip) | 6 | 1 counterexample, spurious (stuck in `Decoder.at`) | 2 violated, both specs stronger than the RFC (non-minimal and over-long integer encodings), 4 held |
-| `internal/protocol` (packet numbers against RFC 9000 A.3 and its example, stream IDs, connection IDs, versions) | 29 | held | held, 1.1M to 5.4M runs each |
+| `internal/protocol` (packet numbers against RFC 9000 A.3 and its example, stream IDs, connection IDs, versions) | 29 | held | held, 1.1M to 5.4M runs each; rerun with seeds: 30 held, one spec with no input not run (the export cannot fuzz a function of no argument) |
 | `internal/utils` (RTT estimator against RFC 9002 5.3 and A.7, PTO) | 4 | held (the RFC-9002 sequence spec was first spurious; see below) | held, 1.5M to 2.2M runs each |
-| `internal/congestion` (Reno window against RFC 9002 7, pacer, hybrid slow start) | 4 | held | held, 1.8M to 2.5M runs each |
+| `internal/congestion` (Reno window against RFC 9002 7, pacer, hybrid slow start) | 5 | held, but for one spec written to fail: `SeqHybridSlowStartLatchedExitIgnoresWindow`, confirmed (below); first written up as held | held, 1.8M to 2.5M runs each; rerun with seeds: the same, the witness spec violated on the all-zero seed |
 | `internal/ackhandler` (PTO backoff, loss and PTO timer selection against RFC 9002 6.1, 6.2 and A.8; the sent-packet handler driven through sends, ACKs, ECN and timeouts against an honest and an adversarial peer) | 3 | held (all three spurious before the `Duration` accessors were modelled; see below) | held, 3.5M to 5.0M runs each |
-| `internal/wire` (frame round trips and lengths, ACK ranges, transport parameters, headers) | 40 | **1 violated and confirmed** (`SeqAckDelayScaling`: the ACK delay wraps, below), the rest held; first written up as all held, corrected 2026-11-23 | 38 held, `SeqAckDelayScaling` among them: **a miss** (no seed inputs, #290); 2 violated, both specs' own (below) |
+| `internal/wire` (frame round trips and lengths, ACK ranges, transport parameters, headers) | 40 | **5 violated and confirmed**: the ACK delay and `max_idle_timeout` wrap (two defects, below), and the three `MaxDataLen` specs (a precondition the specs omit, below); first written up as all held, corrected 2026-11-23 | first run, no seeds: 38 held, all five among them (**misses**, #290), 2 violated, both specs' own (below). Rerun with seeds (2026-11-23, 10 s each): the same 5 violated, 38 held |
 | root package (frame sorter against a byte array, stream flow control, token store) | 4 | held | held, 1.5M to 1.6M runs each |
 
 The `internal/utils` RTT sequence spec (`SeqRTTMatchesRFC9002`, RFC 9002 §5
@@ -109,9 +109,48 @@ send any delay in that range directly. A second spec, written independently
 from msquic's ACK decoding advisory (`SeqAckFrameDecodesAsRFC`), found it
 again at trial 89 and was also held by the fuzzer, over 3.7M executions.
 
-So in this file, **"held under Go's fuzzer" is not evidence for a spec over
-wide integers** until the exported targets are seeded (#290). Such
-results are to be rerun.
+**`max_idle_timeout` wraps too** (2026-11-23). `SeqTransportParametersIdleTimeoutNoOverflow`
+checks that a `max_idle_timeout` in milliseconds never turns into a
+wrapped duration. The model found it at trial 0 and the replay confirmed it
+in the same first round; the unseeded fuzzer held it (466,661 runs), and the
+write-up dropped it too. `TransportParameters.Unmarshal` sets
+`MaxIdleTimeout = max(MinRemoteIdleTimeout, time.Duration(val) *
+time.Millisecond)`: above about 9.2·10^12 ms (292 years) the product
+overflows, and the `max` turns the wrapped value into 5 s. RFC 9000 10.1
+makes the effective idle timeout the minimum of the two endpoints'
+values, so a peer advertising a very long timeout should leave quic-go's
+own (30 s by default) in force; quic-go instead closes the connection after
+5 s of idleness. **Severity: low, no security impact**: a peer can
+advertise 5000 ms directly. Checked by hand on master `cb08e8f`.
+
+**The three `MaxDataLen` specs** (`CryptoFrame`, `StreamFrame`,
+`DatagramFrame`) were violated and confirmed in the same round, and
+dropped from the write-up as well. They are not defects that can be
+reached: `MaxDataLen` assumes the frame's length field takes at most two
+bytes, as it does below 16384 bytes, and subtracts one byte for it; with a
+larger `maxSize` the frame exceeds it by two or six bytes. Every caller
+passes at most a packet's payload (`MaxPacketBufferSize` is 1452), and
+`SendDatagram`, which passes the peer's `max_datagram_frame_size`, takes the
+minimum with that payload estimate first. The specs lack that precondition.
+
+**The hybrid slow start witness.** `SeqHybridSlowStartLatchedExitIgnoresWindow`
+was written to fail: `hybridSlowStart.ShouldExitSlowStart` returns true on
+every call after the one that found a delay increase, whatever the
+window, while the comment says it exits when "the cwnd is greater than 16
+and increasing delay is found". The model confirmed it, and the write-up
+listed the package as held. This is the comment's imprecision, not a
+defect: the window test guards the detecting call only, as in Chromium's
+`HybridSlowStart`, which this code follows.
+
+**The rerun with seeds** (2026-11-23, after #290's seeds and #322): every
+spec of `internal/wire`, `internal/protocol`, `quicvarint`,
+`internal/utils`, `internal/congestion` and `internal/ackhandler` under
+Go's fuzzer for 10 s from the seed corpus. It finds exactly the specs the
+model had confirmed and nothing more. For those packages "held under Go's
+fuzzer" is evidence again. `http3`'s specs mostly take interface
+parameters (`io.Reader`, `quicvarint.Reader`), which the export cannot
+build, so their fuzzer results above come from the hand-written harnesses
+of those rounds and were not rerun.
 
 The two `internal/wire` violations are not defects. One is a transport
 parameters default check that the agent revised after the fuzzer had run on
