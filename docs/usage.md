@@ -302,6 +302,43 @@ quinn advisory, on `frameSorter.Push`), or that a frame cannot implicitly
 open a stream past the advertised limit (from s2n-quic, on
 `streamsMap.AcceptStream`).
 
+## Writing and calibrating the specs
+
+`go2lean agent -candidates candidates.json [-candidate-ids c001,c004]
+<package>` gives the agent the candidates that target the package as
+guidance: each with its harm, oracle and input classes. The agent is asked
+to name the candidate a spec checks in its doc comment (`candidate c001`).
+
+`go2lean calibrate` checks a spec written for a candidate drafted from a
+fix (#315 P3): it must be violated before the fix and hold after it. A
+spec that holds before the fix checks nothing the fix changed; one
+violated after it is wrong, or the fix left something.
+
+```sh
+go2lean calibrate -candidates candidates.json -spec internal/ackhandler/zz_specs_test.go ../quic-go
+```
+
+For each candidate the spec file names that records a fix, it checks the
+two revisions out in git worktrees, copies the spec file into the package,
+runs `go2lean run -specs-only` and reads each spec's result: violated
+(a counterexample the replay confirmed), spurious, held (with the hunt
+summary: what the search covered), no build, not run. A bug a fix
+removed is often rare, so the run's search is larger than `run`'s
+default (`-run-flags`, by default `-trials 50000 -budget 600
+-mutate=false`). The results go to `calibration.json`.
+
+A spec has to build on both revisions: a fix that changes the signature
+of the function a spec calls (quic-go's QPACK header limit added a
+parameter to `requestFromHeaders`) needs a spec through a function both
+revisions have.
+
+On quic-go's probe-packet panic (GHSA-j972-j939-p2v3, fixed in
+`b90058ab`), a sequence spec over sent packets, path probes, ACKs and loss
+detection timeouts calibrates: the model finds the nil dereference at
+random trial 5215 before the fix and the replay confirms it; after the fix
+the spec holds over 50000 trials. With run's default 2000 trials it held
+before the fix too, which is what calibration is for.
+
 ## Commands
 
 ```text
@@ -312,11 +349,12 @@ go2lean hunt    [-workspace out] [-property id] [-engine random|exhaustive|all] 
                 [-seed n] [-trials n] [-fuel n] [-maxlen n] [-exhaust-len n] [-exhaust-limit n]
 go2lean poc     [-workspace out] -counterexample id [more ids...]   one build per package, one process per counterexample
 go2lean run     [-workspace out] [-v] [-nil-inputs] [-deps=false] [-generics=false] [-unexported] [-specs-only] [-run regexp] [-run-budget s] [-changed rev] [-mem-limit mb] <packages...>   compile, props, hunt, poc (./... allowed)
-go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking]
+go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking] [-candidates candidates.json] [-candidate-ids ids]
                 [-repairs n] [-report] <package>
 go2lean advisory [-o file] [-llm ...] <GHSA-id|CVE-id>   draft a catalog property (docs/specs) from a published advisory (OSV)
 go2lean mine    [-o evidence.json] [-similar p,...] [-offline] [-max-commits n] [dir]   collect the evidence properties are drafted from (below)
 go2lean propose [-evidence evidence.json] [-o candidates.json] [-llm ...] [-kinds k,...] [-limit n] [dir]   candidate properties from the evidence (below)
+go2lean calibrate -spec <file> [-candidates candidates.json] [-o calibration.json] [-run-flags "..."] [module]   each spec violated before its candidate's fix, held after (above)
 go2lean symexec [-module dir] [-func names] [-unexported] [-replay=false] [-maxlen n] [-loop n] [-depth n] <package>   bounded symbolic execution (needs z3)
 go2lean zorya  run|replay [-dir zorya] [-ghidra dir] [-seed aaaa] [-results f.json] <binary>   concolic execution of a compiled program, reports replayed
 go2lean prove   [-workspace out] -goals goals.json | -func F -post P  [-llm claude-code|claude|mock:<path>]
