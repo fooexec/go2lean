@@ -1,0 +1,338 @@
+package ackhandler
+
+import (
+	"time"
+
+	"github.com/quic-go/quic-go/internal/monotime"
+	"github.com/quic-go/quic-go/internal/protocol"
+	"github.com/quic-go/quic-go/internal/utils"
+	"github.com/quic-go/quic-go/internal/wire"
+	"github.com/quic-go/quic-go/qlog"
+)
+
+// RFC 9002 loss detection and PTO, checked against independent references.
+// Times are int64 nanoseconds; a zero monotime.Time means "not set", so the
+// specs draw set times from a positive range.
+
+const specMaxPTO = int64(60 * time.Second)
+
+func specAbs(x int64) int64 {
+	if x < 0 {
+		if x == -x { // math.MinInt64
+			return 0
+		}
+		return -x
+	}
+	return x
+}
+
+// specScaledRef is RFC 9002 6.2.1's backoff: the PTO period doubles with each
+// consecutive PTO (2^pto_count); quic-go caps it at 60 s and treats a
+// non-positive period as the cap.
+func specScaledRef(base int64, n uint32) int64 {
+	if base <= 0 {
+		return specMaxPTO
+	}
+	v := base
+	for i := uint32(0); i < n && v <= specMaxPTO; i++ {
+		v *= 2
+	}
+	if v > specMaxPTO {
+		return specMaxPTO
+	}
+	return v
+}
+
+type ptoEvent struct {
+	Kind uint8
+	A    int64
+	B    int64
+}
+
+// go2lean:sequence sentPacketHandler.getScaledPTO
+// SeqScaledPTOBackoff: after any RTT history and any PTO count, the scaled PTO
+// equals the RFC 9002 6.2.1 backoff (capped at 60 s), is positive, never
+// above the cap, and one more consecutive PTO never shortens it.
+func SeqScaledPTOBackoff(events []ptoEvent) bool {
+	rtt := utils.NewRTTStats()
+	h := &sentPacketHandler{rttStats: rtt}
+	for _, e := range events {
+		switch e.Kind % 4 {
+		case 0:
+			rtt.UpdateRTT(time.Duration(e.A%10_000_000_000), time.Duration(specAbs(e.B)%1_000_000_000))
+		case 1:
+			// max_ack_delay: values of 2^14 ms or more are invalid (RFC 9000 18.2).
+			rtt.SetMaxAckDelay(time.Duration(specAbs(e.A) % (16384 * 1_000_000)))
+		case 2:
+			h.ptoCount = uint32(e.A)
+		case 3:
+			h.ptoCount++
+		}
+		for _, incl := range []bool{false, true} {
+			got := int64(h.getScaledPTO(incl))
+			if got <= 0 || got > specMaxPTO {
+				return false
+			}
+			if got != specScaledRef(int64(rtt.PTO(incl)), h.ptoCount) {
+				return false
+			}
+			if h.ptoCount != ^uint32(0) {
+				h.ptoCount++
+				next := int64(h.getScaledPTO(incl))
+				h.ptoCount--
+				if next < got {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+type spaceEvent struct {
+	Kind  uint8
+	Space uint8
+	T     int64
+	N     uint8
+}
+
+func specSpace(h *sentPacketHandler, s uint8) (*packetNumberSpace, protocol.EncryptionLevel) {
+	switch s % 3 {
+	case 0:
+		return h.initialPackets, protocol.EncryptionInitial
+	case 1:
+		return h.handshakePackets, protocol.EncryptionHandshake
+	}
+	return h.appDataPackets, protocol.Encryption1RTT
+}
+
+// specRefLossTime is RFC 9002 A.8 GetLossTimeAndSpace: the earliest set
+// loss_time over the spaces still in use, the earlier space on a tie.
+func specRefLossTime(h *sentPacketHandler) (monotime.Time, protocol.EncryptionLevel) {
+	var t monotime.Time
+	lvl := protocol.Encryption1RTT
+	for s := uint8(0); s < 3; s++ {
+		sp, l := specSpace(h, s)
+		if sp == nil || sp.lossTime == 0 {
+			continue
+		}
+		if t == 0 || sp.lossTime < t {
+			t, lvl = sp.lossTime, l
+		}
+	}
+	return t, lvl
+}
+
+// specRefPTO is RFC 9002 A.8 GetPtoTimeAndSpace. The anti-deadlock branch
+// (no crypto packet in flight before the handshake is confirmed) arms the
+// timer from now, unless the peer has completed address validation; an
+// Application Data PTO is never set before the handshake is confirmed, and
+// only that space adds max_ack_delay.
+func specRefPTO(h *sentPacketHandler, now monotime.Time) (monotime.Time, protocol.EncryptionLevel) {
+	crypto := (h.initialPackets != nil && h.initialPackets.numOutstanding > 0) ||
+		(h.handshakePackets != nil && h.handshakePackets.numOutstanding > 0)
+	if !h.handshakeConfirmed && !crypto {
+		if h.peerCompletedAddressValidation {
+			return 0, 0
+		}
+		t := monotime.Time(int64(now) + specScaledRef(int64(h.rttStats.PTO(false)), h.ptoCount))
+		if h.initialPackets != nil {
+			return t, protocol.EncryptionInitial
+		}
+		return t, protocol.EncryptionHandshake
+	}
+	var t monotime.Time
+	var lvl protocol.EncryptionLevel
+	for s := uint8(0); s < 3; s++ {
+		sp, l := specSpace(h, s)
+		if sp == nil || sp.numOutstanding == 0 || sp.lastAckElicitingPacketTime == 0 {
+			continue
+		}
+		incl := false
+		if s == 2 {
+			if !h.handshakeConfirmed {
+				break
+			}
+			incl = true
+		}
+		c := monotime.Time(int64(sp.lastAckElicitingPacketTime) + specScaledRef(int64(h.rttStats.PTO(incl)), h.ptoCount))
+		if t == 0 || c < t {
+			t, lvl = c, l
+		}
+	}
+	return t, lvl
+}
+
+// go2lean:sequence sentPacketHandler.getPTOTimeAndSpace
+// SeqLossAndPTOTimers: over reachable handshake states (Initial dropped
+// before Handshake, the handshake confirmed when Handshake is dropped), the
+// loss timer and the PTO timer pick the time and space RFC 9002 A.8 gives;
+// no Application Data PTO before the handshake is confirmed; an outstanding
+// ack-eliciting crypto packet always arms a PTO.
+func SeqLossAndPTOTimers(events []spaceEvent) bool {
+	rtt := utils.NewRTTStats()
+	h := &sentPacketHandler{
+		rttStats:         rtt,
+		initialPackets:   newPacketNumberSpace(),
+		handshakePackets: newPacketNumberSpace(),
+		appDataPackets:   newPacketNumberSpace(),
+	}
+	now := monotime.Time(4_000_000_000_000)
+	for _, e := range events {
+		sp, _ := specSpace(h, e.Space)
+		at := monotime.Time(4_000_000_000_000 + specAbs(e.T)%100_000_000_000)
+		switch e.Kind % 7 {
+		case 0:
+			if sp != nil {
+				if e.N%4 == 0 {
+					sp.lossTime = 0
+				} else {
+					sp.lossTime = at
+				}
+			}
+		case 1:
+			if sp != nil {
+				sp.lastAckElicitingPacketTime = at
+			}
+		case 2:
+			if sp != nil {
+				sp.numOutstanding = int(e.N % 4)
+			}
+		case 3:
+			h.initialPackets = nil
+		case 4:
+			h.initialPackets, h.handshakePackets = nil, nil
+			h.handshakeConfirmed = true
+		case 5:
+			h.peerCompletedAddressValidation = !h.peerCompletedAddressValidation
+		case 6:
+			rtt.UpdateRTT(time.Duration(1+specAbs(e.T)%1_000_000_000), 0)
+			h.ptoCount = uint32(e.N % 8)
+		}
+		now = monotime.Time(int64(now) + int64(e.N))
+
+		lt, ll := h.getLossTimeAndSpace()
+		rt, rl := specRefLossTime(h)
+		if lt != rt || (rt != 0 && ll != rl) {
+			return false
+		}
+		pt, pl := h.getPTOTimeAndSpace(now)
+		qt, ql := specRefPTO(h, now)
+		if pt != qt || (qt != 0 && pl != ql) {
+			return false
+		}
+		if pt != 0 && pl == protocol.Encryption1RTT && !h.handshakeConfirmed {
+			return false
+		}
+		if ((h.initialPackets != nil && h.initialPackets.numOutstanding > 0 && h.initialPackets.lastAckElicitingPacketTime != 0) ||
+			(h.handshakePackets != nil && h.handshakePackets.numOutstanding > 0 && h.handshakePackets.lastAckElicitingPacketTime != 0)) && pt == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+type connEvent struct {
+	Kind uint8
+	A    uint16
+	B    uint16
+}
+
+func specBytesInFlight(h *sentPacketHandler) protocol.ByteCount {
+	var n protocol.ByteCount
+	for _, p := range h.hist.Packets() {
+		if p.includedInBytesInFlight {
+			n += p.Length
+		}
+	}
+	return n
+}
+
+// go2lean:sequence sentPacketHandler.ReceivedAck
+// SeqSentPacketHandler1RTT drives a server's handler after the handshake
+// (address validated, Initial and Handshake dropped) through 1-RTT packets
+// sent, acknowledged one at a time, and loss detection timeouts. After every
+// step: ACKs of sent packets and timeouts return no error; bytes_in_flight is
+// the sum over the packets the history counts in flight and never exceeds the
+// bytes sent; the loss detection timer is armed exactly while an
+// ack-eliciting packet is outstanding (RFC 9002 6.2.1); a PTO timeout raises
+// the PTO count by one; after an ACK that newly acknowledges
+// a packet (RFC 9002 A.7), the PTO count is 0 and no in-flight packet
+// below the largest acknowledged was sent more than the time threshold
+// (9/8 of max(smoothed_rtt, latest_rtt), at least 1 ms; RFC 9002 6.1.2) ago.
+func SeqSentPacketHandler1RTT(events []connEvent) bool {
+	rtt := utils.NewRTTStats()
+	h := NewSentPacketHandler(0, 1200, rtt, &utils.ConnectionStats{}, true, false,
+		func(protocol.PacketNumber) {}, protocol.PerspectiveServer, nil, utils.DefaultLogger).(*sentPacketHandler)
+	t := monotime.Time(4_000_000_000_000)
+	h.DropPackets(protocol.EncryptionInitial, t)
+	h.DropPackets(protocol.EncryptionHandshake, t)
+	var sent []protocol.PacketNumber
+	for _, e := range events {
+		t = monotime.Time(int64(t) + int64(e.A)*100_000) // up to ~6.5 s per step
+		switch e.Kind % 3 {
+		case 0:
+			pn := h.PopPacketNumber(protocol.PacketNumberSpaceAppData)
+			frames := []Frame{{Frame: &wire.PingFrame{}}}
+			h.SentPacket(t, pn, protocol.InvalidPacketNumber, nil, frames, protocol.Encryption1RTT,
+				protocol.ECNNon, protocol.ByteCount(1+e.B%1400), false, false)
+			sent = append(sent, pn)
+		case 1:
+			if len(sent) == 0 {
+				continue
+			}
+			pn := sent[int(e.B)%len(sent)]
+			// RFC 9002 A.7: an ACK that newly acknowledges nothing returns
+			// before pto_count is reset and losses are detected.
+			newly := false
+			for qn := range h.hist.Packets() {
+				if qn == pn {
+					newly = true
+				}
+			}
+			ack := &wire.AckFrame{AckRanges: []wire.AckRange{{Smallest: pn, Largest: pn}}}
+			if _, err := h.ReceivedAck(ack, protocol.Encryption1RTT, t); err != nil {
+				return false
+			}
+			if !newly {
+				break
+			}
+			if h.ptoCount != 0 {
+				return false
+			}
+			delay := max(max(rtt.LatestRTT(), rtt.SmoothedRTT())*time.Duration(8+h.timeThresholdEighths)/8, protocol.TimerGranularity)
+			largest := h.appDataPackets.largestAcked
+			for qn, p := range h.hist.Packets() {
+				if qn >= largest {
+					break
+				}
+				if p.includedInBytesInFlight && int64(p.SendTime) <= int64(t)-int64(delay) {
+					return false
+				}
+			}
+		case 2:
+			at := h.GetLossDetectionTimeout()
+			if at == 0 {
+				continue
+			}
+			if at > t {
+				t = at
+			}
+			before := h.ptoCount
+			pto := h.alarm.TimerType == qlog.TimerTypePTO
+			if err := h.OnLossDetectionTimeout(t); err != nil {
+				return false
+			}
+			if pto && h.ptoCount != before+1 {
+				return false
+			}
+		}
+		if h.bytesInFlight != specBytesInFlight(h) || h.bytesInFlight > h.bytesSent {
+			return false
+		}
+		if h.hist.HasOutstandingPackets() == (h.GetLossDetectionTimeout() == 0) {
+			return false
+		}
+	}
+	return true
+}

@@ -37,6 +37,7 @@ asks for disclosure and for a report in the reporter's own words.
 | `internal/protocol` (packet numbers against RFC 9000 A.3 and its example, stream IDs, connection IDs, versions) | 29 | held | held, 1.1M to 5.4M runs each |
 | `internal/utils` (RTT estimator against RFC 9002 5.3 and A.7, PTO) | 4 | held (the RFC-9002 sequence spec was first spurious; see below) | held, 1.5M to 2.2M runs each |
 | `internal/congestion` (Reno window against RFC 9002 7, pacer, hybrid slow start) | 4 | held | held, 1.8M to 2.5M runs each |
+| `internal/ackhandler` (PTO backoff, loss and PTO timer selection against RFC 9002 6.1, 6.2 and A.8; the sent-packet handler driven through sends, ACKs and timeouts) | 3 | held (all three spurious before the `Duration` accessors were modelled; see below) | held, 4.1M to 5.0M runs each |
 | `internal/wire` (frame round trips and lengths, ACK ranges, transport parameters, headers) | 40 | held | 38 held; 2 violated, both specs' own (below) |
 | root package (frame sorter against a byte array, stream flow control, token store) | 4 | held | held, 1.5M to 1.6M runs each |
 
@@ -367,6 +368,47 @@ value (here the `sendPacket` closure call) returned `specUnknown` instead of
 a refutation and was counted as a survivor. The random search passes those
 draws (#84) and confirms the refutation; the mutation pass now does the
 same. With the fix this spec kills 4 of 4.
+
+### Loss detection and PTO, `internal/ackhandler` (2026-11-23)
+
+The package had no spec until the `Duration` accessors were modelled:
+`monotime.Time.Add` goes through `Duration.Nanoseconds`, so every timer the
+handler computes was havoc. Three sequence specs
+([`quic-go/ackhandler_specs_test.go.txt`](quic-go/ackhandler_specs_test.go.txt),
+on quic-go `81d1aff7`), each against an independent reference:
+
+- `SeqScaledPTOBackoff`: the PTO period doubles per consecutive PTO (RFC 9002
+  6.2.1), capped at 60 s; it is positive, never above the cap, and one more
+  PTO never shortens it, including shift overflow at large PTO counts.
+- `SeqLossAndPTOTimers`: over reachable handshake states, the loss timer and
+  the PTO timer pick the time and space of RFC 9002 A.8
+  (`GetLossTimeAndSpace`, `GetPtoTimeAndSpace`); no Application Data PTO
+  before the handshake is confirmed; an outstanding ack-eliciting crypto
+  packet always arms a PTO.
+- `SeqSentPacketHandler1RTT`: a server's handler from its constructor, after
+  the handshake, through 1-RTT sends, single-packet ACKs and timeouts.
+  `bytes_in_flight` equals the history's in-flight packets and never exceeds
+  the bytes sent; the timer is armed exactly while an ack-eliciting packet is
+  outstanding; a PTO timeout raises the PTO count by one; an ACK that newly
+  acknowledges a packet resets it and leaves no in-flight packet below the
+  largest acknowledged older than the time threshold (RFC 9002 6.1.2).
+
+| spec | go2lean before (`7e6378e`) | go2lean after (`07243a7`) | Go fuzzer, 60 s |
+|---|---|---|---|
+| `SeqScaledPTOBackoff` | spurious (`Nanoseconds`, `Abs` havoc) | holds, mutation 4 of 4 | held, 4.8M runs |
+| `SeqLossAndPTOTimers` | spurious (`Nanoseconds` havoc) | holds, mutation 22 of 24 | held, 5.0M runs |
+| `SeqSentPacketHandler1RTT` | spurious (`Nanoseconds` havoc) | holds, mutation 8 of 24 | held, 4.1M runs |
+
+No defect. The handler spec's mutation score is low because its set-up does
+not reach most of the mutated code: ECN is off (the ECN tracker is not
+built), no path probe is sent, and a spurious loss needs an ACK of a packet
+already declared lost. The survivors inside its reach are a few branches of
+`receivedAck`, `detectAndRemoveAckedPackets` and `detectLostPackets`.
+
+A first version of the handler spec was stronger than the RFC: it required
+every ACK to reset the PTO count. RFC 9002 A.7's `OnAckReceived` returns
+before `pto_count = 0` when the ACK newly acknowledges nothing, and quic-go
+does the same; the spec was corrected, not the package.
 
 ## What this says
 
