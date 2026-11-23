@@ -544,6 +544,25 @@ runs a larger search by default. The results are in
 to `requestFromHeaders`, so one spec file does not build on both
 revisions.
 
+The second case is the control frame queue (GHSA-c33x-xqrf-c478, fixed in
+`4a99b816`, candidate c003): a peer's frames make the endpoint queue
+control frames it cannot send, without a bound before the fix, at most
+16384 after it. The spec,
+[calibrate_framer_test.go.txt](quic-go/calibrate_framer_test.go.txt),
+queues 2^15 + 1 frames and checks the queue holds at most 2^15, twice the
+fix's limit, so the bound is not the fix's own constant.
+
+| revision | result |
+|---|---|
+| `4a99b816^` | violated at random trial 0 |
+| `4a99b816` | held: 330 random trials in the 600 s budget, the 6 exhaustive inputs |
+
+The first run did not calibrate. Every run before the fix ended out of
+fuel, and calibrate counted that as a hold. Two things were wrong. The
+model's slice bound was 16384 elements, and a queue past it ended the run
+like fuel; the bound is now 2^20. And a search that checked no input to
+the end is now `unknown`, not held.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five

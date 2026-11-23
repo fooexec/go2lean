@@ -20,5 +20,27 @@
     },
     "passed": true,
     "why": "violated before the fix, holds after"
+  },
+  {
+    "candidate": "c003",
+    "specs": [
+      "SeqControlFrameQueueBounded"
+    ],
+    "before_rev": "4a99b816ae3ab03ae5449d15aac45147c85ed47a^",
+    "after_rev": "4a99b816ae3ab03ae5449d15aac45147c85ed47a",
+    "at_before": {
+      "SeqControlFrameQueueBounded": {
+        "outcome": "violated",
+        "search": "random: found at trial 0 [fuel raised to 256000: 20 of 20 trials ran out at 64000]"
+      }
+    },
+    "at_after": {
+      "SeqControlFrameQueueBounded": {
+        "outcome": "held",
+        "search": "random: none in 330 trials (0 out of fuel, 0 moot/stuck); spec checked 330, vacuous 0 [] [fuel raised to 256000: 20 of 20 trials ran out at 64000] [stopped by the 600s budget]; the package initializers read 2 havoc values (fixed for every trial); exhaustive: holds on 6 inputs; spec checked 6, vacuous 0 [] (recorded as exhausted_assuming)"
+      }
+    },
+    "passed": true,
+    "why": "violated before the fix, holds after"
   }
 ]

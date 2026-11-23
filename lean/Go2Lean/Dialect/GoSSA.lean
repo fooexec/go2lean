@@ -1831,10 +1831,12 @@ def ifaceEqVal (heap : Heap Val) : Val → Val → Option Bool
   | _, _ => none
 
 /-- The model's size bound on a slice's backing array: an allocation past
-it ends the run out of fuel (no behaviour of the program). 16384 covers a
-library's fixed buffers, bufio's 4096 bytes and a stripe lock table
-(#71). -/
-def sliceBound : Nat := 16384
+it ends the run out of fuel (no behaviour of the program). 2^20 elements:
+16384 (#71) covered a library's fixed buffers, bufio's 4096 bytes and a
+stripe lock table, but not a queue a peer fills past a limit of 16384
+(quic-go's control frames, #315), the size a resource limit has. Arrays
+this large are `.arrA`, updated in place. -/
+def sliceBound : Nat := 1048576
 
 def f32Of (n : Nat) : Float32 := Float32.ofBits (UInt32.ofNat n)
 def f64Val (f : Float) : Val := .int 64 (BitVec.ofNat 64 f.toBits.toNat)

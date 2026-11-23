@@ -10972,17 +10972,17 @@ func valueOKVisiting(t types.Type, visiting map[types.Type]bool) bool {
 	return false
 }
 
-// zeroVal is the model's zero value of t.
-// sliceBound is the dialect's sliceBound: the most elements the model
-// allocates for an array or a slice.
-const sliceBound = 16384
+// arrayZeroBound is the longest array type whose zero value the model
+// builds: the value is written out in the Lean source, element by element.
+// (The dialect's sliceBound, for arrays allocated at run time, is larger.)
+const arrayZeroBound = 16384
 
 // bigArrayZero is the zero value of an array type longer than zeroVal
 // builds (4096 elements, which keeps zero values inside other types small),
-// up to sliceBound elements.
+// up to arrayZeroBound elements.
 func bigArrayZero(t types.Type) (ir.Val, bool) {
 	a, ok := t.Underlying().(*types.Array)
-	if !ok || a.Len() > sliceBound {
+	if !ok || a.Len() > arrayZeroBound {
 		return nil, false
 	}
 	z, ok := zeroVal(a.Elem())
@@ -10992,6 +10992,7 @@ func bigArrayZero(t types.Type) (ir.Val, bool) {
 	return ir.ArrVal{Elems: slices.Repeat([]ir.Val{z}, int(a.Len()))}, true
 }
 
+// zeroVal is the model's zero value of t.
 func zeroVal(t types.Type) (ir.Val, bool) {
 	if w, ok := complexWidth(t); ok {
 		z := ir.IntVal{Width: w, Bits: "0"}

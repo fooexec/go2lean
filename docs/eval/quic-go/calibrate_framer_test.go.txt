@@ -1,0 +1,30 @@
+package quic
+
+import (
+	"github.com/quic-go/quic-go/internal/wire"
+)
+
+// SeqControlFrameQueueBounded checks candidate c003: however many control
+// frames a peer's frames make the endpoint queue while it cannot send
+// (RETIRE_CONNECTION_ID, MAX_STREAMS, ...), the queue stays bounded by a
+// constant. The bound checked is 1<<15 frames, after 1<<15+1 are queued
+// without a send; kind picks the frame.
+//
+// go2lean:sequence framerI.QueueControlFrame
+func SeqControlFrameQueueBounded(kind uint8) bool {
+	f := newFramer(nil).(*framerI)
+	const bound = 1 << 15
+	for i := 0; i <= bound; i++ {
+		var fr wire.Frame
+		switch kind % 3 {
+		case 0:
+			fr = &wire.RetireConnectionIDFrame{SequenceNumber: uint64(i)}
+		case 1:
+			fr = &wire.MaxStreamsFrame{MaxStreamNum: 1}
+		default:
+			fr = &wire.PingFrame{}
+		}
+		f.QueueControlFrame(fr)
+	}
+	return len(f.controlFrames) <= bound
+}
