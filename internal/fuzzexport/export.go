@@ -329,7 +329,9 @@ func (g *gen) target(s Spec) (string, error) {
 		usesData = true
 		setup = append(setup, fmt.Sprintf("%s := %s", v, e))
 	}
-	if usesData {
+	if usesData || len(fuzzParams) == 0 {
+		// A spec of no argument (a function of no input, checked once)
+		// still needs one: Go's fuzzer rejects a fuzz function without.
 		fuzzParams = append(fuzzParams, "go2leanData []byte")
 		kinds = append(kinds, "data")
 	}
