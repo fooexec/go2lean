@@ -164,6 +164,9 @@ func Propose(ctx context.Context, llm Completer, r *Report, dir string) (*Propos
 				continue
 			}
 			seen[key] = true
+			for i, ref := range c.Evidence {
+				c.Evidence[i] = evidenceRef(ref, byRef)
+			}
 			for _, ref := range c.Evidence {
 				if e, ok := byRef[ref]; ok && e.After != "" {
 					c.Before, c.After = e.Before, e.After
@@ -425,4 +428,21 @@ func (p *Proposal) Guidance(pkg string, ids []string) (string, []Candidate) {
 		fmt.Fprintf(&b, "From: %s\n", strings.Join(c.Evidence, ", "))
 	}
 	return b.String(), cs
+}
+
+// evidenceRef is the evidence reference an answer means: the prompt heads
+// each item "kind ref" ("pr #6295"), and an answer may copy the kind.
+func evidenceRef(ref string, byRef map[string]Evidence) string {
+	ref = strings.TrimSpace(ref)
+	if _, ok := byRef[ref]; ok {
+		return ref
+	}
+	for _, k := range []string{KindAdvisory, KindPR, KindCommit, KindIssue, KindRFC, KindDoc} {
+		if r := strings.TrimSpace(strings.TrimPrefix(ref, k+" ")); r != ref {
+			if _, ok := byRef[r]; ok {
+				return r
+			}
+		}
+	}
+	return ref
 }

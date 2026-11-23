@@ -114,3 +114,18 @@ func TestGuidance(t *testing.T) {
 		t.Errorf("no candidate: %q", g)
 	}
 }
+
+func TestEvidenceRef(t *testing.T) {
+	by := map[string]Evidence{"#12": {}, "GHSA-aaaa-bbbb-cccc": {}, "RFC 9000 13.2": {}}
+	for in, want := range map[string]string{
+		"pr #12":                       "#12",
+		"#12":                          "#12",
+		"advisory GHSA-aaaa-bbbb-cccc": "GHSA-aaaa-bbbb-cccc",
+		"rfc RFC 9000 13.2":            "RFC 9000 13.2",
+		"issue #99":                    "issue #99", // not an item: kept as written
+	} {
+		if got := evidenceRef(in, by); got != want {
+			t.Errorf("evidenceRef(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
