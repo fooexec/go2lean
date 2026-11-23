@@ -563,6 +563,39 @@ model's slice bound was 16384 elements, and a queue past it ended the run
 like fuel; the bound is now 2^20. And a search that checked no input to
 the end is now `unknown`, not held.
 
+## Candidates from other implementations' advisories, by the agent (2026-11-23)
+
+`go2lean agent -candidates` (#315) took 12 of the candidates that
+`go2lean propose` drafted from other QUIC implementations' advisories and
+that target quic-go's root package. The agent wrote 15 specs from them (13 sequences, 2 postconditions),
+on master `cb08e8f`, with the slice bound at 2^20. The run took 34
+minutes.
+
+| outcome | specs |
+|---|---|
+| held | 9: crypto buffer bound, datagram queue bound and Peek/Pop, connection ID manager state, retirement bound and error codes, token store order, `Config.Clone` independence, connection ID round trip |
+| confirmed, not a defect | 2 (below) |
+| spurious | 4: a function value the model does not know (connection ID generator), `crypto/tls` havoc (packing an Initial), a load through a handle (stream frames), and `slices.overlaps` (frame sorter, below) |
+
+The two confirmed results:
+
+- **A CRYPTO frame for a level whose crypto stream was dropped** dereferences
+  nil (`crypto_stream_manager.go:30`). It is not reachable. The connection
+  drops a level's crypto stream together with its keys
+  (`DiscardInitialKeys`, `SetHandshakeConfirmed`), so a later packet at that
+  level fails with `ErrKeysDropped` before a frame is parsed. Latent; a note.
+- **A NEW_CONNECTION_ID frame that reuses the active connection ID's
+  sequence number with another ID** is ignored as a retransmission, not
+  rejected. RFC 9000 §19.15 makes the rejection optional ("MAY"), so the
+  agent's spec is stronger than the RFC. Not a defect.
+
+One spurious result was a model gap. `slices.Insert` and `slices.Replace`
+call `slices.overlaps`, which compares element addresses through
+`unsafe`; the model read it as havoc, and the frame sorter's spec failed in
+the model only. `slices.overlaps` is now modelled exactly (`sliceOverlap`,
+six sem-diff tests), and the spec holds: 2000 trials, 17 of 24 mutants
+caught.
+
 ## What this says
 
 - The model search found nothing real here: its two rounds gave five
