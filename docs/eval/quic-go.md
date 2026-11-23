@@ -38,7 +38,7 @@ asks for disclosure and for a report in the reporter's own words.
 | `internal/utils` (RTT estimator against RFC 9002 5.3 and A.7, PTO) | 4 | held (the RFC-9002 sequence spec was first spurious; see below) | held, 1.5M to 2.2M runs each |
 | `internal/congestion` (Reno window against RFC 9002 7, pacer, hybrid slow start) | 4 | held | held, 1.8M to 2.5M runs each |
 | `internal/ackhandler` (PTO backoff, loss and PTO timer selection against RFC 9002 6.1, 6.2 and A.8; the sent-packet handler driven through sends, ACKs, ECN and timeouts against an honest and an adversarial peer) | 3 | held (all three spurious before the `Duration` accessors were modelled; see below) | held, 3.5M to 5.0M runs each |
-| `internal/wire` (frame round trips and lengths, ACK ranges, transport parameters, headers) | 40 | held | 38 held; 2 violated, both specs' own (below) |
+| `internal/wire` (frame round trips and lengths, ACK ranges, transport parameters, headers) | 40 | **1 violated and confirmed** (`SeqAckDelayScaling`: the ACK delay wraps, below), the rest held; first written up as all held, corrected 2026-11-23 | 38 held, `SeqAckDelayScaling` among them: **a miss** (no seed inputs, #290); 2 violated, both specs' own (below) |
 | root package (frame sorter against a byte array, stream flow control, token store) | 4 | held | held, 1.5M to 1.6M runs each |
 
 The `internal/utils` RTT sequence spec (`SeqRTTMatchesRFC9002`, RFC 9002 §5
@@ -84,6 +84,34 @@ truncated headers, duplicate and boolean settings, PRIORITY_UPDATE, capsules).
 In `qpack`, the agent's report notes that a `DecodeFunc` call after an error
 can return `io.EOF` (the error is not sticky); the doc comment says any
 non-EOF error is fatal, so this is a note, not a defect.
+
+**The ACK delay wraps** (correction, 2026-11-23). `SeqAckDelayScaling`
+checks that an ACK frame's delay decodes as RFC 9000 19.3 says: the field
+times 2^ack_delay_exponent microseconds, saturating where it does not fit.
+The model found a violation at trial 0 in both runs, and the replay
+confirmed it (`real: ret false`). Go's fuzzer ran 2.7M executions and held.
+The write-up then took the fuzzer's verdict for the spec and listed it as
+held. That was a triage error: a confirmed counterexample is a finding,
+whatever another engine says (#317). The fuzzer missed it because its
+exported target starts from an empty corpus, and about half of all
+uniformly random inputs fail; with eight random seeds it fails at once
+(#290).
+
+The defect: `parseAckFrame` computes `time.Duration(delay*1<<exp) *
+time.Microsecond`. The shift wraps in `uint64`, and the product in `int64`,
+both to non-negative values, so the following `delayTime < 0` check, meant
+to saturate an overflow, never fires. A delay field of 2^61 with the
+default exponent 3 decodes to 0; a field of 18446744073709552 with exponent
+0 decodes to 384 ns instead of about 584 years. This is checked by hand on
+master `cb08e8f`. **Severity: low, no security impact.** Both places that use
+the delay cap it with `min(ack.DelayTime, MaxAckDelay())`, and a peer can
+send any delay in that range directly. A second spec, written independently
+from msquic's ACK decoding advisory (`SeqAckFrameDecodesAsRFC`), found it
+again at trial 89 and was also held by the fuzzer, over 3.7M executions.
+
+So in this file, **"held under Go's fuzzer" is not evidence for a spec over
+wide integers** until the exported targets are seeded (#290). Such
+results are to be rerun.
 
 The two `internal/wire` violations are not defects. One is a transport
 parameters default check that the agent revised after the fuzzer had run on
