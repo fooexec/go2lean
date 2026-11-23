@@ -932,6 +932,24 @@ func SeqTestSliceToArrayEmpty() bool { return testSliceToArrayEmpty() }
 // go2lean:sequence testSliceToArrayShortPanics
 func SeqTestSliceToArrayShortPanics() bool { return testSliceToArrayShortPanics() }
 
+// go2lean:sequence testSlicesInsertAliased
+func SeqTestSlicesInsertAliased() bool { return testSlicesInsertAliased() }
+
+// go2lean:sequence testSlicesInsertAliasedTail
+func SeqTestSlicesInsertAliasedTail() bool { return testSlicesInsertAliasedTail() }
+
+// go2lean:sequence testSlicesInsertEmptyStruct
+func SeqTestSlicesInsertEmptyStruct() bool { return testSlicesInsertEmptyStruct() }
+
+// go2lean:sequence testSlicesInsertFresh
+func SeqTestSlicesInsertFresh() bool { return testSlicesInsertFresh() }
+
+// go2lean:sequence testSlicesReplaceAliased
+func SeqTestSlicesReplaceAliased() bool { return testSlicesReplaceAliased() }
+
+// go2lean:sequence testSlicesReplaceFresh
+func SeqTestSlicesReplaceFresh() bool { return testSlicesReplaceFresh() }
+
 // go2lean:sequence testSlicesSortFunc
 func SeqTestSlicesSortFunc() bool { return testSlicesSortFunc() }
 

@@ -166,6 +166,7 @@ goroutine that can move, it is not reported.
 | `xs[i]`, `xs[lo:hi]`, `xs[lo:hi:max]` | `indexCheck load reslice reslice3` | exact, bounds panics |
 | `make([]T, n, c)` | `makeSlice` | exact; a negative length, or one above the capacity, panics; above 2^20 elements: out of fuel |
 | `append` | `appendSlice` | exact while capacity allows; growth doubles the capacity (Go's growth is implementation-defined); growth above 2^20 elements: out of fuel (16384 until #315's calibration found a queue bug, quic-go's control frames, just past it) |
+| `slices.overlaps` (the aliasing check of `slices.Insert` and `Replace`, through `unsafe`) | `sliceOverlap` | exact: the two slices share a backing array and their index ranges intersect; zero-size elements never overlap |
 | `copy` | `copySlice` | exact |
 | `min`, `max` on integers | a comparison and `ite` per argument | exact (on strings and floats: havoc) |
 | `len`, `cap` of slices, arrays, pointers to arrays | `len cap` | exact |

@@ -4971,6 +4971,9 @@ func (t *fnState) call(x *ssa.Call) error {
 			return nil
 		}
 	}
+	if callee != nil && isSlicesOverlaps(callee) && len(x.Call.Args) == 2 {
+		return t.slicesOverlaps(x)
+	}
 	if callee != nil && callee.String() == "reflect.DeepEqual" && len(x.Call.Args) == 2 {
 		return t.deepEqual(x)
 	}
@@ -12014,4 +12017,41 @@ func noopFuncLit(pkg *types.Package, t types.Type, src string) string {
 		return src + "(" + lit + ")"
 	}
 	return lit
+}
+
+// isSlicesOverlaps: the slices package's overlaps[E], which compares the
+// addresses of the two slices' elements (unsafe.Pointer to uintptr), so
+// that Insert and Replace copy safely when their arguments alias.
+func isSlicesOverlaps(f *ssa.Function) bool {
+	o := f
+	if f.Origin() != nil {
+		o = f.Origin()
+	}
+	return o.Name() == "overlaps" && o.Pkg != nil && o.Pkg.Pkg.Path() == "slices"
+}
+
+// slicesOverlaps models slices.overlaps(a, b) exactly: the two slices share a
+// backing array and their elements' index ranges intersect. A slice of
+// zero-size elements never overlaps (Go's elemSize == 0 case).
+func (t *fnState) slicesOverlaps(x *ssa.Call) error {
+	if el, ok := x.Call.Args[0].Type().Underlying().(*types.Slice); ok && zeroSize(el.Elem()) {
+		t.emit(ir.Instr{Dst: t.def(x), Op: ir.Const{V: ir.BoolVal(false)}})
+		return nil
+	}
+	a, err := t.val(x.Call.Args[0])
+	if err != nil {
+		return err
+	}
+	b, err := t.val(x.Call.Args[1])
+	if err != nil {
+		return err
+	}
+	t.emit(ir.Instr{Dst: t.def(x), Op: ir.Simple("sliceOverlap"), Args: []ir.Var{a, b}})
+	return nil
+}
+
+// zeroSize: a type whose values take no memory (struct{}, [0]T, and
+// structs and arrays of them).
+func zeroSize(t types.Type) bool {
+	return (&types.StdSizes{WordSize: 8, MaxAlign: 8}).Sizeof(t) == 0
 }
