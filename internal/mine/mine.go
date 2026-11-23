@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 )
@@ -73,6 +74,16 @@ type Options struct {
 	RFCCache string
 	// OSV and RFCBase override the services' base URLs (tests).
 	OSV, RFCBase string
+	// GitHubRepo is the project's owner/name on GitHub, for its issues and
+	// pull requests (default: from the origin remote); GitHubToken
+	// authenticates the search (optional), GitHubBase overrides the API's
+	// URL (tests), MaxIssues bounds each search (0: 300).
+	GitHubRepo, GitHubToken, GitHubBase string
+	MaxIssues                           int
+	// GitHubFile, when set, is read for the issues and pull requests (search
+	// API results, as `gh api --paginate search/issues` writes them) in
+	// place of the search.
+	GitHubFile string
 }
 
 // Report is the output: the evidence and what each collector did.
@@ -123,7 +134,12 @@ func Collect(ctx context.Context, o Options) (*Report, error) {
 			r.Evidence = append(r.Evidence, ev...)
 		}
 	}
-	r.Evidence = dedupAdvisories(r.Evidence)
+	if items, err := trackerItems(ctx, o); err != nil {
+		note("issues and pull requests: %v", err)
+	} else if items != nil {
+		r.Evidence = append(r.Evidence, TrackerEvidence(o.Dir, items)...)
+	}
+	r.Evidence = foldPRs(dedupAdvisories(r.Evidence))
 	sort.SliceStable(r.Evidence, func(i, j int) bool { return kindRank(r.Evidence[i].Kind) < kindRank(r.Evidence[j].Kind) })
 	return r, nil
 }
@@ -183,7 +199,7 @@ func contains(xs []string, x string) bool {
 
 // kindRank orders the report: advisories, fixes, RFC rules, then docs.
 func kindRank(k string) int {
-	return map[string]int{KindAdvisory: 0, KindCommit: 1, KindRFC: 2, KindDoc: 3}[k]
+	return map[string]int{KindAdvisory: 0, KindPR: 1, KindCommit: 2, KindIssue: 3, KindRFC: 4, KindDoc: 5}[k]
 }
 
 // Write writes the report as indented JSON.
@@ -200,8 +216,30 @@ func (r *Report) Summary() string {
 		n[e.Kind]++
 	}
 	var parts []string
-	for _, k := range []string{KindAdvisory, KindCommit, KindRFC, KindDoc} {
+	for _, k := range []string{KindAdvisory, KindPR, KindCommit, KindIssue, KindRFC, KindDoc} {
 		parts = append(parts, fmt.Sprintf("%d %s", n[k], k))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// trackerItems reads the issues and pull requests from GitHubFile, or
+// searches GitHub for them; nil when there is neither a file nor a GitHub
+// repository, or the collector is offline.
+func trackerItems(ctx context.Context, o Options) ([]ghItem, error) {
+	if o.GitHubFile != "" {
+		f, err := os.Open(o.GitHubFile)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		return ReadGitHub(f)
+	}
+	repo := o.GitHubRepo
+	if repo == "" {
+		repo = GitHubRepo(o.Dir)
+	}
+	if repo == "" || o.Offline {
+		return nil, nil
+	}
+	return SearchGitHub(ctx, o.GitHubBase, o.GitHubToken, repo, o.MaxIssues)
 }

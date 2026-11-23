@@ -90,9 +90,9 @@ func usage() {
   go2lean rank    [-workspace out]                 order confirmed verdicts by how plausible their input is (tiers 1-4)
   go2lean summary [-workspace out]                 all verdicts and proofs of a workspace as Markdown
   go2lean advisory [-o file] <GHSA-id|CVE-id>      draft a catalog property from an advisory (OSV)
-  go2lean mine [-o evidence.json] [-similar p,...] [-offline] [dir]   collect the evidence specs are drafted from: advisories, fix commits, cited RFC sections, doc contracts
+  go2lean mine [-o evidence.json] [-similar p,...] [-github-repo o/n] [-github-json f] [-offline] [dir]   collect the evidence specs are drafted from: advisories, fix commits and pull requests, open bug issues, cited RFC sections, doc contracts
   go2lean propose [-evidence evidence.json] [-o candidates.json] [-llm claude|claude-code|mock:<path>] [dir]   draft candidate properties from the evidence
-  go2lean calibrate -spec <pkg>/<file>_test.go [-candidates candidates.json] [-o calibration.json] [module]   check each spec is violated before its candidate's fix and holds after
+  go2lean calibrate -spec <pkg>/<file>_test.go [-spec-before <file>] [-candidates candidates.json] [-o calibration.json] [module]   check each spec is violated before its candidate's fix and holds after
   go2lean agent   [-workspace out] [-llm claude|mock:<file>] <package>
                                                   agent: propose spec-in-Go properties, run, report
   go2lean llvm    [-workspace out] <file.c|.ll|.bc> C / LLVM IR: model every function, search for UB,

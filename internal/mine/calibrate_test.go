@@ -86,7 +86,7 @@ func TestCalibrate(t *testing.T) {
 		{ID: "c003", After: after}, // no spec
 		{ID: "c004"},               // no fix
 	}
-	cals, err := Calibrate(dir, "frame", spec, cs, fake, t.TempDir())
+	cals, err := Calibrate(dir, "frame", spec, "", cs, fake, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +104,33 @@ func TestCalibrate(t *testing.T) {
 	}
 	if ok, why := judge([]string{"A", "B"}, map[string]Result{"A": {Outcome: OutViolated}, "B": {Outcome: OutHeld}}, map[string]Result{"A": {Outcome: OutHeld}, "B": {Outcome: OutHeld}}); !ok {
 		t.Errorf("judge: %s", why)
+	}
+	// A spec file for the revision before the fix, installed under the
+	// spec file's name there.
+	beforeSpec := filepath.Join(t.TempDir(), "specs_before_test.go")
+	if err := os.WriteFile(beforeSpec, []byte(calSpec+"\n// before the fix\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var installed []bool
+	saw := func(wt, pkg string, specs []string) (map[string]Result, error) {
+		b, err := os.ReadFile(filepath.Join(wt, pkg, "specs_test.go"))
+		if err != nil {
+			return nil, err
+		}
+		installed = append(installed, strings.Contains(string(b), "before the fix"))
+		return fake(wt, pkg, specs)
+	}
+	if _, err := Calibrate(dir, "frame", spec, beforeSpec, cs[:1], saw, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if len(installed) != 2 || !installed[0] || installed[1] {
+		t.Errorf("before file installed at %v, want [true false]", installed)
+	}
+	// The two files must name the same specs.
+	other := filepath.Join(t.TempDir(), "other_test.go")
+	os.WriteFile(other, []byte("package frame\n\n// SpecX checks candidate c001.\nfunc SpecX() bool { return true }\n"), 0o644)
+	if _, err := Calibrate(dir, "frame", spec, other, cs[:1], saw, t.TempDir()); err == nil || !strings.Contains(err.Error(), "same specs") {
+		t.Errorf("mismatched spec files: %v", err)
 	}
 	// The worktrees are gone.
 	if out := run(t, dir, "worktree", "list"); strings.Count(out, "\n") != 0 {

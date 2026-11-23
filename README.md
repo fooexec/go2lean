@@ -79,7 +79,7 @@ under AddressSanitizer (C) is the judge.
   verdicts. Given a published advisory it writes the specs that find that
   bug class and its siblings ([property catalog](docs/specs/README.md)).
   `go2lean mine` collects what specs are drafted from: the project's
-  advisories and fix commits, the RFC sections its code cites, its
+  advisories, fix commits, fix pull requests and open bug issues, the RFC sections its code cites, its
   documented contracts, and similar projects' advisories
   ([usage](docs/usage.md#mining-the-evidence)); `go2lean propose` drafts
   candidate properties from it, and `go2lean calibrate` checks that a spec

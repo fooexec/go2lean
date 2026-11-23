@@ -22,6 +22,9 @@ func cmdMine(args []string) error {
 	similar := fs.String("similar", "", "comma-separated projects whose advisories count too: Go module paths, or ecosystem:name (crates.io:quiche)")
 	offline := fs.Bool("offline", false, "do not query OSV or fetch RFC texts")
 	rfcCache := fs.String("rfc-cache", defaultRFCCache(), "directory the fetched RFC texts are kept in (empty: none)")
+	ghRepo := fs.String("github-repo", "", "the project's owner/name on GitHub, for its merged pull requests and open bug issues (default: the origin remote's; GITHUB_TOKEN authenticates the search)")
+	ghJSON := fs.String("github-json", "", "read the issues and pull requests from this file of search API results (gh api --paginate search/issues ...) instead of searching")
+	maxIssues := fs.Int("max-issues", 300, "how many merged pull requests, and how many open issues, to read")
 	fs.Parse(args)
 	dir := "."
 	if fs.NArg() > 1 {
@@ -38,6 +41,7 @@ func cmdMine(args []string) error {
 	}
 	r, err := mine.Collect(context.Background(), mine.Options{
 		Dir: dir, Module: *module, MaxCommits: *maxCommits, Similar: sim, Offline: *offline, RFCCache: *rfcCache,
+		GitHubRepo: *ghRepo, GitHubFile: *ghJSON, GitHubToken: os.Getenv("GITHUB_TOKEN"), MaxIssues: *maxIssues,
 	})
 	if err != nil {
 		return err
