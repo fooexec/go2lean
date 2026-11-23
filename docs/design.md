@@ -594,7 +594,12 @@ maximum and the minimum, 2^31, 2^32, 2^62, 2^63, all-0xff decoder bytes),
 and eight uniformly random inputs drawn from the spec's name. From an empty
 corpus Go's fuzzer seldom leaves the values near zero: on quic-go it held,
 over 2.7M and 3.7M runs, two specs that half and a twentieth of all random
-inputs violate, and with the seeds both fail on the seed corpus itself. A postcondition calls the target (function or
+inputs violate, and with the seeds both fail on the seed corpus itself.
+A seed that makes the spec false is reported as a violation with the entry
+(`seed#N`), its `f.Add` arguments and the `go test -run` that replays it.
+The agent's seed gate sends a spec back for revision only when the all-zero
+seed (`seed#0`) makes it false: the other seeds are inputs like the ones the
+fuzzer finds. A postcondition calls the target (function or
 method) and skips inputs on which it panics, as the model's postcondition
 does. The targets are built with coverage instrumentation through an
 overlay (`go test -c -fuzz`, nothing written into the package) and each

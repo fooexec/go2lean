@@ -244,3 +244,23 @@ func SeqAllKinds(a int8, b uint16, c float32, d float64, e bool, f string, g []b
 		}
 	}
 }
+
+// A seed corpus entry that fails is reported by Go without a corpus file;
+// seedRe and seedArgs recover which entry and its arguments.
+func TestSeedFailureParsing(t *testing.T) {
+	out := "        zz_go2lean_fuzz_test.go:70: go2lean: SeqAckDelayScaling is false\n    \nFAIL\n" +
+		"fuzz: elapsed: 0s, gathering baseline coverage: 0/16 completed\n" +
+		"failure while testing seed corpus entry: FuzzGo2Lean_SeqAckDelayScaling/seed#2\n"
+	m := seedRe.FindStringSubmatch(out)
+	if m == nil || m[1] != "seed#2" || m[2] != "2" || !reportRe.MatchString(out) {
+		t.Fatalf("match %v", m)
+	}
+	src := "func FuzzGo2Lean_Other(f *testing.F) {\n\tf.Add(uint64(9))\n}\n" +
+		"func FuzzGo2Lean_SeqAckDelayScaling(f *testing.F) {\n\tf.Add(uint64(0), uint8(0))\n\tf.Add(uint64(1), uint8(1))\n\tf.Add(uint64(18446744073709551615), uint8(255))\n\tf.Fuzz(func(t *testing.T, a0 uint64, a1 uint8) {\n"
+	if got := seedArgs(src, "FuzzGo2Lean_SeqAckDelayScaling", 2); got != "uint64(18446744073709551615), uint8(255)" {
+		t.Errorf("seedArgs = %q", got)
+	}
+	if seedArgs(src, "FuzzGo2Lean_SeqAckDelayScaling", 5) != "" || seedArgs(src, "FuzzGo2Lean_None", 0) != "" {
+		t.Error("absent seed not empty")
+	}
+}
