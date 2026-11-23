@@ -37,7 +37,7 @@ asks for disclosure and for a report in the reporter's own words.
 | `internal/protocol` (packet numbers against RFC 9000 A.3 and its example, stream IDs, connection IDs, versions) | 29 | held | held, 1.1M to 5.4M runs each |
 | `internal/utils` (RTT estimator against RFC 9002 5.3 and A.7, PTO) | 4 | held (the RFC-9002 sequence spec was first spurious; see below) | held, 1.5M to 2.2M runs each |
 | `internal/congestion` (Reno window against RFC 9002 7, pacer, hybrid slow start) | 4 | held | held, 1.8M to 2.5M runs each |
-| `internal/ackhandler` (PTO backoff, loss and PTO timer selection against RFC 9002 6.1, 6.2 and A.8; the sent-packet handler driven through sends, ACKs and timeouts) | 3 | held (all three spurious before the `Duration` accessors were modelled; see below) | held, 4.1M to 5.0M runs each |
+| `internal/ackhandler` (PTO backoff, loss and PTO timer selection against RFC 9002 6.1, 6.2 and A.8; the sent-packet handler driven through sends, ACKs, ECN and timeouts against an honest and an adversarial peer) | 3 | held (all three spurious before the `Duration` accessors were modelled; see below) | held, 3.5M to 5.0M runs each |
 | `internal/wire` (frame round trips and lengths, ACK ranges, transport parameters, headers) | 40 | held | 38 held; 2 violated, both specs' own (below) |
 | root package (frame sorter against a byte array, stream flow control, token store) | 4 | held | held, 1.5M to 1.6M runs each |
 
@@ -399,11 +399,54 @@ on quic-go `81d1aff7`), each against an independent reference:
 | `SeqLossAndPTOTimers` | spurious (`Nanoseconds` havoc) | holds, mutation 22 of 24 | held, 5.0M runs |
 | `SeqSentPacketHandler1RTT` | spurious (`Nanoseconds` havoc) | holds, mutation 8 of 24 | held, 4.1M runs |
 
-No defect. The handler spec's mutation score is low because its set-up does
-not reach most of the mutated code: ECN is off (the ECN tracker is not
-built), no path probe is sent, and a spurious loss needs an ACK of a packet
-already declared lost. The survivors inside its reach are a few branches of
-`receivedAck`, `detectAndRemoveAckedPackets` and `detectLostPackets`.
+No defect. In this first version the handler spec's mutation score was low
+because its set-up did not reach most of the mutated code: ECN off, single
+packet ACKs, no ack delay, no spurious loss.
+
+**The handler spec tightened.** `SeqSentPacketHandler1RTT` now runs with
+ECN on and max_ack_delay 25 ms, and plays both an honest and an adversarial
+peer: ACKs of any subset of the recent packets in several ranges with an ack
+delay, ECN counts of what arrived (some arrivals CE-marked by the path),
+the same with tampered counts, ACKs of arbitrary packet number ranges, and
+bursts of up to 12 packets (enough to finish ECN testing). On top of the
+first version's checks:
+
+- an ACK of sent packets is not an error, one of a packet number never sent
+  is (RFC 9000 13.1);
+- the RTT sample is the largest newly acknowledged packet's, less the ack
+  delay capped at max_ack_delay when that keeps it at least min_rtt (RFC 9002
+  5.3);
+- a packet with 3 sent packets after it up to the largest acknowledged is
+  declared lost (6.1.1), unless quic-go turned the packet threshold off after
+  a spurious loss;
+- ECN validation (RFC 9000 13.4.2.1): packets go unmarked or ECT(0); failed
+  stays failed; an ACK that does not increase the largest acknowledged does
+  not change the state; one that does fails validation when it reports more
+  ECT(0) than sent, acknowledges ECN-marked packets without counts, lowers a
+  count, or raises ECT(0)+ECN-CE by less than the ECT(0) packets it newly
+  acknowledges; an honest path that never CE-marks never fails it;
+- the time threshold stays within 9/8 and 16/8 and never tightens, and a
+  packet threshold turned off stays off (quic-go's relaxation after spurious
+  losses, which RFC 9002 6.1 allows).
+
+It holds in the model and under Go's fuzzer (3.5M runs in 60 s; the other
+two specs again 4.7M and 4.8M), and its mutation score goes from 8 to 12 of
+24. Of the 12 survivors, 6 can be placed by the function they mutate: 2 are
+in path-probe code (`RemovePathProbe`, `detectLostPathProbes`), which the
+set-up never reaches; 2 are in the spurious-loss heuristic
+(`detectSpuriousLosses`), whose threshold increase the RFC leaves open and
+the spec bounds only; 2 are in the ECN tracker, one of them in the mangling
+check, a MAY of RFC 9000 13.4.2.1. The other 6 (two in `receivedAck`, two in
+`detectAndRemoveAckedPackets`, one each in `getPTOTimeAndSpace` and
+`detectLostPackets`) are not classified: the mutation report names blocks of
+go2lean's IR, which does not map one to one onto Go's SSA blocks, so they
+are not traced to source lines here.
+
+Before the run, the spec was checked natively (50000 random sequences, with
+coverage). That caught one more spec mistake: an RTT sample of 0 (an ACK at
+the instant of sending) is not taken by `RTTStats`, and the spec now skips
+it. The coverage also showed the ECN mangling state was never reached, which
+is why the bursts of sends were added.
 
 A first version of the handler spec was stronger than the RFC: it required
 every ACK to reset the PTO count. RFC 9002 A.7's `OnAckReceived` returns
