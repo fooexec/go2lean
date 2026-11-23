@@ -588,7 +588,13 @@ fuzz <pkg>` writes every postcondition and sequence spec of the package
 as a `FuzzGo2Lean_<Spec>` target: parameters of the types Go's fuzzer
 takes are fuzz arguments, slices, arrays, structs and pointers to them
 are decoded from one extra `[]byte` (little-endian integers, lengths up to
-8, strings up to 32 bytes); a postcondition calls the target (function or
+8, strings up to 32 bytes). Every target starts from a seed corpus
+(#290): all zeros, each boundary in turn for every scalar (1, -1, the
+maximum and the minimum, 2^31, 2^32, 2^62, 2^63, all-0xff decoder bytes),
+and eight uniformly random inputs drawn from the spec's name. From an empty
+corpus Go's fuzzer seldom leaves the values near zero: on quic-go it held,
+over 2.7M and 3.7M runs, two specs that half and a twentieth of all random
+inputs violate, and with the seeds both fail on the seed corpus itself. A postcondition calls the target (function or
 method) and skips inputs on which it panics, as the model's postcondition
 does. The targets are built with coverage instrumentation through an
 overlay (`go test -c -fuzz`, nothing written into the package) and each

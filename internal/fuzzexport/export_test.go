@@ -184,3 +184,63 @@ func SeqEmpty(e go2leanEmpty) bool { return Before("a", "b") }
 		t.Fatalf("generated file does not build: %v\n%s\n%s", err, out, src)
 	}
 }
+
+// TestExportSeedsReachWideIntegers: the seed corpus alone (go test -run,
+// no fuzzing) falsifies a spec only values far from zero violate, which an
+// empty corpus seldom reaches (#290); seeds of every fuzz argument kind
+// compile, and a true spec passes them.
+func TestExportSeedsReachWideIntegers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	root, err := repo.Root()
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := []byte(`package strs
+
+type go2leanEv struct {
+	N uint64
+	S string
+}
+
+// go2lean:sequence Before
+func SeqWideIsSmall(x uint64, y int32) bool { return x < 1<<40 }
+
+// go2lean:sequence Before
+func SeqAllKinds(a int8, b uint16, c float32, d float64, e bool, f string, g []byte, h int, evs []go2leanEv) bool {
+	return true
+}
+`)
+	dir := filepath.Join(root, "examples", "strs")
+	overlay := map[string][]byte{filepath.Join(dir, "zz_extra_test.go"): extra}
+	src, targets, skipped, err := Export(root, "github.com/fooexec/go2lean/examples/strs", overlay, []Spec{
+		{Property: "p_wide", Kind: contract.KindSequence, Spec: "SeqWideIsSmall"},
+		{Property: "p_kinds", Kind: contract.KindSequence, Spec: "SeqAllKinds"},
+	})
+	if err != nil || len(targets) != 2 || len(skipped) != 0 {
+		t.Fatalf("err %v targets %v skipped %v", err, targets, skipped)
+	}
+	if n := strings.Count(src, "f.Add("); n < 2*(1+len(boundaries)) {
+		t.Errorf("%d seeds:\n%s", n, src)
+	}
+	tmp := t.TempDir()
+	if out, err := exec.Command("cp", "-r", dir, filepath.Join(tmp, "strs")).CombinedOutput(); err != nil {
+		t.Fatal(string(out))
+	}
+	os.WriteFile(filepath.Join(tmp, "go.mod"), []byte("module scratch\n\ngo 1.24\n"), 0o644)
+	sdir := filepath.Join(tmp, "strs")
+	os.WriteFile(filepath.Join(sdir, "zz_extra_test.go"), extra, 0o644)
+	os.WriteFile(filepath.Join(sdir, FileName), []byte(src), 0o644)
+	for _, c := range []struct {
+		fuzz string
+		fail bool
+	}{{"FuzzGo2Lean_SeqWideIsSmall", true}, {"FuzzGo2Lean_SeqAllKinds", false}} {
+		cmd := exec.Command("go", "test", "-run=^"+c.fuzz+"$", ".")
+		cmd.Dir = sdir
+		out, err := cmd.CombinedOutput()
+		if (err != nil) != c.fail || (c.fail && !strings.Contains(string(out), "go2lean: SeqWideIsSmall is false")) {
+			t.Errorf("%s on the seeds: failed=%v, want %v\n%s", c.fuzz, err != nil, c.fail, out)
+		}
+	}
+}
