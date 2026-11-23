@@ -64,5 +64,27 @@
     },
     "passed": true,
     "why": "violated before the fix, holds after"
+  },
+  {
+    "candidate": "c050",
+    "specs": [
+      "SeqStreamDataBlockedReported"
+    ],
+    "before_rev": "bbaf7610042d9c532cbcb58ac1c740e4131e8e35^",
+    "after_rev": "bbaf7610042d9c532cbcb58ac1c740e4131e8e35",
+    "at_before": {
+      "SeqStreamDataBlockedReported": {
+        "outcome": "violated",
+        "search": "random: found at trial 281"
+      }
+    },
+    "at_after": {
+      "SeqStreamDataBlockedReported": {
+        "outcome": "held",
+        "search": "random: none in 50000 trials (0 out of fuel, 0 moot/stuck); spec checked 50000, vacuous 0 []; the package initializers read 2 havoc values (fixed for every trial); exhaustive: skipped (domain too large: 2.5e+07 > 300000)"
+      }
+    },
+    "passed": true,
+    "why": "violated before the fix, holds after"
   }
 ]
