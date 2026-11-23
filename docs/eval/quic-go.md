@@ -640,7 +640,20 @@ the spec calibrates on it:
 
 The spec is
 [issue_stream_data_blocked_test.go.txt](quic-go/issue_stream_data_blocked_test.go.txt).
-The DATA_BLOCKED half of #4174 (the connection-level limit) is still open.
+The DATA_BLOCKED half of #4174 (the connection-level limit) is still open,
+and the same defect is there. `connectionFlowController.lastBlockedAt`
+starts at 0, and `Reset` (0-RTT rejected) sets it back to 0, so with a
+peer's `initial_max_data` of 0 `IsNewlyBlocked` sees the window equal to
+the last blocked offset and never reports: no DATA_BLOCKED is sent. A
+hand-written spec
+([issue_data_blocked_test.go.txt](quic-go/issue_data_blocked_test.go.txt))
+is violated on master `bbaf7610` at random trial 24, with
+`initialMaxData` 0, and the replay confirms it. With the change #6301
+made for streams (`lastBlockedAt` starting at `InvalidByteCount`, in the
+constructor and in `Reset`) the spec holds over 200000 random runs in Go,
+but six of quic-go's framer tests fail: they build the flow controller
+without a send window and expect no DATA_BLOCKED, so a fix updates them.
+The maintainers track this as the rest of #4174; nothing to report.
 
 ## What this says
 
