@@ -95,3 +95,22 @@ func TestProposeRepairsGuessedTargets(t *testing.T) {
 		t.Errorf("repair prompt: %v", llm.prompts)
 	}
 }
+
+func TestGuidance(t *testing.T) {
+	p := &Proposal{Candidates: []Candidate{
+		{ID: "c001", Property: "P1", Harm: "H1", Oracle: "O1", Inputs: []string{"a", "b"}, Kind: "security", Priority: 1,
+			Targets: []Target{{"http3", "requestFromHeaders"}, {".", "Conn.run"}}, Evidence: []string{"GHSA-x"}},
+		{ID: "c002", Property: "P2", Kind: "correctness", Priority: 2, Targets: []Target{{".", "Conn.run"}}, Evidence: []string{"abc"}},
+	}}
+	g, cs := p.Guidance("http3", nil)
+	if len(cs) != 1 || !strings.Contains(g, "### c001 (security, priority 1)") || !strings.Contains(g, "Functions: requestFromHeaders\n") ||
+		!strings.Contains(g, "Input classes: a; b") || !strings.Contains(g, `"candidate <id>"`) || strings.Contains(g, "c002") {
+		t.Errorf("guidance for http3:\n%s", g)
+	}
+	if _, cs := p.Guidance(".", []string{"c002"}); len(cs) != 1 || cs[0].ID != "c002" {
+		t.Errorf("ids filter: %+v", cs)
+	}
+	if g, cs := p.Guidance("wire", nil); g != "" || cs != nil {
+		t.Errorf("no candidate: %q", g)
+	}
+}

@@ -81,7 +81,9 @@ under AddressSanitizer (C) is the judge.
   `go2lean mine` collects what specs are drafted from: the project's
   advisories and fix commits, the RFC sections its code cites, its
   documented contracts, and similar projects' advisories
-  ([usage](docs/usage.md#mining-the-evidence)).
+  ([usage](docs/usage.md#mining-the-evidence)); `go2lean propose` drafts
+  candidate properties from it, and `go2lean calibrate` checks that a spec
+  written for a fixed bug is violated before the fix and holds after it.
   The basic pipeline needs no API key.
 
 ## Quick start

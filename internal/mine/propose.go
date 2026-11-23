@@ -373,3 +373,54 @@ func Select(ev []Evidence, kinds string, limit int) []Evidence {
 	}
 	return out
 }
+
+// Guidance renders the candidates of package pkg (its directory relative to
+// the module, "." for the root) as the agent's guidance (#315 P3): one
+// section per candidate, the spec to carry "candidate <id>" in its doc
+// comment so that calibration can find it. ids, when not empty, keeps only
+// those candidates.
+func (p *Proposal) Guidance(pkg string, ids []string) (string, []Candidate) {
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	var cs []Candidate
+	for _, c := range p.Candidates {
+		if len(want) > 0 && !want[c.ID] {
+			continue
+		}
+		for _, t := range c.Targets {
+			if t.Package == pkg {
+				cs = append(cs, c)
+				break
+			}
+		}
+	}
+	if len(cs) == 0 {
+		return "", nil
+	}
+	var b strings.Builder
+	b.WriteString("Candidate properties drafted from the project's evidence (its advisories, fix commits, cited RFC sections, documentation, and similar projects' advisories). Write at least one spec for each, checking the property against the oracle given, over inputs built from the classes listed. Put the words \"candidate <id>\" (for example \"candidate c003\") in the doc comment of every spec written for a candidate. Write the property as stated, not a weaker one the code happens to satisfy: a candidate drafted from a fixed defect must be able to fail on the code before the fix.\n")
+	for _, c := range cs {
+		fmt.Fprintf(&b, "\n### %s (%s, priority %d)\n", c.ID, c.Kind, c.Priority)
+		fmt.Fprintf(&b, "Property: %s\n", c.Property)
+		if c.Harm != "" {
+			fmt.Fprintf(&b, "Harm: %s\n", c.Harm)
+		}
+		if c.Oracle != "" {
+			fmt.Fprintf(&b, "Oracle: %s\n", c.Oracle)
+		}
+		if len(c.Inputs) > 0 {
+			fmt.Fprintf(&b, "Input classes: %s\n", strings.Join(c.Inputs, "; "))
+		}
+		var ts []string
+		for _, t := range c.Targets {
+			if t.Package == pkg {
+				ts = append(ts, t.Func)
+			}
+		}
+		fmt.Fprintf(&b, "Functions: %s\n", strings.Join(ts, ", "))
+		fmt.Fprintf(&b, "From: %s\n", strings.Join(c.Evidence, ", "))
+	}
+	return b.String(), cs
+}

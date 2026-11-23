@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/fooexec/go2lean/internal/agent"
 	"github.com/fooexec/go2lean/internal/contract"
 	llvmfe "github.com/fooexec/go2lean/internal/frontend/llvm"
+	"github.com/fooexec/go2lean/internal/mine"
 	"github.com/fooexec/go2lean/internal/repo"
 )
 
@@ -26,6 +28,8 @@ func cmdAgent(args []string) error {
 	repairs := fs.Int("repairs", 2, "rounds spent repairing specs the frontend rejected")
 	report := fs.Bool("report", true, "ask the agent for a report (and possibly revised specs) after the verdicts")
 	guidance := fs.String("guidance", "", "file with guidance for the proposal round (bug classes, invariants, functions to target)")
+	candidates := fs.String("candidates", "", "candidates.json from go2lean propose: the candidates targeting this package become the guidance")
+	candidateIDs := fs.String("candidate-ids", "", "with -candidates: only these candidates, comma-separated (c001,c003)")
 	specsOnly := fs.Bool("specs-only", false, "search only the properties of the specs the agent wrote, not the package's built-in ones")
 	specFile := fs.String("spec-file", "", "name of the spec file the agent writes in the package (default go2lean_specs_test.go)")
 	// On by default: specs drive the code under test through its
@@ -53,6 +57,17 @@ func cmdAgent(args []string) error {
 	}
 	if fs.NArg() != 1 {
 		return fmt.Errorf("agent: exactly one package pattern (or C file) expected")
+	}
+	if *candidates != "" {
+		g, n, err := candidateGuidance(*candidates, fs.Arg(0), splitList(*candidateIDs))
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("agent: no candidate in %s targets %s", *candidates, fs.Arg(0))
+		}
+		fmt.Printf("agent: %d candidate properties as guidance\n", n)
+		guidanceText = strings.TrimSpace(guidanceText+"\n\n"+g) + "\n"
 	}
 	if strings.HasSuffix(fs.Arg(0), ".c") || (*lib != "" && strings.HasSuffix(fs.Arg(0), ".h")) {
 		var libFiles []string
@@ -94,4 +109,23 @@ func cmdAgent(args []string) error {
 	return agent.Run(context.Background(), w, env, fs.Arg(0), llm, agent.Options{
 		Search: opts.get(), MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, SpecsOnly: *specsOnly, SpecFile: *specFile, FuzzTime: *fuzzTime,
 	}, os.Stdout)
+}
+
+// candidateGuidance reads go2lean propose's candidates and renders those of
+// the package pattern (./http3, ., ./internal/wire) as guidance.
+func candidateGuidance(path, pattern string, ids []string) (string, int, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, err
+	}
+	var p mine.Proposal
+	if err := json.Unmarshal(b, &p); err != nil {
+		return "", 0, fmt.Errorf("%s: %v", path, err)
+	}
+	pkg := strings.TrimSuffix(strings.TrimPrefix(filepath.ToSlash(pattern), "./"), "/")
+	if pkg == "" || pkg == "." {
+		pkg = "."
+	}
+	g, cs := p.Guidance(pkg, ids)
+	return g, len(cs), nil
 }
