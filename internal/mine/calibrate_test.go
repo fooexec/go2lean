@@ -116,11 +116,16 @@ func TestOutcomes(t *testing.T) {
 	for _, p := range []*contract.Property{
 		{ID: "p1", Kind: contract.KindSequence, Spec: &contract.SpecRef{GoFunc: "example.com/frame.SeqA"}},
 		{ID: "p2", Kind: contract.KindSequence, Spec: &contract.SpecRef{GoFunc: "example.com/frame.SeqB"}},
-		{ID: "p3", Kind: contract.KindSequence, Spec: &contract.SpecRef{GoFunc: "example.com/frame.SeqC"}},
+		{ID: "p3", Kind: contract.KindPostcondition, Spec: &contract.SpecRef{GoFunc: "example.com/frame.SpecC"}},
+		// A sequence spec is named by its target.
+		{ID: "p4", Kind: contract.KindSequence, Target: "t4"},
 	} {
 		if err := ws.WriteProperty(p); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := ws.WriteTarget(&contract.Target{ID: "t4", Func: "SeqE"}); err != nil {
+		t.Fatal(err)
 	}
 	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p2", Summary: "random: none in 2000 trials"})
 	for i, st := range []contract.VerdictStatus{contract.VerdictConfirmed, contract.VerdictSpurious} {
@@ -128,12 +133,13 @@ func TestOutcomes(t *testing.T) {
 		ws.WriteCounterexample(&contract.Counterexample{ID: id, Property: []string{"p1", "p3"}[i]})
 		ws.WriteVerdict(&contract.Verdict{Counterexample: id, Status: st})
 	}
-	got := Outcomes(ws, []string{"SeqA", "SeqB", "SeqC", "SeqD"})
+	got := Outcomes(ws, []string{"SeqA", "SeqB", "SpecC", "SeqD", "SeqE"})
 	want := map[string]Result{
-		"SeqA": {Outcome: OutViolated},
-		"SeqB": {Outcome: OutHeld, Search: "random: none in 2000 trials"},
-		"SeqC": {Outcome: OutSpurious},
-		"SeqD": {Outcome: OutNotRun},
+		"SeqA":  {Outcome: OutViolated},
+		"SeqB":  {Outcome: OutHeld, Search: "random: none in 2000 trials"},
+		"SpecC": {Outcome: OutSpurious},
+		"SeqD":  {Outcome: OutNotRun},
+		"SeqE":  {Outcome: OutHeld},
 	}
 	for s, w := range want {
 		if got[s] != w {

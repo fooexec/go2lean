@@ -219,11 +219,20 @@ func Outcomes(ws contract.Workspace, specs []string) map[string]Result {
 	ofProp := map[string]string{} // property id -> spec
 	res := map[string]Result{}
 	for _, p := range props {
-		if p.Spec == nil {
+		// A spec property names its spec; a sequence spec is the target.
+		name := ""
+		if p.Spec != nil {
+			name = p.Spec.GoFunc
+		} else if p.Kind == contract.KindSequence {
+			if t, _ := ws.Target(p.Target); t != nil {
+				name = t.Func
+			}
+		}
+		if name == "" {
 			continue
 		}
 		for _, s := range specs {
-			if p.Spec.GoFunc == s || strings.HasSuffix(p.Spec.GoFunc, "."+s) {
+			if name == s || strings.HasSuffix(name, "."+s) {
 				ofProp[p.ID] = s
 				r := Result{Outcome: OutHeld}
 				if h := ws.HuntRecord(p.ID); h != nil {
