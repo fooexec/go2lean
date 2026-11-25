@@ -45,7 +45,6 @@ func cmdAgent(args []string) error {
 	lib := fs.String("lib", "", "on a C header: the library's .c files, comma-separated globs, linked with the specs (the argument is then the public header)")
 	cflags := fs.String("cflags", "", "on a C file: flags for every compilation, comma-separated (-Iinclude,-DX=1)")
 	ldflags := fs.String("ldflags", "", "on a C file: flags for the links of the replays and the fuzzer, as on a command line (\"-Lbuild -lfoo -Wl,-rpath,build\")")
-	maxLen := fs.Int("maxlen", 0, "on a C file: maximum elements of a generated buffer (0: 8)")
 	memory := fs.Bool("memory", true, "on a C file: memory errors only (out of bounds, use after free, double free), not the rest of undefined behaviour")
 	fuzzTime := fs.Duration("fuzztime", 30*time.Second, "after the pipeline, fuzz each spec with go test -fuzz this long (0: off)")
 	opts := searchFlags(fs, 120)
@@ -98,7 +97,7 @@ func cmdAgent(args []string) error {
 		}
 		return agent.RunC(context.Background(), root, contract.Workspace{Root: *ws.workspace}, fs.Arg(0), llm, agent.Options{
 			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, FuzzTime: *fuzzTime, Memory: *memory, Lib: libFiles, CFlags: splitList(*cflags),
-			LDFlags: strings.Fields(*ldflags), MaxLen: *maxLen,
+			LDFlags: strings.Fields(*ldflags), MaxLen: opts.get().MaxLen,
 		}, os.Stdout)
 	}
 	w, env, err := openWorkspace(ws)
