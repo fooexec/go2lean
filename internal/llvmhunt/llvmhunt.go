@@ -256,6 +256,12 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 				certificate = fmt.Sprintf("; exhaustive: no UB on all %.0f inputs", res.Domain)
 			}
 			fmt.Fprintf(log, "    no UB in %d trials (%d stuck, %d out of fuel)%s\n", res.Trials, res.Stuck, res.OutOfFuel, certificate)
+			// The record of a search that found nothing, as the Go line
+			// writes one: calibration reads it (#315).
+			ws.WriteHuntRecord(&contract.HuntRecord{
+				Property: fmt.Sprintf("p_llvm_%s_%s_noub", key, fn.Name),
+				Summary:  fmt.Sprintf("no UB in %d trials (%d stuck, %d out of fuel)%s", res.Trials, res.Stuck, res.OutOfFuel, certificate),
+			})
 			// Where the trials got stuck: what to model next.
 			sites := make([]string, 0, len(res.StuckSites))
 			for site := range res.StuckSites {

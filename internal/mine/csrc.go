@@ -134,11 +134,28 @@ var cIdentBeforeParen = regexp.MustCompile(`([A-Za-z_]\w*)\s*\($`)
 // parameter list. Static functions are listed too: a spec that includes
 // the file can call them.
 func cFunctions(src []byte) []string {
-	lines := strings.Split(string(stripComments(src)), "\n")
 	var out []string
+	for _, d := range cDefs(src) {
+		out = append(out, d.name)
+	}
+	return out
+}
+
+// cDef is a function definition: its name, its header (the lines before
+// the body, joined) and the line its header starts on (0-based).
+type cDef struct {
+	name, header string
+	start        int
+}
+
+// cDefs lists the function definitions of a C source, as cFunctions.
+func cDefs(src []byte) []cDef {
+	lines := strings.Split(string(stripComments(src)), "\n")
+	var out []cDef
 	seen := map[string]bool{}
 	for i, l := range lines {
 		var header []string
+		start := i
 		switch {
 		case strings.HasPrefix(l, "{"):
 			for j := i - 1; j >= 0 && len(header) < 12; j-- {
@@ -147,6 +164,7 @@ func cFunctions(src []byte) []string {
 					break
 				}
 				header = append([]string{t}, header...)
+				start = j
 			}
 		case !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") && strings.HasSuffix(strings.TrimSpace(l), ") {"):
 			header = []string{strings.TrimSuffix(strings.TrimSpace(l), "{")}
@@ -167,7 +185,36 @@ func cFunctions(src []byte) []string {
 		}
 		if !seen[m[1]] {
 			seen[m[1]] = true
-			out = append(out, m[1])
+			out = append(out, cDef{m[1], h, start})
+		}
+	}
+	return out
+}
+
+// cSpecsByCandidate reads a C spec file: the spec functions (marked
+// annotate("go2lean:spec"), directly or through a SPEC macro) each
+// candidate's comment above them names.
+func cSpecsByCandidate(src []byte) map[string][]string {
+	lines := strings.Split(string(src), "\n")
+	out := map[string][]string{}
+	for _, d := range cDefs(src) {
+		if !strings.Contains(d.header, "SPEC") && !strings.Contains(d.header, "go2lean:spec") {
+			continue
+		}
+		// The comment just above the header.
+		var doc []string
+		for k := d.start - 1; k >= 0; k-- {
+			t := strings.TrimSpace(lines[k])
+			if strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*") || strings.HasSuffix(t, "*/") {
+				doc = append(doc, t)
+				continue
+			}
+			break
+		}
+		for _, m := range candidateMark.FindAllStringSubmatch(strings.Join(doc, " "), -1) {
+			if !contains(out[m[1]], d.name) {
+				out[m[1]] = append(out[m[1]], d.name)
+			}
 		}
 	}
 	return out

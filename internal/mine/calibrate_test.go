@@ -57,7 +57,7 @@ func TestCalibrate(t *testing.T) {
 	}
 	// The fake runner: the spec "catches" the code without the fix.
 	var seen []string
-	fake := func(wt, pkg string, specs []string) (map[string]Result, error) {
+	fake := func(wt, pkg, _ string, specs []string) (map[string]Result, error) {
 		src, err := os.ReadFile(filepath.Join(wt, pkg, "frame.go"))
 		if err != nil {
 			return nil, err
@@ -112,13 +112,13 @@ func TestCalibrate(t *testing.T) {
 		t.Fatal(err)
 	}
 	var installed []bool
-	saw := func(wt, pkg string, specs []string) (map[string]Result, error) {
+	saw := func(wt, pkg, file string, specs []string) (map[string]Result, error) {
 		b, err := os.ReadFile(filepath.Join(wt, pkg, "specs_test.go"))
 		if err != nil {
 			return nil, err
 		}
 		installed = append(installed, strings.Contains(string(b), "before the fix"))
-		return fake(wt, pkg, specs)
+		return fake(wt, pkg, file, specs)
 	}
 	if _, err := Calibrate(dir, "frame", spec, beforeSpec, cs[:1], saw, t.TempDir()); err != nil {
 		t.Fatal(err)
@@ -173,6 +173,69 @@ func TestOutcomes(t *testing.T) {
 	for s, w := range want {
 		if got[s] != w {
 			t.Errorf("%s: got %+v, want %+v", s, got[s], w)
+		}
+	}
+}
+
+func TestCalibrateInTree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	write(t, dir, "bgpd/attr.c", "int bound = 4;\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "initial")
+	write(t, dir, "bgpd/attr.c", "int bound = 5;\n")
+	run(t, dir, "commit", "-q", "-am", "fix")
+	fix := run(t, dir, "rev-parse", "HEAD")
+	// A file of the build, not in git, that a worktree would lack.
+	write(t, dir, "config.h", "#define X 1\n")
+	write(t, dir, "bgpd/zz_spec.c", "#define SPEC __attribute__((annotate(\"go2lean:spec\")))\n\n/* The bound: candidate c001. */\nSPEC int spec_bound(void)\n{\n\treturn 1;\n}\n\nstatic int helper(void)\n{\n\treturn 0;\n}\n")
+
+	var seen []string
+	fake := func(d, pkg, file string, specs []string) (map[string]Result, error) {
+		b, _ := os.ReadFile(filepath.Join(d, "bgpd/attr.c"))
+		if _, err := os.Stat(filepath.Join(d, "config.h")); err != nil {
+			t.Error("config.h missing in the tree")
+		}
+		seen = append(seen, strings.TrimSpace(string(b)))
+		out := map[string]Result{}
+		for _, s := range specs {
+			if strings.Contains(string(b), "4") {
+				out[s] = Result{Outcome: OutViolated}
+			} else {
+				out[s] = Result{Outcome: OutHeld}
+			}
+		}
+		return out, nil
+	}
+	cals, err := CalibrateInTree(dir, "bgpd", filepath.Join(dir, "bgpd/zz_spec.c"), "", []Candidate{{ID: "c001", After: fix}}, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cals) != 1 || !cals[0].Passed || strings.Join(seen, "|") != "int bound = 4;|int bound = 5;" {
+		t.Errorf("calibrations %+v, runs saw %v", cals, seen)
+	}
+	// The tree is as it was: the fixed file, and nothing changed in git.
+	if b, _ := os.ReadFile(filepath.Join(dir, "bgpd/attr.c")); string(b) != "int bound = 5;\n" {
+		t.Errorf("attr.c left as %q", b)
+	}
+	if st := run(t, dir, "status", "--porcelain", "--untracked-files=no"); st != "" {
+		t.Errorf("tree changed: %s", st)
+	}
+}
+
+func TestLLVMOutcomes(t *testing.T) {
+	ws := contract.Workspace{Root: t.TempDir()}
+	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p_llvm_m_zz_spec_SpecHeld_noub", Summary: "no UB in 2000 trials (0 stuck, 0 out of fuel)"})
+	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p_llvm_m_zz_spec_SpecStuck_noub", Summary: "no UB in 2000 trials (2000 stuck, 0 out of fuel)"})
+	ws.WriteCounterexample(&contract.Counterexample{ID: "cx1", Property: "p_llvm_m_zz_spec_SpecBad_noub"})
+	ws.WriteVerdict(&contract.Verdict{Counterexample: "cx1", Status: contract.VerdictConfirmed})
+	got := LLVMOutcomes(ws, []string{"SpecHeld", "SpecStuck", "SpecBad", "SpecGone"})
+	for s, want := range map[string]string{"SpecHeld": OutHeld, "SpecStuck": OutUnknown, "SpecBad": OutViolated, "SpecGone": OutNotRun} {
+		if got[s].Outcome != want {
+			t.Errorf("%s: %s, want %s", s, got[s].Outcome, want)
 		}
 	}
 }

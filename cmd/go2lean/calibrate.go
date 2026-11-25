@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/fooexec/go2lean/internal/mine"
+	"github.com/fooexec/go2lean/internal/repo"
 )
 
 // cmdCalibrate checks the specs written for candidates drafted from a fix
@@ -22,6 +24,10 @@ func cmdCalibrate(args []string) error {
 	specBefore := fs.String("spec-before", "", "the spec file for the revision before the fix, when the fix changed a signature the specs call: the same specs, written against the code before it (installed under -spec's name)")
 	scratch := fs.String("scratch", "", "directory for the worktrees (default: a temporary one)")
 	runFlags := fs.String("run-flags", "-trials 50000 -budget 600 -mutate=false", "flags for go2lean run on each revision (space-separated): a bug a fix removed is often rare, so the default search is larger than run's")
+	cflags := fs.String("cflags", "", "a C spec: flags for every compilation, comma-separated (as go2lean llvm -cflags)")
+	ldflags := fs.String("ldflags", "", "a C spec: flags for the links of the replay and the fuzzer (as go2lean llvm -ldflags)")
+	maxLen := fs.Int("maxlen", 32, "a C spec: maximum elements of a generated buffer")
+	fuzzFor := fs.String("fuzz", "60s", "a C spec: libFuzzer time on each spec the model search did not settle (0: none)")
 	fs.Parse(args)
 	module := "."
 	if fs.NArg() == 1 {
@@ -63,7 +69,29 @@ func cmdCalibrate(args []string) error {
 		}
 		defer os.RemoveAll(dir)
 	}
-	cals, err := mine.Calibrate(absMod, pkg, absSpec, *specBefore, p.Candidates, mine.GoRunner(bin, strings.Fields(*runFlags)...), dir)
+	var cals []mine.Calibration
+	if strings.HasSuffix(absSpec, ".c") {
+		// A C spec, on the LLVM line, in the project's own configured tree
+		// (a worktree lacks the build's generated files): the files the fix
+		// changes are checked out at each revision and put back.
+		root, rerr := repo.Root()
+		if rerr != nil {
+			return fmt.Errorf("calibrate: a C spec runs go2lean llvm, which runs from the go2lean checkout (#335): %v", rerr)
+		}
+		extra := []string{"-maxlen", strconv.Itoa(*maxLen)}
+		if *cflags != "" {
+			extra = append(extra, "-cflags", *cflags)
+		}
+		if *ldflags != "" {
+			extra = append(extra, "-ldflags", *ldflags)
+		}
+		if *fuzzFor != "" && *fuzzFor != "0" {
+			extra = append(extra, "-fuzz", *fuzzFor)
+		}
+		cals, err = mine.CalibrateInTree(absMod, pkg, absSpec, *specBefore, p.Candidates, mine.LLVMRunner(bin, root, extra...))
+	} else {
+		cals, err = mine.Calibrate(absMod, pkg, absSpec, *specBefore, p.Candidates, mine.GoRunner(bin, strings.Fields(*runFlags)...), dir)
+	}
 	passed := 0
 	for _, c := range cals {
 		mark := "FAIL"

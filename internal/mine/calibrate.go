@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/fooexec/go2lean/internal/contract"
@@ -53,7 +54,7 @@ type Result struct {
 
 // Runner runs the specs of the spec file installed in package pkg of the
 // module checked out in dir, and gives each spec's result.
-type Runner func(dir, pkg string, specs []string) (map[string]Result, error)
+type Runner func(dir, pkg, file string, specs []string) (map[string]Result, error)
 
 // candidateMark is how a spec names the candidate it was written for.
 var candidateMark = regexp.MustCompile(`\bcandidate (c\d{3,})\b`)
@@ -61,6 +62,13 @@ var candidateMark = regexp.MustCompile(`\bcandidate (c\d{3,})\b`)
 // SpecsByCandidate reads a spec file: the specs (functions named Spec* or
 // Seq*) each candidate's doc comments name.
 func SpecsByCandidate(specFile string) (map[string][]string, error) {
+	if strings.HasSuffix(specFile, ".c") {
+		src, err := os.ReadFile(specFile)
+		if err != nil {
+			return nil, err
+		}
+		return cSpecsByCandidate(src), nil
+	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, specFile, nil, parser.ParseComments)
 	if err != nil {
@@ -210,14 +218,14 @@ func runAt(module, pkg, name string, src []byte, rev string, specs []string, run
 	if err := os.WriteFile(filepath.Join(dir, name), src, 0o644); err != nil {
 		return nil, err
 	}
-	return run(wt, pkg, specs)
+	return run(wt, pkg, name, specs)
 }
 
 // GoRunner runs go2lean (the binary at bin) on the package, specs only,
 // with the extra run flags (a larger search budget, say), and reads each
 // spec's result from the workspace.
 func GoRunner(bin string, extra ...string) Runner {
-	return func(dir, pkg string, specs []string) (map[string]Result, error) {
+	return func(dir, pkg, _ string, specs []string) (map[string]Result, error) {
 		ws, err := os.MkdirTemp("", "go2lean-calibrate-")
 		if err != nil {
 			return nil, err
@@ -313,4 +321,200 @@ func Outcomes(ws contract.Workspace, specs []string) map[string]Result {
 		}
 	}
 	return res
+}
+
+// LLVMRunner runs go2lean's C line (the binary at bin, from the go2lean
+// checkout root) on the spec file, memory errors only, with the extra
+// flags (-cflags, -ldflags, -maxlen, -fuzz), and reads each spec's result.
+func LLVMRunner(bin, root string, extra ...string) Runner {
+	return func(dir, pkg, file string, specs []string) (map[string]Result, error) {
+		ws, err := os.MkdirTemp("", "go2lean-calibrate-")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(ws)
+		args := append([]string{"llvm", "-memory", "-specs-only", "-workspace", ws}, extra...)
+		args = append(args, filepath.Join(dir, pkg, file))
+		cmd := exec.Command(bin, args...)
+		cmd.Dir = root
+		out, runErr := cmd.CombinedOutput()
+		res := LLVMOutcomes(contract.Workspace{Root: ws}, specs)
+		for s, r := range res {
+			if r.Outcome == OutNotRun && runErr != nil {
+				res[s] = Result{OutNoBuild, lastLines(string(out), 5)}
+			}
+		}
+		return res, nil
+	}
+}
+
+var llvmSummary = regexp.MustCompile(`no UB in (\d+) trials \((\d+) stuck, (\d+) out of fuel\)`)
+
+// LLVMOutcomes reads the result of each spec function from a workspace the
+// C line wrote: its property is p_llvm_<module>_<spec>_noub.
+func LLVMOutcomes(ws contract.Workspace, specs []string) map[string]Result {
+	res := map[string]Result{}
+	ofProp := func(prop string) string {
+		for _, s := range specs {
+			if strings.HasPrefix(prop, "p_llvm_") && strings.HasSuffix(prop, "_"+s+"_noub") {
+				return s
+			}
+		}
+		return ""
+	}
+	hs, _ := filepath.Glob(filepath.Join(ws.Root, "hunts", "*.json"))
+	for _, f := range hs {
+		h := ws.HuntRecord(strings.TrimSuffix(filepath.Base(f), ".json"))
+		if h == nil {
+			continue
+		}
+		if s := ofProp(h.Property); s != "" {
+			r := Result{Outcome: OutUnknown, Search: h.Summary}
+			if m := llvmSummary.FindStringSubmatch(h.Summary); m != nil {
+				trials, _ := strconv.Atoi(m[1])
+				stuck, _ := strconv.Atoi(m[2])
+				oof, _ := strconv.Atoi(m[3])
+				if trials-stuck-oof > 0 {
+					r.Outcome = OutHeld
+				}
+			}
+			res[s] = r
+		}
+	}
+	vs, _ := filepath.Glob(filepath.Join(ws.Root, "verdicts", "*.json"))
+	for _, f := range vs {
+		cxID := strings.TrimSuffix(filepath.Base(f), ".json")
+		v := ws.Verdict(cxID)
+		cx, _ := ws.Counterexample(cxID)
+		if v == nil || cx == nil {
+			continue
+		}
+		s := ofProp(cx.Property)
+		if s == "" {
+			continue
+		}
+		r := res[s]
+		if v.Status == contract.VerdictConfirmed {
+			r.Outcome = OutViolated
+		} else if r.Outcome != OutViolated {
+			r.Outcome = OutSpurious
+		}
+		res[s] = r
+	}
+	for _, s := range specs {
+		if _, ok := res[s]; !ok {
+			res[s] = Result{Outcome: OutNotRun}
+		}
+	}
+	return res
+}
+
+// CalibrateInTree is Calibrate in module's own checkout, for a project whose
+// build generates files a fresh worktree lacks (a C project's config.h):
+// for each revision it checks out only the files the fix changes, installs
+// the spec file, runs, and puts every file back as it was.
+func CalibrateInTree(module, pkg, specFile, beforeFile string, cs []Candidate, run Runner) ([]Calibration, error) {
+	byCand, err := SpecsByCandidate(specFile)
+	if err != nil {
+		return nil, err
+	}
+	src, err := os.ReadFile(specFile)
+	if err != nil {
+		return nil, err
+	}
+	beforeSrc := src
+	if beforeFile != "" {
+		if beforeSrc, err = os.ReadFile(beforeFile); err != nil {
+			return nil, err
+		}
+	}
+	name := filepath.Base(specFile)
+	var out []Calibration
+	for _, c := range cs {
+		specs := byCand[c.ID]
+		if c.After == "" || len(specs) == 0 {
+			continue
+		}
+		sort.Strings(specs)
+		before := c.Before
+		if before == "" {
+			before = c.After + "^"
+		}
+		files, err := gitLines(module, "diff", "--name-only", before, c.After)
+		if err != nil {
+			return out, err
+		}
+		cal := Calibration{Candidate: c.ID, Specs: specs, Before: before, After: c.After}
+		for i, rev := range []string{before, c.After} {
+			code := src
+			if i == 0 {
+				code = beforeSrc
+			}
+			res, err := runInTree(module, pkg, name, code, rev, files, specs, run)
+			if err != nil {
+				return out, fmt.Errorf("calibrate %s at %s: %w", c.ID, rev, err)
+			}
+			if i == 0 {
+				cal.AtBefore = res
+			} else {
+				cal.AtAfter = res
+			}
+		}
+		cal.Passed, cal.Why = judge(specs, cal.AtBefore, cal.AtAfter)
+		out = append(out, cal)
+	}
+	// The spec file as it was given.
+	return out, os.WriteFile(specFile, src, 0o644)
+}
+
+// runInTree puts files at rev in module's tree, with the spec file, runs,
+// and restores the files.
+func runInTree(module, pkg, name string, code []byte, rev string, files, specs []string, run Runner) (map[string]Result, error) {
+	saved := map[string][]byte{}
+	for _, f := range files {
+		p := filepath.Join(module, f)
+		if b, err := os.ReadFile(p); err == nil {
+			saved[f] = b
+		}
+	}
+	defer func() {
+		for _, f := range files {
+			p := filepath.Join(module, f)
+			if b, ok := saved[f]; ok {
+				os.WriteFile(p, b, 0o644)
+			} else {
+				os.Remove(p)
+			}
+		}
+	}()
+	for _, f := range files {
+		p := filepath.Join(module, f)
+		b, err := exec.Command("git", "-C", module, "show", rev+":"+f).Output()
+		if err != nil {
+			os.Remove(p) // not in rev
+			continue
+		}
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			return nil, err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(module, pkg, name), code, 0o644); err != nil {
+		return nil, err
+	}
+	return run(module, pkg, name, specs)
+}
+
+func gitLines(dir string, args ...string) ([]string, error) {
+	out, err := git(dir, args...)
+	if err != nil {
+		return nil, err
+	}
+	var ls []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l != "" {
+			ls = append(ls, l)
+		}
+	}
+	return ls, nil
 }

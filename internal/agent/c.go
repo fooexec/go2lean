@@ -170,7 +170,7 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 		os.WriteFile(filepath.Join(agentDir, CSpecFile), []byte(header+spec+"\n"), 0o644)
 		fmt.Fprintf(out, "== search and replay of the specs (%s)\n", specPath)
 		log.Reset()
-		so := llvmhunt.Options{Trials: 2000, Seed: 42, Fuel: 20000, Engine: "all", ExhaustLen: 3, Init: -1, SpecsOnly: true, Fuzz: opts.FuzzTime, Memory: opts.Memory, Lib: opts.Lib, CFlags: opts.CFlags}
+		so := llvmhunt.Options{Trials: 2000, Seed: 42, Fuel: 20000, Engine: "all", ExhaustLen: 3, Init: -1, SpecsOnly: true, Fuzz: opts.FuzzTime, Memory: opts.Memory, Lib: opts.Lib, CFlags: opts.CFlags, LDFlags: opts.LDFlags, MaxLen: opts.MaxLen}
 		runErr = llvmhunt.Run(root, ws, specPath, so, io.MultiWriter(out, &log))
 		if runErr != nil {
 			fmt.Fprintf(out, "  error: %v\n", runErr)
