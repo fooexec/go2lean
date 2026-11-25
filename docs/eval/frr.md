@@ -68,8 +68,8 @@ other 18 sit in code that has changed since, and calibrating them needs
 a configured build of each old revision.
 
 `propose` drafted 13 candidates from the 12, seeing each fix's diff, and
-the agent wrote specs for the three on `bgp_attr.c`
-([specs_bgp_attr.c.txt](frr/specs_bgp_attr.c.txt)). They need bgpd's
+the agent wrote specs for the nine on bgpd's parsers (the three on
+`bgp_attr.c`: [specs_bgp_attr.c.txt](frr/specs_bgp_attr.c.txt)). They need bgpd's
 own set-up (the BGP master, a bgp instance, a peer with an input stream),
 taken from FRR's unit tests (`tests/bgpd/test_mp_attr.c`) and given to
 the agent as guidance. libFuzzer runs them against the real code, linked
@@ -80,6 +80,15 @@ with `libbgp.a` and `libfrr`.
 | CVE-2026-129456, use after free of Tunnel Encapsulation sub-TLVs | `5c241056` | interning keeps the sub-TLV chain owned while a route holds it | violated | holds (5.4 million fuzzer runs) |
 | CVE-2026-37458, martian next hop accepted in MP_REACH_NLRI | `8102a8ae` | an IPv4 next hop in MP_REACH_NLRI gets the NEXT_HOP attribute's martian check | violated | holds (9.7 million fuzzer runs) |
 | CVE-2026-37459, NHC TLV length | `693a2e02` | each TLV with its header fits in the attribute | | violated: the spec's error |
+| CVE-2023-38406, FlowSpec NLRI length | `b1867d42` | a FlowSpec NLRI whose declared length passes the buffer is rejected, nothing read past it | violated | holds (5.1 million fuzzer runs) |
+| CVE-2023-41360, ROUTE-REFRESH ORF | `c2b0d6a0` | the ORF entries are read within the message (two specs) | violated | holds (5.2 and 6.0 million fuzzer runs) |
+| CVE-2023-41361, Software Version capability | `ff4c767a` | the version string is copied within its buffer, and the read pointer moves by the declared length | violated | violated: the spec's error |
+| CVE-2026-37460, EVPN Type-2 length | `7676cad6` | a Type-2 NLRI is accepted only if its length matches its fields | violated | holds (4.7 million fuzzer runs) |
+| CVE-2026-37460, EVPN Type-3 length | `7676cad6` | the same for Type-3 (13 or 25 bytes) | violated | holds (6.7 million fuzzer runs) |
+| CVE-2026-37460, EVPN NLRI walk | `7676cad6` | an inconsistent length in any EVPN NLRI is rejected, nothing read past it | violated | holds (3.4 million fuzzer runs) |
+
+Seven of the nine candidates calibrate; the other two are specs that are
+wrong, and calibration rejected both.
 
 CVE-2026-37458 is a semantic rule, not a memory error: a spec that
 returns 0 when a martian next hop is accepted catches it, where
@@ -93,6 +102,21 @@ constant. A repair round that gives the agent the violation and the log,
 and keeps the revised spec only if it is still violated before the fix,
 would close this (#339).
 
+The Software Version spec makes the same kind of error the other way: it
+also feeds the parser a stream shorter than the capability's declared
+length, which `bgp_capability_parse`, its only caller, never does (it
+checks `start + caphdr.length > end` first). FRR's `stream_get` then
+stops on its own assertion. Both errors are a caller's guarantee the
+spec did not keep; the repair round would show the agent the caller.
+
+Two judging errors came up, both fixed in the tool. The ROUTE-REFRESH
+spec counted as spurious after the fix: the model, which gets bgpd's
+set-up wrong, reported a nil dereference in it that the real code did
+not reproduce, though the fuzzer ran clean. Its outcome is now a hold.
+The Software Version crash, an assertion with no sanitizer report, was
+inconclusive and counted as spurious too; a failed assertion is now a
+crash the replay confirms, and an inconclusive replay counts as unknown.
+
 What it took, each now in the tool:
 - the real fix of an advisory, and its diff in the evidence (#336, #337);
 - calibration on today's code with the fix reversed, since a 2024 fix's
@@ -105,8 +129,8 @@ What it took, each now in the tool:
 
 ## Next
 
-- Calibrate the other advisories with a fix commit (bgpd's attribute and
-  NLRI parsers, ospfd's TE and opaque LSA parsers).
+- Calibrate the 18 advisories whose fix no longer reverses onto today's
+  code: each needs a configured build of its own revision.
 - `propose` and the agent on FRR's evidence, for the parsers no advisory
   covers yet.
 - A binary line: FRR as distributions and vendors ship it (CVE-2023-38802

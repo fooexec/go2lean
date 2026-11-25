@@ -400,10 +400,24 @@ func LLVMOutcomes(ws contract.Workspace, specs []string) map[string]Result {
 			continue
 		}
 		r := res[s]
-		if v.Status == contract.VerdictConfirmed {
+		switch {
+		case v.Status == contract.VerdictConfirmed:
 			r.Outcome = OutViolated
-		} else if r.Outcome != OutViolated {
+		case r.Outcome == OutViolated:
+		case v.Status == contract.VerdictSpurious && r.Outcome == OutHeld && fuzzedClean.MatchString(r.Search):
+			// The model's counterexample did not reproduce, and the fuzzer
+			// ran the real code clean: the spec holds there; the model was
+			// wrong about it.
+			r.Search += "; a model counterexample did not reproduce"
+		case v.Status == contract.VerdictSpurious:
 			r.Outcome = OutSpurious
+		default:
+			// Inconclusive: a crash the replay could not judge, a spec's
+			// own undefined behaviour, a PoC that did not build.
+			r.Outcome = OutUnknown
+			if v.Diagnosis != nil {
+				r.Search = strings.TrimPrefix(r.Search+"; replay inconclusive: "+v.Diagnosis.Reason, "; ")
+			}
 		}
 		res[s] = r
 	}

@@ -367,7 +367,12 @@ spec and the module given as absolute paths.
 
 A C spec's outcome counts libFuzzer's clean run as a hold: a spec that
 needs the project's own set-up (FRR's bgpd globals, its event loop) gets
-stuck in the model on every trial, and the fuzzer is what checks it.
+stuck in the model on every trial, and the fuzzer is what checks it. So
+does a model counterexample the real run does not reproduce when the
+fuzzer then runs clean: the model was wrong, not the spec. A crash the
+replay cannot judge is unknown, not spurious. A failed assertion of the
+project's own (FRR's `stream_get` aborting on a read past the end) counts
+as a crash, as a sanitizer report does.
 `-lib` links more of the project's C files into the model, the replay and
 the fuzzer, as on `go2lean llvm`.
 
