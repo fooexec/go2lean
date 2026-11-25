@@ -149,6 +149,25 @@ MSDP TLV length bounds (70M), BSM parse-matches-reference (102M) and
 truncated (30M), and the Join/Prune valid-entry path (100M). No memory
 error survived in any of them.
 
+A later pass turned the agent onto three more faces, all held: the Assert
+metric comparison of RFC 4601 §4.6.3 — its order, transitivity and the
+cancel-loses rule (184M–260M runs each); the Candidate-RP rule that a BSM
+is not regenerated unless the router is elected BSR; and the BSM fragment
+parser — reject-truncated (119M), fragment-fits-MTU (89M) and
+reject-inconsistent-counts (176M). No memory error in any.
+
+A third pass took the receive-path byte-order and hash readers, again all
+held: the IGMPv3 group-address filter read from the wire bytes and the
+received-report group-range check (221M and 103M runs); the AutoRP
+announcement holdtime decoded big-endian (79M); and the BSR RP-selection
+hash of RFC 7761 §4.7.2 (278M–299M). The AutoRP *discovery* holdtime
+reader produced a libFuzzer timeout whose input replays in 50 ms with exit
+0 in a fresh process — the same between-runs state growth as before (the
+spec adds a discovery RP each run and removes it only when its probe key
+matches, so unmatched runs accumulate in the list); the frozen eval build
+recorded it inconclusive, and the current tool, which judges a fast clean
+replay as spurious, classifies it so.
+
 Four results needed triage and were not defects:
 
 - The IGMPv3 record spec required FRR to leave the earlier records of a
@@ -194,9 +213,14 @@ conformance deviation rather than a memory error:
 
 - Calibrate the 18 advisories whose fix no longer reverses onto today's
   code: each needs a configured build of its own revision.
-- Confirm the Register-Stop wildcard deviation with the maintainers and,
-  if it stands, the other priority-2 pimd candidates and the remaining
-  daemons (isisd, ospf6d, ldpd, bfdd).
+- Confirm the Register-Stop wildcard deviation with the maintainers. The
+  priority-2 pimd receive paths that fit the IPv4 harness are now covered
+  (assert metric, Candidate-RP, BSM fragment, group-address byte order,
+  AutoRP holdtime, BSR hash), all held. Remaining: the pim6d/MLD paths
+  (need a `PIM_IPV=6` build for the ICMPv6 pseudo-header and MLDv2
+  candidates) and the (S,G)/upstream-state candidates (need real mroute
+  and upcall state the unconnected-zebra harness cannot model), then the
+  other daemons (isisd, ospf6d, ldpd, bfdd), each needing its own harness.
 - A binary line: FRR as distributions and vendors ship it (CVE-2023-38802
   also affected Pica8 PICOS), through an AArch64 semantics in Lean
   (Google DeepMind's AlphaProof Code, Lean 4.35.0 like go2lean's).
