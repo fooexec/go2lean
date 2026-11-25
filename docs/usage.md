@@ -309,7 +309,16 @@ functions a spec for it drives.
 ```sh
 go2lean propose -llm claude-code -evidence evidence.json -o candidates.json ../quic-go
 go2lean propose -kinds advisory,commit -limit 50 ...   # a part of the evidence
+go2lean propose -siblings ...                           # code a fix did not reach
 ```
+
+By default a fix's property targets the functions the fix changed, which
+calibration needs. With `-siblings` it targets the other functions that
+read the same kind of input (the same option, TLV or length field in
+another message type, address family or code path) and may lack the fix's
+rule: the search for a defect the fix did not reach. On FRR's pimd, its
+parser fixes of 2026 (mtrace lengths, AutoRP, BSM, the PIM header length)
+gave 43 candidates over IGMP, MLD, MSDP, AutoRP, BSM and Join/Prune.
 
 The evidence goes ten items to a call. Each call lists the functions of the
 packages the items concern, and the package index for items that name no
@@ -403,7 +412,7 @@ go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-ur
                 [-repairs n] [-report] <package>
 go2lean advisory [-o file] [-llm ...] <GHSA-id|CVE-id>   draft a catalog property (docs/specs) from a published advisory (OSV)
 go2lean mine    [-o evidence.json] [-osv-package eco:name] [-similar p,...] [-github-repo o/n] [-github-json f] [-offline] [-max-commits n] [dir]   collect the evidence properties are drafted from (below)
-go2lean propose [-evidence evidence.json] [-o candidates.json] [-llm ...] [-kinds k,...] [-limit n] [dir]   candidate properties from the evidence (below)
+go2lean propose [-evidence evidence.json] [-o candidates.json] [-llm ...] [-kinds k,...] [-limit n] [-siblings] [dir]   candidate properties from the evidence (below)
 go2lean calibrate -spec <file> [-spec-before <file>] [-candidates candidates.json] [-o calibration.json] [-run-flags "..."] [module]   each spec violated before its candidate's fix, held after (above)
 go2lean symexec [-module dir] [-func names] [-unexported] [-replay=false] [-maxlen n] [-loop n] [-depth n] <package>   bounded symbolic execution (needs z3)
 go2lean zorya  run|replay [-dir zorya] [-ghidra dir] [-seed aaaa] [-results f.json] <binary>   concolic execution of a compiled program, reports replayed
