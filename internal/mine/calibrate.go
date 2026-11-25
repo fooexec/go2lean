@@ -348,6 +348,9 @@ func LLVMRunner(bin, root string, extra ...string) Runner {
 	}
 }
 
+// fuzzedClean: libFuzzer ran the real program and found nothing.
+var fuzzedClean = regexp.MustCompile(`libfuzzer: no crash in [1-9]\d* runs`)
+
 var llvmSummary = regexp.MustCompile(`no UB in (\d+) trials \((\d+) stuck, (\d+) out of fuel\)`)
 
 // LLVMOutcomes reads the result of each spec function from a workspace the
@@ -370,6 +373,9 @@ func LLVMOutcomes(ws contract.Workspace, specs []string) map[string]Result {
 		}
 		if s := ofProp(h.Property); s != "" {
 			r := Result{Outcome: OutUnknown, Search: h.Summary}
+			if fuzzedClean.MatchString(h.Summary) {
+				r.Outcome = OutHeld
+			}
 			if m := llvmSummary.FindStringSubmatch(h.Summary); m != nil {
 				trials, _ := strconv.Atoi(m[1])
 				stuck, _ := strconv.Atoi(m[2])

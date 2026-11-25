@@ -230,10 +230,11 @@ func TestLLVMOutcomes(t *testing.T) {
 	ws := contract.Workspace{Root: t.TempDir()}
 	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p_llvm_m_zz_spec_SpecHeld_noub", Summary: "no UB in 2000 trials (0 stuck, 0 out of fuel)"})
 	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p_llvm_m_zz_spec_SpecStuck_noub", Summary: "no UB in 2000 trials (2000 stuck, 0 out of fuel)"})
+	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p_llvm_m_zz_spec_SpecFuzzed_noub", Summary: "no UB in 2000 trials (2000 stuck, 0 out of fuel); libfuzzer: no crash in 7408301 runs (1m0s)"})
 	ws.WriteCounterexample(&contract.Counterexample{ID: "cx1", Property: "p_llvm_m_zz_spec_SpecBad_noub"})
 	ws.WriteVerdict(&contract.Verdict{Counterexample: "cx1", Status: contract.VerdictConfirmed})
-	got := LLVMOutcomes(ws, []string{"SpecHeld", "SpecStuck", "SpecBad", "SpecGone"})
-	for s, want := range map[string]string{"SpecHeld": OutHeld, "SpecStuck": OutUnknown, "SpecBad": OutViolated, "SpecGone": OutNotRun} {
+	got := LLVMOutcomes(ws, []string{"SpecHeld", "SpecStuck", "SpecFuzzed", "SpecBad", "SpecGone"})
+	for s, want := range map[string]string{"SpecHeld": OutHeld, "SpecStuck": OutUnknown, "SpecFuzzed": OutHeld, "SpecBad": OutViolated, "SpecGone": OutNotRun} {
 		if got[s].Outcome != want {
 			t.Errorf("%s: %s, want %s", s, got[s].Outcome, want)
 		}

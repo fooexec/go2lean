@@ -340,6 +340,15 @@ func fuzzLog(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Option
 		fmt.Fprintf(log, "    libfuzzer: not fuzzed (%s)\n", r.Skipped)
 	case r.Verdict == nil:
 		fmt.Fprintf(log, "    libfuzzer: no crash in %s runs (%s)\n", r.Execs, opts.Fuzz)
+		// The fuzzer checked the real program: a hold calibration counts
+		// even where the model got stuck on every trial.
+		prop := fmt.Sprintf("p_llvm_%s_%s_noub", key, fn.Name)
+		h := ws.HuntRecord(prop)
+		if h == nil {
+			h = &contract.HuntRecord{Property: prop}
+		}
+		h.Summary = strings.TrimPrefix(h.Summary+"; libfuzzer: no crash in "+r.Execs+" runs ("+opts.Fuzz.String()+")", "; ")
+		ws.WriteHuntRecord(h)
 	default:
 		fmt.Fprintf(log, "    libfuzzer: crash after %s runs, input %s\n", r.Execs, r.Verdict.Evidence.Cmd)
 		fmt.Fprintf(log, "    -> %s %s%s\n", r.Verdict.Status, memTag(r.Verdict), firstLine(r.Verdict.Evidence.PanicMsg))
