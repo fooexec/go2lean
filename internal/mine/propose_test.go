@@ -129,3 +129,16 @@ func TestEvidenceRef(t *testing.T) {
 		}
 	}
 }
+
+func TestGuidanceShowsFix(t *testing.T) {
+	p := &Proposal{Candidates: []Candidate{{ID: "c001", Property: "p", Targets: []Target{{"bgpd", "bgp_attr_nhc"}},
+		Fix: "-if (length < tlv_length)\n+if (length < tlv_length + BGP_NHC_TLV_MIN_LEN)"}}}
+	g, _ := p.Guidance("bgpd", nil)
+	if !strings.Contains(g, "```diff") || !strings.Contains(g, "BGP_NHC_TLV_MIN_LEN") {
+		t.Errorf("guidance:\n%s", g)
+	}
+	e := Evidence{Kind: KindAdvisory, Text: "Advisory CVE-1\n\nThe fix (abc):\ndiff --git a/x.c b/x.c\n-old\n+new"}
+	if f := fixOf(e); !strings.HasPrefix(f, "diff --git") {
+		t.Errorf("fixOf: %q", f)
+	}
+}

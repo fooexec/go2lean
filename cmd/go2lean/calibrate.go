@@ -25,6 +25,7 @@ func cmdCalibrate(args []string) error {
 	scratch := fs.String("scratch", "", "directory for the worktrees (default: a temporary one)")
 	runFlags := fs.String("run-flags", "-trials 50000 -budget 600 -mutate=false", "flags for go2lean run on each revision (space-separated): a bug a fix removed is often rare, so the default search is larger than run's")
 	cflags := fs.String("cflags", "", "a C spec: flags for every compilation, comma-separated (as go2lean llvm -cflags)")
+	libFlag := fs.String("lib", "", "a C spec: more C files of the project, comma-separated, linked into the model, the replay and the fuzzer (as go2lean llvm -lib)")
 	ldflags := fs.String("ldflags", "", "a C spec: flags for the links of the replay and the fuzzer (as go2lean llvm -ldflags)")
 	maxLen := fs.Int("maxlen", 32, "a C spec: maximum elements of a generated buffer")
 	atHead := fs.Bool("at-head", true, "a C spec: calibrate on the current code, with the fix reversed for the revision before it (a fix's own revision often no longer builds against the tree); false: check out the fix's files at its revisions")
@@ -85,6 +86,9 @@ func cmdCalibrate(args []string) error {
 		}
 		if *ldflags != "" {
 			extra = append(extra, "-ldflags", *ldflags)
+		}
+		if *libFlag != "" {
+			extra = append(extra, "-lib", *libFlag)
 		}
 		if *fuzzFor != "" && *fuzzFor != "0" {
 			extra = append(extra, "-fuzz", *fuzzFor)

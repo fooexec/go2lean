@@ -40,6 +40,10 @@ type Candidate struct {
 	// before, holding after. From the first evidence item that has them.
 	Before string `json:"before,omitempty"`
 	After  string `json:"after,omitempty"`
+	// Fix is the diff of the fix the candidate comes from (an own
+	// advisory's, or a fix commit's): what the spec writer reads to learn
+	// the real formats and bounds instead of guessing them.
+	Fix string `json:"fix,omitempty"`
 }
 
 // Proposal is propose's output.
@@ -185,6 +189,7 @@ func Propose(ctx context.Context, llm Completer, r *Report, dir string) (*Propos
 			for _, ref := range c.Evidence {
 				if e, ok := byRef[ref]; ok && e.After != "" {
 					c.Before, c.After = e.Before, e.After
+					c.Fix = fixOf(e)
 					break
 				}
 			}
@@ -440,6 +445,9 @@ func (p *Proposal) Guidance(pkg string, ids []string) (string, []Candidate) {
 			}
 		}
 		fmt.Fprintf(&b, "Functions: %s\n", strings.Join(ts, ", "))
+		if c.Fix != "" {
+			fmt.Fprintf(&b, "The fix it comes from (read it for the real formats, lengths and bounds; do not guess them):\n```diff\n%s\n```\n", strings.TrimSpace(c.Fix))
+		}
 		fmt.Fprintf(&b, "From: %s\n", strings.Join(c.Evidence, ", "))
 	}
 	return b.String(), cs
@@ -475,4 +483,21 @@ func systemFor(prompt, lang string) string {
 		`{"package": "<package directory>", "func": "<Name or Type.Method>"}`, `{"package": "<source directory>", "func": "<function name>"}`,
 	)
 	return r.Replace(prompt)
+}
+
+// fixOf is the diff part of an evidence item: a commit's text after its
+// message, or an own advisory's after "The fix (".
+func fixOf(e Evidence) string {
+	if i := strings.Index(e.Text, "\nThe fix ("); i >= 0 {
+		t := e.Text[i+1:]
+		if j := strings.Index(t, "\n"); j >= 0 {
+			return clip(t[j+1:], maxDiff)
+		}
+	}
+	if e.Kind == KindCommit {
+		if i := strings.Index(e.Text, "\ndiff --git "); i >= 0 {
+			return clip(e.Text[i+1:], maxDiff)
+		}
+	}
+	return ""
 }
