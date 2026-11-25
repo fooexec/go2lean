@@ -1,0 +1,37 @@
+/* go2lean specs for bgpd's FlowSpec decoders: candidate from CVE-2026-37457. */
+#include "bgp_flowspec_util.c"
+
+#define SPEC __attribute__((annotate("go2lean:spec")))
+
+/* bgpd's PBR entry builder, which the file references from a function the
+ * specs do not call. */
+int bgp_pbr_build_and_validate_entry(const struct prefix *p, struct bgp_path_info *path,
+				     struct bgp_pbr_entry_main *api)
+{
+	return 0;
+}
+
+/* A FlowSpec numeric component (RFC 8955, Section 4.2.1.1) decoded into
+ * the operator array bgpd keeps for it (BGP_PBR_MATCH_VAL_MAX entries)
+ * stays inside it, however many operators a peer chains: candidate c001.
+ * A component longer than the array is an error, not a write past it. */
+SPEC int spec_flowspec_op_decode_in_bounds(uint8_t *nlri, uint32_t len)
+{
+	struct bgp_pbr_match_val mval[BGP_PBR_MATCH_VAL_MAX];
+	int error = 0;
+
+	memset(mval, 0, sizeof(mval));
+	bgp_flowspec_op_decode(BGP_FLOWSPEC_CONVERT_TO_NON_OPAQUE, nlri, len, mval, &error);
+	return 1;
+}
+
+/* The same for the bitmask components (TCP flags, fragment): candidate c001. */
+SPEC int spec_flowspec_bitmask_decode_in_bounds(uint8_t *nlri, uint32_t len)
+{
+	struct bgp_pbr_match_val mval[BGP_PBR_MATCH_VAL_MAX];
+	int error = 0;
+
+	memset(mval, 0, sizeof(mval));
+	bgp_flowspec_bitmask_decode(BGP_FLOWSPEC_CONVERT_TO_NON_OPAQUE, nlri, len, mval, &error);
+	return 1;
+}

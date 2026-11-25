@@ -109,6 +109,11 @@ On [stb_image](../docs/eval/stb-image.md) they find:
   do not reach;
 - with libFuzzer on the specs the model did not settle, two more defects.
 
+On [FRR](../docs/eval/frr.md), the routing suite, a spec of bgpd's
+FlowSpec decoders calibrates on CVE-2026-37457: the replay confirms a
+stack buffer overflow before the fix, and after it the spec holds over
+2000 trials and 30 million libFuzzer runs.
+
 Three more C parsers (json-parser, parson, lcms2) came back
 [clean](../docs/eval/c-clean-results.md), with the reasons and what to
 pick next.
