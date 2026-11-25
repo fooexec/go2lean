@@ -74,11 +74,15 @@ type Model struct {
 	Lean string
 }
 
-// maxBuf bounds the elements of a generated buffer.
+// maxBuf bounds the elements of a generated buffer, unless
+// Options.MaxBuf says otherwise.
 const maxBuf = 8
 
 // Options say what to lower and how parameters are passed.
 type Options struct {
+	// MaxBuf bounds the elements of a generated buffer (0: 8). A protocol
+	// message needs more: a parser's defect may need several fields.
+	MaxBuf int
 	// Keep selects the functions to model (all defined functions when nil);
 	// a call to any other function is havoc.
 	Keep func(name string) bool
@@ -1057,7 +1061,11 @@ func (l *lowerer) function(f llvm.Value, index int) (string, Func) {
 				fn.Gens = append(fn.Gens, Gen{K: "typed", Name: name, Ty: ts[i]})
 				continue
 			}
-			g := Gen{K: "buf", Name: name, EB: l.elemBytes(f, p), MaxLen: maxBuf}
+			mb := maxBuf
+			if l.opts.MaxBuf > 0 {
+				mb = l.opts.MaxBuf
+			}
+			g := Gen{K: "buf", Name: name, EB: l.elemBytes(f, p), MaxLen: mb}
 			if g.EB != 1 && g.EB != 2 && g.EB != 4 && g.EB != 8 {
 				g.K = "zbuf"
 			}

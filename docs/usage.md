@@ -656,6 +656,15 @@ go2lean llvm -memory -specs-only -fuzz 60s -lib 'src/*.c' -cflags -Iinclude spec
 The model links all the files (`llvm-link`); the replay and the fuzzer
 link them as separate translation units (`examples/llvm/multi/`).
 
+A spec of a project's own file includes that file (its static functions
+are then visible) with the project's compile flags, and links the
+project's libraries: `-ldflags` goes to the links of the replay and the
+fuzzer, as on a command line (`"-Lbuild -lfrr -Wl,-rpath,build"`); the
+sandbox they run in binds the directories it names read-only. Generated
+buffers have at most 8 elements; `-maxlen` raises that for a parser whose
+defect needs a longer message ([FRR](eval/frr.md)). `go2lean llvm` runs
+from the go2lean checkout, where it finds its Lean project.
+
 The model's search is the one that can exhaust a domain. The fuzzer runs
 the real program, so it reaches what the model does not run (here
 `strtol`) and values the search rarely draws (`examples/llvm/fuzz.c`).

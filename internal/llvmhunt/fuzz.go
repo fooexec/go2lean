@@ -180,6 +180,7 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options) 
 	env := []string{"ASAN_OPTIONS=detect_leaks=0", "UBSAN_OPTIONS=print_stacktrace=1"}
 	secs := max(int(d.Seconds()), 1)
 	lim := sandbox.Default
+	lim.ReadOnly = opts.libDirs()
 	lim.MemBytes, lim.Wall, lim.CPUSeconds = 0, d+time.Minute, int64(secs)+120
 	_, stderr, _, files, err := sandbox.RunCollect(bin, dir,
 		[]string{fmt.Sprintf("-max_total_time=%d", secs), fmt.Sprintf("-seed=%d", seed+1), "-timeout=10", "-print_final_stats=1",
@@ -219,6 +220,7 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options) 
 	}
 	// The crash input, run once more on its own: the run is the replay.
 	rlim := sandbox.Default
+	rlim.ReadOnly = opts.libDirs()
 	rlim.MemBytes, rlim.Wall = 0, 30*time.Second
 	stdout, rerr, exit, err := sandbox.Run(bin, dir, []string{filepath.Join("testdata", filepath.Base(name))}, env, rlim)
 	if err != nil {
