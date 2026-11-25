@@ -781,13 +781,22 @@ func cInt(s string) string {
 
 // sanitizerReport is the line where ASan or UBSan named the error.
 func sanitizerReport(stderr string) string {
+	assertion := ""
 	for _, line := range strings.Split(stderr, "\n") {
 		if strings.Contains(line, "ERROR: AddressSanitizer") || strings.Contains(line, "runtime error:") {
 			return strings.TrimSpace(line)
 		}
+		if assertion == "" && assertFailed.MatchString(line) {
+			assertion = strings.TrimSpace(line)
+		}
 	}
-	return ""
+	return assertion
 }
+
+// assertFailed: the program stopped itself on a failed assertion (assert(3)
+// or a project's own, like FRR's "assertion (0) failed"). Reached from a
+// spec's input, it is a crash a peer can cause, as a sanitizer report is.
+var assertFailed = regexp.MustCompile(`(?i)\bassertion\b.*\bfailed\b`)
 
 func tail(s string) string {
 	if len(s) > 2000 {

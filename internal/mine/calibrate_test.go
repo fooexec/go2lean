@@ -233,8 +233,19 @@ func TestLLVMOutcomes(t *testing.T) {
 	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p_llvm_m_zz_spec_SpecFuzzed_noub", Summary: "no UB in 2000 trials (2000 stuck, 0 out of fuel); libfuzzer: no crash in 7408301 runs (1m0s)"})
 	ws.WriteCounterexample(&contract.Counterexample{ID: "cx1", Property: "p_llvm_m_zz_spec_SpecBad_noub"})
 	ws.WriteVerdict(&contract.Verdict{Counterexample: "cx1", Status: contract.VerdictConfirmed})
-	got := LLVMOutcomes(ws, []string{"SpecHeld", "SpecStuck", "SpecFuzzed", "SpecBad", "SpecGone"})
-	for s, want := range map[string]string{"SpecHeld": OutHeld, "SpecStuck": OutUnknown, "SpecFuzzed": OutHeld, "SpecBad": OutViolated, "SpecGone": OutNotRun} {
+	// The model's counterexample does not reproduce; the fuzzer ran clean.
+	ws.WriteHuntRecord(&contract.HuntRecord{Property: "p_llvm_m_zz_spec_SpecModelWrong_noub", Summary: "libfuzzer: no crash in 5210102 runs (1m0s)"})
+	ws.WriteCounterexample(&contract.Counterexample{ID: "cx2", Property: "p_llvm_m_zz_spec_SpecModelWrong_noub"})
+	ws.WriteVerdict(&contract.Verdict{Counterexample: "cx2", Status: contract.VerdictSpurious})
+	// The same with no fuzzer run: spurious.
+	ws.WriteCounterexample(&contract.Counterexample{ID: "cx3", Property: "p_llvm_m_zz_spec_SpecSpurious_noub"})
+	ws.WriteVerdict(&contract.Verdict{Counterexample: "cx3", Status: contract.VerdictSpurious})
+	// A crash the replay could not judge: unknown, not spurious.
+	ws.WriteCounterexample(&contract.Counterexample{ID: "cx4", Property: "p_llvm_m_zz_spec_SpecUnjudged_noub"})
+	ws.WriteVerdict(&contract.Verdict{Counterexample: "cx4", Status: contract.VerdictInconclusive, Diagnosis: &contract.Diagnosis{Reason: "crash_without_sanitizer_report"}})
+	got := LLVMOutcomes(ws, []string{"SpecHeld", "SpecStuck", "SpecFuzzed", "SpecBad", "SpecGone", "SpecModelWrong", "SpecSpurious", "SpecUnjudged"})
+	for s, want := range map[string]string{"SpecHeld": OutHeld, "SpecStuck": OutUnknown, "SpecFuzzed": OutHeld, "SpecBad": OutViolated, "SpecGone": OutNotRun,
+		"SpecModelWrong": OutHeld, "SpecSpurious": OutSpurious, "SpecUnjudged": OutUnknown} {
 		if got[s].Outcome != want {
 			t.Errorf("%s: %s, want %s", s, got[s].Outcome, want)
 		}
