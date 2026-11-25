@@ -117,6 +117,7 @@ Rules:
 - Never write the input that triggers a defect, or a property that only the vulnerable version breaks for that one input.
 - Propose properties only for what running the code can show. Skip evidence that is about the build, the tests, performance, logging or documentation.
 - An advisory of another project counts only if this project has the same kind of code; name the functions where the same harm could occur.
+- When an item shows its fix (a diff), the targets are the functions the fix changes, and the property is the rule the fix adds: a bound, or a semantic check (a value the protocol forbids, a state that must not be reached), whatever the advisory's text says the mechanism was.
 - Several items may give the same property: give it once, with all their refs.
 - An empty array is a valid answer.`
 
