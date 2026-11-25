@@ -167,7 +167,7 @@ func Collect(ctx context.Context, o Options) (*Report, error) {
 	} else if items != nil {
 		r.Evidence = append(r.Evidence, TrackerEvidence(o.Dir, items)...)
 	}
-	r.Evidence = foldPRs(dedupAdvisories(r.Evidence))
+	r.Evidence = foldPRs(resolveFixes(o.Dir, o.Module, dedupAdvisories(r.Evidence)))
 	sort.SliceStable(r.Evidence, func(i, j int) bool { return kindRank(r.Evidence[i].Kind) < kindRank(r.Evidence[j].Kind) })
 	return r, nil
 }
