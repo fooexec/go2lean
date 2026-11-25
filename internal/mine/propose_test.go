@@ -142,3 +142,13 @@ func TestGuidanceShowsFix(t *testing.T) {
 		t.Errorf("fixOf: %q", f)
 	}
 }
+
+func TestSiblingsRule(t *testing.T) {
+	if !strings.Contains(proposeSystem, fixRule) {
+		t.Fatal("proposeSystem no longer states fixRule: -siblings would change nothing")
+	}
+	got := strings.Replace(proposeSystem, fixRule, siblingsRule, 1)
+	if strings.Contains(got, fixRule) || !strings.Contains(got, "a defect the fix did not reach") {
+		t.Error("siblings prompt does not swap the rule")
+	}
+}

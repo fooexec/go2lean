@@ -125,6 +125,9 @@ Rules:
 - Several items may give the same property: give it once, with all their refs.
 - An empty array is a valid answer.`
 
+// fixRule is the rule for an item that shows its fix, as proposeSystem states it.
+const fixRule = `- When an item shows its fix (a diff), the targets are the functions the fix changes, and the property is the rule the fix adds: a bound, or a semantic check (a value the protocol forbids, a state that must not be reached), whatever the advisory's text says the mechanism was.`
+
 // batch is how many evidence items go into one call.
 const batch = 10
 
@@ -134,6 +137,21 @@ const maxItemText = 1500
 // Propose asks the LLM for candidate properties, a batch of evidence at a
 // time, and keeps those whose targets exist in the module in dir.
 func Propose(ctx context.Context, llm Completer, r *Report, dir string) (*Proposal, error) {
+	return ProposeWith(ctx, llm, r, dir, false)
+}
+
+// siblingsRule replaces the fix rule when the search is for defects a fix
+// did not reach: the same rule, on the project's other code that reads the
+// same kind of input.
+const siblingsRule = `- When an item shows its fix (a diff), the property is the rule the fix adds (a bound, or a semantic check), and the targets are the other functions of this project that read the same kind of input (the same message, option, TLV, header or length field, in another message type, address family, protocol version or code path) and may lack that rule. Name the fixed function too only when the property covers it. The goal is a defect the fix did not reach, so the property must hold on today's code if those functions are right.`
+
+// ProposeWith is Propose; with siblings, a fix's property targets the code
+// that reads the same kind of input elsewhere, not the function it fixed.
+func ProposeWith(ctx context.Context, llm Completer, r *Report, dir string, siblings bool) (*Proposal, error) {
+	system := proposeSystem
+	if siblings {
+		system = strings.Replace(system, fixRule, siblingsRule, 1)
+	}
 	funcs, docs, err := Functions(dir)
 	if err != nil {
 		return nil, err
@@ -153,7 +171,7 @@ func Propose(ctx context.Context, llm Completer, r *Report, dir string) (*Propos
 	seen := map[string]bool{}
 	for start := 0; start < len(r.Evidence); start += batch {
 		items := r.Evidence[start:min(start+batch, len(r.Evidence))]
-		resp, err := llm.Complete(ctx, systemFor(proposeSystem, lang), proposePrompt(r.Module, items, funcs, docs))
+		resp, err := llm.Complete(ctx, systemFor(system, lang), proposePrompt(r.Module, items, funcs, docs))
 		if err != nil {
 			return out, fmt.Errorf("propose: batch %d: %w", start/batch+1, err)
 		}

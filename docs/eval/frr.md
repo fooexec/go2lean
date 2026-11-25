@@ -127,12 +127,76 @@ What it took, each now in the tool:
 - a clean fuzzer run counted as a hold: the model gets stuck in bgpd's
   set-up on every trial, and the fuzzer is what checks these specs (#342).
 
+## pimd parsers with no advisory coverage (2026-11-25)
+
+`propose -siblings` (the fix's rule turned onto the functions it did not
+reach, #343) and the agent drafted specs for pimd's receive paths that no
+advisory touches: IGMP and IGMPv3, AutoRP, mtrace, BSM/BSR, MSDP, the
+Join/Prune parser and Register-Stop. The specs need pimd's own set-up,
+built from the daemon's init rather than hand-made structs: `router` with
+an `event_master`, `qobj_init`, `cmd_init(0)`, `pim_vrf_init`
+(`pim_instance_init` runs), `pim_zebra_init` (zebra clients, not
+connected, so RIB and nexthop lookups fail cleanly), an interface through
+`if_get_by_name` and `pim_if_new`, an IGMP socket from `igmp_sock_new(-1,
+…)`, and, for the forwarding paths, `pim_if_add_vif` so the OIF has a
+mroute VIF index. libFuzzer runs each spec against the real code linked
+with `libpim4.a` and `libfrr`.
+
+The RFC-derived properties held under tens to hundreds of millions of
+runs each: IGMPv2 report/leave (37M) and framing (31M), AutoRP
+announcement (35M) and discovery, mtrace length/forward/debug (82M–113M),
+MSDP TLV length bounds (70M), BSM parse-matches-reference (102M) and
+truncated (30M), and the Join/Prune valid-entry path (100M). No memory
+error survived in any of them.
+
+Four results needed triage and were not defects:
+
+- The IGMPv3 record spec required FRR to leave the earlier records of a
+  report unapplied when a later one is truncated; FRR applies each record
+  as it bounds-checks it and drops the report at the overrun, which RFC
+  3376 permits. Spec over-reach.
+- The MSDP spec required an oversize TLV (over the 9192-byte maximum) to
+  be counted as received; RFC 3618 §12 only asks that it be accepted with
+  the extra data ignored and the session kept up, which is what FRR does.
+  Spec over-reach.
+- Several crashes were in forwarding or response-send code reached after a
+  nexthop or RIB lookup — `mtrace_send_response` → `pim_socket_bind`, and
+  valid `(*,G)` Join/Prune processing → `pim_channel_add_oif`. They come
+  from the harness's zebra client not being a connected daemon and its VIF
+  not being a real kernel mroute interface; `pim_nht_lookup` returns a
+  non-null interface only with a real RIB, and `recv_join`/`recv_prune`
+  already discard the inconsistent WC=1/RPT=0 combination the spec aimed
+  at. Harness artefacts.
+- A class of fuzzer timeouts whose input ran in a few milliseconds on its
+  own: libFuzzer keeps one process across runs, so set-up state that only
+  a timer would expire grew until a run was slow. The tool now judges a
+  timeout or out-of-memory input that replays fast in a fresh process as
+  spurious rather than inconclusive.
+
+One property was violated on today's code and the replay confirmed it, a
+conformance deviation rather than a memory error:
+
+- **Register-Stop treats the RP's own address as the all-sources
+  wildcard.** `pim_register_stop_recv` sets `handling_star` when the
+  encoded source equals `rp->rpf_addr`, as well as when it is all zeros,
+  and then stops every `(S,G)` of the group. RFC 7761 §4.9.4 — and the
+  function's own comment — define only the all-zeros address as the
+  wildcard. A Register-Stop sent for a single source whose address happens
+  to equal the RP's is thus applied to all sources of the group. The
+  packet must already come from the RP (an earlier check requires the L3
+  source to equal `rp->rpf_addr`), so this grants no capability beyond the
+  existing all-zeros wildcard and the impact is a transient over-stop of
+  registration when the multicast source equals the RP; it is a
+  longstanding deviation (predates the 2022 `rpf_addr` rework), on `master`
+  at HEAD. Recorded as a draft for maintainer confirmation, not filed.
+
 ## Next
 
 - Calibrate the 18 advisories whose fix no longer reverses onto today's
   code: each needs a configured build of its own revision.
-- `propose` and the agent on FRR's evidence, for the parsers no advisory
-  covers yet.
+- Confirm the Register-Stop wildcard deviation with the maintainers and,
+  if it stands, the other priority-2 pimd candidates and the remaining
+  daemons (isisd, ospf6d, ldpd, bfdd).
 - A binary line: FRR as distributions and vendors ship it (CVE-2023-38802
   also affected Pica8 PICOS), through an AArch64 semantics in Lean
   (Google DeepMind's AlphaProof Code, Lean 4.35.0 like go2lean's).

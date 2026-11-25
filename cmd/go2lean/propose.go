@@ -23,6 +23,7 @@ func cmdPropose(args []string) error {
 	thinking := fs.Bool("thinking", true, "send adaptive thinking")
 	kinds := fs.String("kinds", "", "only evidence of these kinds, comma-separated (advisory,commit,rfc,doc)")
 	limit := fs.Int("limit", 0, "only the first n evidence items (0: all)")
+	siblings := fs.Bool("siblings", false, "target the code a fix did not reach: the other functions that read the same kind of input")
 	fs.Parse(args)
 	dir := "."
 	if fs.NArg() == 1 {
@@ -43,7 +44,7 @@ func cmdPropose(args []string) error {
 	if err != nil {
 		return err
 	}
-	p, err := mine.Propose(context.Background(), llm, &r, dir)
+	p, err := mine.ProposeWith(context.Background(), llm, &r, dir, *siblings)
 	if p == nil {
 		return err
 	}
