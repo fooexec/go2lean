@@ -284,6 +284,13 @@ record it tracks, whose GIT range names the fix commit. On FRR (46290
 commits) the run took 4.5 minutes: 55 advisories (19 with their fix
 commit), 693 commits, 377 RFC sections, 69 pull requests and 18 issues.
 
+The fix of a project's own advisory is the first of these that changes
+source files: a commit its references name, the merge (or squash) of a
+pull request they name, and the commit of the CVE record's GIT range,
+which often names the release that shipped the fix (a version bump) and
+then is no fix at all. On FRR this gives 30 of the 55 advisories their
+fix.
+
 `-offline` skips OSV, the RFC texts and the GitHub search; the citations
 are still listed, and a `-github-json` file is still read. On
 quic-go (7489 commits) the run takes about 6 seconds and gives 30 advisories
@@ -347,6 +354,15 @@ run ran out of fuel, so nothing was checked), no build, not run. A bug a fix
 removed is often rare, so the run's search is larger than `run`'s
 default (`-run-flags`, by default `-trials 50000 -budget 600
 -mutate=false`). The results go to `calibration.json`.
+
+A C spec (`-spec x.c`) runs on the LLVM line, in the project's own
+configured tree: a fresh worktree lacks what the build generates
+(`config.h`, generated headers). For each revision, calibrate checks out
+only the files the fix changes, installs the spec file, runs `go2lean
+llvm -memory -specs-only` with `-cflags`, `-ldflags`, `-maxlen` (32) and
+`-fuzz` (60s), and puts every file back. A C spec names its candidate in
+the comment above it. It runs from the go2lean checkout (#335), with the
+spec and the module given as absolute paths.
 
 A spec has to build on both revisions. When the fix changed the signature
 of a function the spec calls (quic-go's QPACK header limit added a

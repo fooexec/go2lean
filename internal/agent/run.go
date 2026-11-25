@@ -49,6 +49,10 @@ type Options struct {
 	// and the model reads. CFlags go to every compilation (-I, -D).
 	Lib    []string
 	CFlags []string
+	// LDFlags (C only) go to the links of the replays and the fuzzer (the
+	// project's own libraries); MaxLen bounds generated buffers (0: 8).
+	LDFlags []string
+	MaxLen  int
 }
 
 // Run drives the agent on one package: propose specs, repair until they

@@ -110,3 +110,11 @@ func TestSystemFor(t *testing.T) {
 		t.Errorf("C prompt: %s", c[:300])
 	}
 }
+
+func TestCSpecsAttributeLine(t *testing.T) {
+	src := "/*\n * candidate c008, candidate c021\n */\n__attribute__((annotate(\"go2lean:spec\")))\nint spec_mp(uint8_t a,\n\t    uint8_t b)\n{\n\treturn 1;\n}\n"
+	m := cSpecsByCandidate([]byte(src))
+	if strings.Join(m["c008"], ",") != "spec_mp" || strings.Join(m["c021"], ",") != "spec_mp" {
+		t.Errorf("specs: %v", m)
+	}
+}

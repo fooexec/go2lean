@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -43,6 +44,7 @@ func cmdAgent(args []string) error {
 	// budget left some of them with a handful of trials.
 	lib := fs.String("lib", "", "on a C header: the library's .c files, comma-separated globs, linked with the specs (the argument is then the public header)")
 	cflags := fs.String("cflags", "", "on a C file: flags for every compilation, comma-separated (-Iinclude,-DX=1)")
+	ldflags := fs.String("ldflags", "", "on a C file: flags for the links of the replays and the fuzzer, as on a command line (\"-Lbuild -lfoo -Wl,-rpath,build\")")
 	memory := fs.Bool("memory", true, "on a C file: memory errors only (out of bounds, use after free, double free), not the rest of undefined behaviour")
 	fuzzTime := fs.Duration("fuzztime", 30*time.Second, "after the pipeline, fuzz each spec with go test -fuzz this long (0: off)")
 	opts := searchFlags(fs, 120)
@@ -95,6 +97,7 @@ func cmdAgent(args []string) error {
 		}
 		return agent.RunC(context.Background(), root, contract.Workspace{Root: *ws.workspace}, fs.Arg(0), llm, agent.Options{
 			MaxRepairs: *repairs, ReportRound: *report, Guidance: guidanceText, FuzzTime: *fuzzTime, Memory: *memory, Lib: libFiles, CFlags: splitList(*cflags),
+			LDFlags: strings.Fields(*ldflags), MaxLen: opts.get().MaxLen,
 		}, os.Stdout)
 	}
 	w, env, err := openWorkspace(ws)
@@ -121,6 +124,17 @@ func candidateGuidance(path, pattern string, ids []string) (string, int, error) 
 	var p mine.Proposal
 	if err := json.Unmarshal(b, &p); err != nil {
 		return "", 0, fmt.Errorf("%s: %v", path, err)
+	}
+	if strings.HasSuffix(pattern, ".c") || strings.HasSuffix(pattern, ".h") {
+		// A C file: its directory, relative to the root of its repository
+		// (go2lean llvm runs from the go2lean checkout, not the project's).
+		abs, _ := filepath.Abs(pattern)
+		pattern = filepath.Dir(abs)
+		if top, err := exec.Command("git", "-C", pattern, "rev-parse", "--show-toplevel").Output(); err == nil {
+			if rel, err := filepath.Rel(strings.TrimSpace(string(top)), pattern); err == nil {
+				pattern = rel
+			}
+		}
 	}
 	pkg := strings.TrimSuffix(strings.TrimPrefix(filepath.ToSlash(pattern), "./"), "/")
 	if pkg == "" || pkg == "." {
