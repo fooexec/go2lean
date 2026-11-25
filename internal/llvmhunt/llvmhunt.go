@@ -66,6 +66,10 @@ type Options struct {
 	Lib []string
 	// CFlags go to every compilation (-I, -D).
 	CFlags []string
+	// LDFlags go to the links of the replay and the fuzzer, after the
+	// objects (-L, -l, -Wl,-rpath): the libraries the code calls into
+	// that are not given as C files.
+	LDFlags []string
 }
 
 // libObjects compiles the library's files once per sanitizer set and
@@ -543,7 +547,7 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 		return nil, err
 	}
 	buildArgs := append(append(append([]string{"-g", "-O0"}, opts.sanitizers(false)...), opts.CFlags...), "-fno-omit-frame-pointer", "-w", harness)
-	build := exec.Command("clang", append(append(buildArgs, libObjs...), "-o", bin, "-lm")...)
+	build := exec.Command("clang", append(append(append(buildArgs, libObjs...), "-o", bin, "-lm"), opts.LDFlags...)...)
 	if out, err := build.CombinedOutput(); err != nil {
 		v.Status = contract.VerdictInconclusive
 		v.Evidence = contract.Evidence{Cmd: strings.Join(build.Args, " "), Exit: -1, StderrTail: tail(string(out))}
