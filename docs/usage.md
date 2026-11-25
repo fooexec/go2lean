@@ -333,7 +333,8 @@ open a stream past the advertised limit (from s2n-quic, on
 
 `go2lean agent -candidates candidates.json [-candidate-ids c001,c004]
 <package>` gives the agent the candidates that target the package as
-guidance: each with its harm, oracle and input classes. The agent is asked
+guidance: each with its harm, oracle and input classes. A candidate drafted from a fix carries the fix's diff, which the agent
+reads for the real formats and bounds instead of guessing them. The agent is asked
 to name the candidate a spec checks in its doc comment (`candidate c001`).
 
 `go2lean calibrate` checks a spec written for a candidate drafted from a
@@ -363,6 +364,12 @@ llvm -memory -specs-only` with `-cflags`, `-ldflags`, `-maxlen` (32) and
 `-fuzz` (60s), and puts every file back. A C spec names its candidate in
 the comment above it. It runs from the go2lean checkout (#335), with the
 spec and the module given as absolute paths.
+
+A C spec's outcome counts libFuzzer's clean run as a hold: a spec that
+needs the project's own set-up (FRR's bgpd globals, its event loop) gets
+stuck in the model on every trial, and the fuzzer is what checks it.
+`-lib` links more of the project's C files into the model, the replay and
+the fuzzer, as on `go2lean llvm`.
 
 A spec has to build on both revisions. When the fix changed the signature
 of a function the spec calls (quic-go's QPACK header limit added a
