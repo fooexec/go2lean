@@ -36,6 +36,10 @@ type Limits struct {
 	CPUSeconds int64
 	FileBytes  int64 // largest file the run may write
 	Wall       time.Duration
+	// ReadOnly are directories the run sees read-only although they sit
+	// under a directory the sandbox hides (/tmp, the home): the shared
+	// libraries a C replay links against.
+	ReadOnly []string
 }
 
 // Default is generous for a unit test and stops runaway ones (a random
@@ -100,7 +104,7 @@ func requireIsolation(mode, consent string) error {
 // under the private home and /tmp: tests find files of the module outside
 // their package by their source path (grpc-go's testdata.Path, from
 // runtime.Caller), #221.
-func bwrapArgs(w, bin, mod string) []string {
+func bwrapArgs(w, bin, mod string, ro []string) []string {
 	args := []string{"--ro-bind", "/", "/"}
 	if home, err := os.UserHomeDir(); err == nil && home != "/" {
 		args = append(args, "--tmpfs", home)
@@ -108,6 +112,11 @@ func bwrapArgs(w, bin, mod string) []string {
 	args = append(args, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
 	if mod != "" {
 		args = append(args, "--ro-bind", mod, mod)
+	}
+	for _, d := range ro {
+		if st, err := os.Stat(d); err == nil && st.IsDir() {
+			args = append(args, "--ro-bind", d, d)
+		}
 	}
 	return append(args, []string{
 		"--ro-bind", filepath.Dir(bin), filepath.Dir(bin),
@@ -222,7 +231,7 @@ func RunCollect(bin, dir string, args, env []string, lim Limits, collect string)
 	var cmd *exec.Cmd
 	switch Mode() {
 	case ModeBwrap:
-		cmd = exec.CommandContext(ctx, "bwrap", append(append(bwrapArgs(w, bin, moduleRoot(dir)), "--"), limited...)...)
+		cmd = exec.CommandContext(ctx, "bwrap", append(append(bwrapArgs(w, bin, moduleRoot(dir), lim.ReadOnly), "--"), limited...)...)
 	case ModeLimits:
 		cmd = exec.CommandContext(ctx, limited[0], limited[1:]...)
 		cmd.Dir = filepath.Join(w, "pkg")

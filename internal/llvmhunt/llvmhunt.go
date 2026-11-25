@@ -558,6 +558,7 @@ func replay(ws contract.Workspace, src string, fn llvmfe.Func, cx *contract.Coun
 		return v, ws.WriteVerdict(v)
 	}
 	lim := sandbox.Default
+	lim.ReadOnly = opts.libDirs()
 	lim.MemBytes, lim.Wall = 0, 20*time.Second
 	stdout, stderr, exit, err := sandbox.Run(bin, "", nil, []string{"ASAN_OPTIONS=detect_leaks=0", "UBSAN_OPTIONS=print_stacktrace=1"}, lim)
 	if err != nil {
@@ -778,4 +779,27 @@ func tail(s string) string {
 		return s[len(s)-2000:]
 	}
 	return s
+}
+
+// libDirs are the directories LDFlags names (-L, an rpath): the replay and
+// the fuzzer run in a sandbox that hides /tmp and the home, and must see
+// the shared libraries they link.
+func (o Options) libDirs() []string {
+	var ds []string
+	for _, f := range o.LDFlags {
+		switch {
+		case strings.HasPrefix(f, "-L") && len(f) > 2:
+			ds = append(ds, f[2:])
+		case strings.HasPrefix(f, "-Wl,"):
+			parts := strings.Split(strings.TrimPrefix(f, "-Wl,"), ",")
+			for i, p := range parts {
+				if v, ok := strings.CutPrefix(p, "-rpath="); ok {
+					ds = append(ds, v)
+				} else if (p == "-rpath" || p == "-R") && i+1 < len(parts) {
+					ds = append(ds, parts[i+1])
+				}
+			}
+		}
+	}
+	return ds
 }
