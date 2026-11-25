@@ -518,3 +518,110 @@ func gitLines(dir string, args ...string) ([]string, error) {
 	}
 	return ls, nil
 }
+
+// CalibrateAtHead calibrates on the project's current code: after the fix
+// is the tree as it is; before it is the tree with the fix's change to the
+// source reversed (git apply -R). It is the defect put back into today's
+// code, for a fix whose own revision no longer builds against the rest of
+// the tree (a C project whose headers moved on since). A fix that no
+// longer reverses cleanly is reported as such.
+func CalibrateAtHead(module, pkg, specFile string, cs []Candidate, run Runner) ([]Calibration, error) {
+	byCand, err := SpecsByCandidate(specFile)
+	if err != nil {
+		return nil, err
+	}
+	name := filepath.Base(specFile)
+	var out []Calibration
+	for _, c := range cs {
+		specs := byCand[c.ID]
+		if c.After == "" || len(specs) == 0 {
+			continue
+		}
+		sort.Strings(specs)
+		before := c.Before
+		if before == "" {
+			before = c.After + "^"
+		}
+		cal := Calibration{Candidate: c.ID, Specs: specs, Before: "HEAD with " + c.After + " reverted", After: "HEAD"}
+		res, err := runReverted(module, pkg, name, before, c.After, specs, run)
+		if err != nil {
+			return out, fmt.Errorf("calibrate %s: %w", c.ID, err)
+		}
+		cal.AtBefore = res
+		if cal.AtAfter, err = run(module, pkg, name, specs); err != nil {
+			return out, fmt.Errorf("calibrate %s at HEAD: %w", c.ID, err)
+		}
+		cal.Passed, cal.Why = judge(specs, cal.AtBefore, cal.AtAfter)
+		out = append(out, cal)
+	}
+	return out, nil
+}
+
+// runReverted reverses the source part of before..after in module's tree,
+// runs, and restores the files.
+func runReverted(module, pkg, name, before, after string, specs []string, run Runner) (map[string]Result, error) {
+	files, err := gitLines(module, "diff", "--name-only", before, after)
+	if err != nil {
+		return nil, err
+	}
+	var src []string
+	for _, f := range files {
+		if (strings.HasSuffix(f, ".go") && !strings.HasSuffix(f, "_test.go")) || (isCSource(f) && !cTestPath(f)) {
+			src = append(src, f)
+		}
+	}
+	noBuild := func(why string) map[string]Result {
+		res := map[string]Result{}
+		for _, s := range specs {
+			res[s] = Result{OutNoBuild, why}
+		}
+		return res
+	}
+	if len(src) == 0 {
+		return noBuild("the fix changes no source file"), nil
+	}
+	patch, err := git(module, append([]string{"diff", before, after, "--"}, src...)...)
+	if err != nil {
+		return nil, err
+	}
+	pf, err := os.CreateTemp("", "go2lean-revert-*.patch")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(pf.Name())
+	pf.Write(patch)
+	pf.Close()
+	saved := map[string][]byte{}
+	for _, f := range src {
+		if b, err := os.ReadFile(filepath.Join(module, f)); err == nil {
+			saved[f] = b
+		}
+	}
+	// Less context first lets a later edit near the fix through.
+	var applyArgs []string
+	for _, ctx := range [][]string{nil, {"-C1"}} {
+		args := append([]string{"-C", module, "apply", "-R"}, ctx...)
+		if exec.Command("git", append(append(args, "--check"), pf.Name())...).Run() == nil {
+			applyArgs = append(args, pf.Name())
+			break
+		}
+	}
+	if applyArgs == nil {
+		out, _ := exec.Command("git", "-C", module, "apply", "-R", "--check", pf.Name()).CombinedOutput()
+		return noBuild("the fix does not revert on the current code: " + lastLines(string(out), 3)), nil
+	}
+	defer func() {
+		for _, f := range src {
+			p := filepath.Join(module, f)
+			if b, ok := saved[f]; ok {
+				os.WriteFile(p, b, 0o644)
+			} else {
+				os.Remove(p)
+			}
+		}
+	}()
+	if out, err := exec.Command("git", applyArgs...).CombinedOutput(); err != nil {
+		return noBuild("git apply -R: " + lastLines(string(out), 3)), nil
+	}
+	return run(module, pkg, name, specs)
+}

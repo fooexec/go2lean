@@ -171,7 +171,7 @@ func cDefs(src []byte) []cDef {
 		default:
 			continue
 		}
-		h := strings.Join(header, " ")
+		h := cAttribute.ReplaceAllString(strings.Join(header, " "), " ")
 		if h == "" || strings.Contains(h, "=") || strings.HasPrefix(h, "struct ") && !strings.Contains(h, "(") {
 			continue
 		}
@@ -185,7 +185,7 @@ func cDefs(src []byte) []cDef {
 		}
 		if !seen[m[1]] {
 			seen[m[1]] = true
-			out = append(out, cDef{m[1], h, start})
+			out = append(out, cDef{m[1], strings.Join(header, " "), start})
 		}
 	}
 	return out
@@ -219,6 +219,10 @@ func cSpecsByCandidate(src []byte) map[string][]string {
 	}
 	return out
 }
+
+// cAttribute is a GCC/clang attribute clause, __attribute__((...)), whose
+// parentheses would otherwise be read as a parameter list.
+var cAttribute = regexp.MustCompile(`__attribute__\s*\(\((?:[^()]|\([^()]*\))*\)\)`)
 
 var cKeyword = map[string]bool{"if": true, "for": true, "while": true, "switch": true, "return": true, "sizeof": true, "defined": true}
 

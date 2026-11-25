@@ -239,3 +239,49 @@ func TestLLVMOutcomes(t *testing.T) {
 		}
 	}
 }
+
+func TestCalibrateAtHead(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	dir := t.TempDir()
+	run(t, dir, "init", "-q")
+	pad := "int p1;\nint p2;\nint p3;\nint p4;\n"
+	write(t, dir, "bgpd/attr.c", "int a;\n"+pad+"int bound = 4;\nint z;\n")
+	write(t, dir, "bgpd/attr.h", "int h1;\n")
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "initial")
+	write(t, dir, "bgpd/attr.c", "int a;\n"+pad+"int bound = 5;\nint z;\n")
+	run(t, dir, "commit", "-q", "-am", "fix")
+	fix := run(t, dir, "rev-parse", "HEAD")
+	// Later work changes another line of the file and the header.
+	write(t, dir, "bgpd/attr.c", "int a2;\n"+pad+"int bound = 5;\nint z;\n")
+	write(t, dir, "bgpd/attr.h", "int h2;\n")
+	run(t, dir, "commit", "-q", "-am", "later")
+	write(t, dir, "bgpd/zz_spec.c", "/* candidate c001 */\nSPEC int spec_bound(void)\n{\n\treturn 1;\n}\n")
+
+	var seen []string
+	fake := func(d, pkg, file string, specs []string) (map[string]Result, error) {
+		b, _ := os.ReadFile(filepath.Join(d, "bgpd/attr.c"))
+		seen = append(seen, strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(string(b)), pad, ""), "\n", " "))
+		out := map[string]Result{}
+		for _, s := range specs {
+			out[s] = Result{Outcome: OutHeld}
+			if strings.Contains(string(b), "bound = 4") {
+				out[s] = Result{Outcome: OutViolated}
+			}
+		}
+		return out, nil
+	}
+	cals, err := CalibrateAtHead(dir, "bgpd", filepath.Join(dir, "bgpd/zz_spec.c"), []Candidate{{ID: "c001", After: fix}}, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Before: today's code with the fix reverted (a2 kept, bound back to 4).
+	if len(cals) != 1 || !cals[0].Passed || strings.Join(seen, "|") != "int a2; int bound = 4; int z;|int a2; int bound = 5; int z;" {
+		t.Errorf("calibrations %+v, runs saw %v", cals, seen)
+	}
+	if st := run(t, dir, "status", "--porcelain", "--untracked-files=no"); st != "" {
+		t.Errorf("tree changed: %s", st)
+	}
+}

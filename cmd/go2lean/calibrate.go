@@ -27,6 +27,7 @@ func cmdCalibrate(args []string) error {
 	cflags := fs.String("cflags", "", "a C spec: flags for every compilation, comma-separated (as go2lean llvm -cflags)")
 	ldflags := fs.String("ldflags", "", "a C spec: flags for the links of the replay and the fuzzer (as go2lean llvm -ldflags)")
 	maxLen := fs.Int("maxlen", 32, "a C spec: maximum elements of a generated buffer")
+	atHead := fs.Bool("at-head", true, "a C spec: calibrate on the current code, with the fix reversed for the revision before it (a fix's own revision often no longer builds against the tree); false: check out the fix's files at its revisions")
 	fuzzFor := fs.String("fuzz", "60s", "a C spec: libFuzzer time on each spec the model search did not settle (0: none)")
 	fs.Parse(args)
 	module := "."
@@ -88,7 +89,11 @@ func cmdCalibrate(args []string) error {
 		if *fuzzFor != "" && *fuzzFor != "0" {
 			extra = append(extra, "-fuzz", *fuzzFor)
 		}
-		cals, err = mine.CalibrateInTree(absMod, pkg, absSpec, *specBefore, p.Candidates, mine.LLVMRunner(bin, root, extra...))
+		if *atHead {
+			cals, err = mine.CalibrateAtHead(absMod, pkg, absSpec, p.Candidates, mine.LLVMRunner(bin, root, extra...))
+		} else {
+			cals, err = mine.CalibrateInTree(absMod, pkg, absSpec, *specBefore, p.Candidates, mine.LLVMRunner(bin, root, extra...))
+		}
 	} else {
 		cals, err = mine.Calibrate(absMod, pkg, absSpec, *specBefore, p.Candidates, mine.GoRunner(bin, strings.Fields(*runFlags)...), dir)
 	}
