@@ -183,7 +183,7 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options) 
 	lim.ReadOnly = opts.libDirs()
 	lim.MemBytes, lim.Wall, lim.CPUSeconds = 0, d+time.Minute, int64(secs)+120
 	_, stderr, _, files, err := sandbox.RunCollect(bin, dir,
-		[]string{fmt.Sprintf("-max_total_time=%d", secs), fmt.Sprintf("-seed=%d", seed+1), "-timeout=10", "-print_final_stats=1",
+		[]string{fmt.Sprintf("-max_total_time=%d", secs), fmt.Sprintf("-seed=%d", seed+1), fmt.Sprintf("-timeout=%d", int(fuzzerTimeout.Seconds())), "-print_final_stats=1",
 			"-artifact_prefix=testdata/", "testdata/corpus"}, env, lim, "testdata")
 	if err != nil {
 		return nil, err
@@ -222,7 +222,9 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options) 
 	rlim := sandbox.Default
 	rlim.ReadOnly = opts.libDirs()
 	rlim.MemBytes, rlim.Wall = 0, 30*time.Second
+	start := time.Now()
 	stdout, rerr, exit, err := sandbox.Run(bin, dir, []string{filepath.Join("testdata", filepath.Base(name))}, env, rlim)
+	elapsed := time.Since(start)
 	if err != nil {
 		return nil, err
 	}
@@ -243,12 +245,8 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options) 
 	case report != "":
 		v.Status = contract.VerdictConfirmed
 		v.Evidence.PanicMsg = report
-	case strings.HasPrefix(filepath.Base(name), "timeout-"):
-		v.Status = contract.VerdictInconclusive
-		v.Diagnosis = &contract.Diagnosis{Reason: "fuzzer_timeout"}
-	case strings.HasPrefix(filepath.Base(name), "oom-"):
-		v.Status = contract.VerdictInconclusive
-		v.Diagnosis = &contract.Diagnosis{Reason: "fuzzer_out_of_memory"}
+	case strings.HasPrefix(filepath.Base(name), "timeout-"), strings.HasPrefix(filepath.Base(name), "oom-"):
+		v.Status, v.Diagnosis = resourceVerdict(filepath.Base(name), exit, elapsed)
 	case exit == 0:
 		v.Status = contract.VerdictSpurious
 		v.Diagnosis = &contract.Diagnosis{Reason: "crash_did_not_reproduce"}
@@ -258,4 +256,23 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options) 
 	}
 	res.Verdict = v
 	return res, ws.WriteVerdict(v)
+}
+
+// fuzzerTimeout is the -timeout the fuzzer runs with.
+const fuzzerTimeout = 10 * time.Second
+
+// resourceVerdict judges a fuzzer timeout or out-of-memory input by its
+// replay in a fresh process. libFuzzer runs every input in one process, so
+// state the target keeps between runs (a cache that only a timer would
+// expire) grows until a run is slow or memory runs out; an input that then
+// runs cleanly and quickly on its own is that growth, not a hang or a
+// blow-up of the input.
+func resourceVerdict(base string, exit int, elapsed time.Duration) (contract.VerdictStatus, *contract.Diagnosis) {
+	if exit == 0 && elapsed < fuzzerTimeout/2 {
+		return contract.VerdictSpurious, &contract.Diagnosis{Reason: "fuzzer_resource_limit_not_reproduced: the input ran cleanly in " + elapsed.Round(time.Millisecond).String() + " in a fresh process (state kept between fuzzer runs?)"}
+	}
+	if strings.HasPrefix(base, "oom-") {
+		return contract.VerdictInconclusive, &contract.Diagnosis{Reason: "fuzzer_out_of_memory"}
+	}
+	return contract.VerdictInconclusive, &contract.Diagnosis{Reason: "fuzzer_timeout"}
 }

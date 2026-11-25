@@ -663,7 +663,11 @@ not settle:
 A target decodes the parameters from the fuzzer's bytes and calls the
 function under ASan and UBSan; it is written to
 `out/fuzz/<key>/<function>/`. A crash input is run once more and recorded
-as a counterexample with its verdict:
+as a counterexample with its verdict. A timeout or out-of-memory input
+that then runs cleanly within half the fuzzer's 10 s timeout, in a fresh
+process, is `spurious`: libFuzzer runs every input in one process, so
+state the target keeps between runs (a cache only a timer would expire)
+grew until a run was slow, and the input alone does not hang:
 
 ```
   weight_of
