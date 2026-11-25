@@ -54,6 +54,7 @@ type Options struct {
 	GoABI   bool
 	Callees bool
 	Types   map[string][]any
+	MaxBuf  int
 }
 
 func Load(path string, opts Options) (*Model, error)      { return nil, errNoLLVM }
