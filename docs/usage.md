@@ -275,6 +275,15 @@ is:pr is:merged'` writes them). On quic-go, 300 merged pull requests and
 146 open issues gave 166 `pr` items (162 matched to their commit, 51 folded
 into `commit` items) and 24 `issue` items.
 
+A C project (no `go.mod`) is mined too: the history's commits that change
+`.c` or `.h` files (not under `tests/`), the RFC sections its comments
+cite, and its function definitions for the targets `propose` chooses from.
+OSV lists a C project's advisories under a distribution's package, given
+with `-osv-package` (`Debian:frr`); each entry is followed to the CVE
+record it tracks, whose GIT range names the fix commit. On FRR (46290
+commits) the run took 4.5 minutes: 55 advisories (19 with their fix
+commit), 693 commits, 377 RFC sections, 69 pull requests and 18 issues.
+
 `-offline` skips OSV, the RFC texts and the GitHub search; the citations
 are still listed, and a `-github-json` file is still read. On
 quic-go (7489 commits) the run takes about 6 seconds and gives 30 advisories
@@ -365,7 +374,7 @@ go2lean run     [-workspace out] [-v] [-nil-inputs] [-deps=false] [-generics=fal
 go2lean agent   [-workspace out] [-llm claude|mock:<path>] [-model id] [-base-url url] [-thinking] [-candidates candidates.json] [-candidate-ids ids]
                 [-repairs n] [-report] <package>
 go2lean advisory [-o file] [-llm ...] <GHSA-id|CVE-id>   draft a catalog property (docs/specs) from a published advisory (OSV)
-go2lean mine    [-o evidence.json] [-similar p,...] [-github-repo o/n] [-github-json f] [-offline] [-max-commits n] [dir]   collect the evidence properties are drafted from (below)
+go2lean mine    [-o evidence.json] [-osv-package eco:name] [-similar p,...] [-github-repo o/n] [-github-json f] [-offline] [-max-commits n] [dir]   collect the evidence properties are drafted from (below)
 go2lean propose [-evidence evidence.json] [-o candidates.json] [-llm ...] [-kinds k,...] [-limit n] [dir]   candidate properties from the evidence (below)
 go2lean calibrate -spec <file> [-spec-before <file>] [-candidates candidates.json] [-o calibration.json] [-run-flags "..."] [module]   each spec violated before its candidate's fix, held after (above)
 go2lean symexec [-module dir] [-func names] [-unexported] [-replay=false] [-maxlen n] [-loop n] [-depth n] <package>   bounded symbolic execution (needs z3)

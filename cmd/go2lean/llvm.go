@@ -28,6 +28,7 @@ func cmdLLVM(args []string) error {
 	memory := fs.Bool("memory", false, "memory errors only (out of bounds, use after free, double free): signed arithmetic wraps and the rest of UBSan is off")
 	lib := fs.String("lib", "", "more C files of the library, comma-separated globs, linked with the source (a spec file that includes the library's headers)")
 	cflags := fs.String("cflags", "", "flags for every compilation, comma-separated (-Iinclude,-DX=1)")
+	ldflags := fs.String("ldflags", "", "flags for the links of the replay and the fuzzer, comma-separated (-Lbuild,-lfoo,-Wl,-rpath=build): libraries the code calls that are not given as C files")
 	fuzzFor := fs.Duration("fuzz", 0, "run libFuzzer this long on each function the model search did not settle (e.g. 60s)")
 	fuzzConfirmed := fs.Bool("fuzz-confirmed", false, "with -fuzz: also fuzz the functions whose violation the model search confirmed (to compare the two)")
 	fs.Parse(args)
@@ -42,7 +43,7 @@ func cmdLLVM(args []string) error {
 		return err
 	}
 	ws := contract.Workspace{Root: *workspace}
-	opts := llvmhunt.Options{FuzzConfirmed: *fuzzConfirmed, Trials: *trials, Seed: *seed, Fuel: *fuel, Engine: *engine, ExhaustLen: *exhaustLen, Init: -1, Internal: *internal, SpecsOnly: *specsOnly, Fuzz: *fuzzFor, Memory: *memory, CFlags: splitList(*cflags)}
+	opts := llvmhunt.Options{FuzzConfirmed: *fuzzConfirmed, Trials: *trials, Seed: *seed, Fuel: *fuel, Engine: *engine, ExhaustLen: *exhaustLen, Init: -1, Internal: *internal, SpecsOnly: *specsOnly, Fuzz: *fuzzFor, Memory: *memory, CFlags: splitList(*cflags), LDFlags: splitList(*ldflags)}
 	for _, pat := range splitList(*lib) {
 		ms, err := filepath.Glob(pat)
 		if err != nil || len(ms) == 0 {

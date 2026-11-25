@@ -57,7 +57,7 @@ func History(dir string, max int) ([]Evidence, error) {
 		}
 		code := false
 		for _, p := range files {
-			if !strings.HasSuffix(p, "_test.go") {
+			if !strings.HasSuffix(p, "_test.go") && !(isCSource(p) && cTestPath(p)) {
 				code = true
 			}
 		}
@@ -77,7 +77,7 @@ func History(dir string, max int) ([]Evidence, error) {
 	return ev, nil
 }
 
-// goFiles are the Go files a commit changed.
+// goFiles are the source files a commit changed: Go, or C (.c, .h).
 func goFiles(dir, hash string) ([]string, error) {
 	out, err := git(dir, "show", "--format=", "--name-only", hash)
 	if err != nil {
@@ -85,7 +85,7 @@ func goFiles(dir, hash string) ([]string, error) {
 	}
 	var fs []string
 	for _, l := range strings.Split(string(out), "\n") {
-		if strings.HasSuffix(l, ".go") {
+		if strings.HasSuffix(l, ".go") || isCSource(l) {
 			fs = append(fs, l)
 		}
 	}

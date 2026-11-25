@@ -23,6 +23,12 @@ type Advisory struct {
 	Packages  []Package
 	Fix       []string // fix commits and pull requests, from the references
 	Reference []string // other references
+	// GitFixed are the commits a GIT range of the record says fix it (a C
+	// project's CVE record, converted from NVD, names them this way).
+	GitFixed []string
+	// Upstream are the records this one is derived from: a distribution's
+	// entry (DEBIAN-CVE-...) names the CVE it tracks.
+	Upstream []string
 }
 
 // Package is an affected package and the versions around the fix.
@@ -38,12 +44,14 @@ type osvRecord struct {
 	Aliases  []string `json:"aliases"`
 	Summary  string   `json:"summary"`
 	Details  string   `json:"details"`
+	Upstream []string `json:"upstream"`
 	Affected []struct {
 		Package struct {
 			Ecosystem string `json:"ecosystem"`
 			Name      string `json:"name"`
 		} `json:"package"`
 		Ranges []struct {
+			Type   string `json:"type"`
 			Events []struct {
 				Introduced string `json:"introduced"`
 				Fixed      string `json:"fixed"`
@@ -65,7 +73,7 @@ func Parse(data []byte) (*Advisory, error) {
 	if r.ID == "" {
 		return nil, fmt.Errorf("advisory: no id in the record")
 	}
-	a := &Advisory{ID: r.ID, Aliases: r.Aliases, Summary: r.Summary, Details: r.Details}
+	a := &Advisory{ID: r.ID, Aliases: r.Aliases, Summary: r.Summary, Details: r.Details, Upstream: r.Upstream}
 	for _, af := range r.Affected {
 		p := Package{Ecosystem: af.Package.Ecosystem, Name: af.Package.Name}
 		for _, rg := range af.Ranges {
@@ -75,6 +83,9 @@ func Parse(data []byte) (*Advisory, error) {
 				}
 				if e.Fixed != "" {
 					p.Fixed = append(p.Fixed, e.Fixed)
+					if rg.Type == "GIT" {
+						a.GitFixed = append(a.GitFixed, e.Fixed)
+					}
 				}
 			}
 		}

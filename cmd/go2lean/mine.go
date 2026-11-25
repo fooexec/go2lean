@@ -19,6 +19,7 @@ func cmdMine(args []string) error {
 	out := fs.String("o", "evidence.json", "write the evidence here (- for stdout)")
 	module := fs.String("module-path", "", "the module path (default: read from go.mod)")
 	maxCommits := fs.Int("max-commits", 2000, "how many commits of the history to read")
+	osvPkg := fs.String("osv-package", "", "where OSV lists the project's own advisories, for a project that is not a Go module: ecosystem:name (Debian:frr)")
 	similar := fs.String("similar", "", "comma-separated projects whose advisories count too: Go module paths, or ecosystem:name (crates.io:quiche)")
 	offline := fs.Bool("offline", false, "do not query OSV or fetch RFC texts")
 	rfcCache := fs.String("rfc-cache", defaultRFCCache(), "directory the fetched RFC texts are kept in (empty: none)")
@@ -41,7 +42,7 @@ func cmdMine(args []string) error {
 	}
 	r, err := mine.Collect(context.Background(), mine.Options{
 		Dir: dir, Module: *module, MaxCommits: *maxCommits, Similar: sim, Offline: *offline, RFCCache: *rfcCache,
-		GitHubRepo: *ghRepo, GitHubFile: *ghJSON, GitHubToken: os.Getenv("GITHUB_TOKEN"), MaxIssues: *maxIssues,
+		OSVPackage: *osvPkg, GitHubRepo: *ghRepo, GitHubFile: *ghJSON, GitHubToken: os.Getenv("GITHUB_TOKEN"), MaxIssues: *maxIssues,
 	})
 	if err != nil {
 		return err

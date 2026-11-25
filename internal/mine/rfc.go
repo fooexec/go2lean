@@ -39,10 +39,8 @@ func Citations(dir string) ([]Evidence, error) {
 	where := map[cite][]string{}
 	ctx := map[cite][]string{}
 	var order []cite
-	err := goSources(dir, func(rel string, file *ast.File, fset *token.FileSet) {
-		for _, g := range file.Comments {
-			text := g.Text()
-			line := fset.Position(g.Pos()).Line
+	visit := func(rel string, line int, text string) {
+		{
 			var found []cite
 			for _, m := range citeSecFirst.FindAllStringSubmatch(text, -1) {
 				found = append(found, cite{m[2], m[1]})
@@ -66,7 +64,19 @@ func Citations(dir string) ([]Evidence, error) {
 				}
 			}
 		}
+	}
+	err := goSources(dir, func(rel string, file *ast.File, fset *token.FileSet) {
+		for _, g := range file.Comments {
+			visit(rel, fset.Position(g.Pos()).Line, g.Text())
+		}
 	})
+	if err == nil {
+		err = cSources(dir, func(rel string, src []byte) {
+			for _, c := range cComments(src) {
+				visit(rel, c.line, c.text)
+			}
+		})
+	}
 	if err != nil {
 		return nil, err
 	}

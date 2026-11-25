@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -64,6 +65,11 @@ type Options struct {
 	Module string // its module path (for the advisories); read from go.mod when empty
 	// MaxCommits bounds the history read (0: 2000).
 	MaxCommits int
+	// OSVPackage is where OSV lists the project's own advisories, for a
+	// project that is not a Go module: "ecosystem:name" (Debian:frr). A
+	// distribution's entry is followed to the CVE record it tracks, for
+	// the fix commit.
+	OSVPackage string
 	// Similar are other projects whose advisories count, as
 	// "ecosystem:name" (crates.io:quiche) or a Go module path.
 	Similar []string
@@ -99,7 +105,14 @@ func Collect(ctx context.Context, o Options) (*Report, error) {
 	if o.Module == "" {
 		m, err := modulePath(o.Dir)
 		if err != nil {
-			return nil, err
+			if Language(o.Dir) == "Go" {
+				return nil, err
+			}
+			// A C project: named after its repository.
+			if m = GitHubRepo(o.Dir); m == "" {
+				abs, _ := filepath.Abs(o.Dir)
+				m = filepath.Base(abs)
+			}
 		}
 		o.Module = m
 	}
@@ -125,11 +138,26 @@ func Collect(ctx context.Context, o Options) (*Report, error) {
 		r.Evidence = append(r.Evidence, cites...)
 	} else {
 		r.Evidence = append(r.Evidence, FetchRFCs(ctx, cites, o.RFCBase, o.RFCCache, note)...)
-		for _, p := range append([]string{o.Module}, o.Similar...) {
-			ev, err := Advisories(ctx, o.OSV, p, o.Module)
+		own := o.Module
+		if o.OSVPackage != "" {
+			own = o.OSVPackage
+		} else if Language(o.Dir) != "Go" {
+			own = ""
+			note("advisories: not a Go module, and no -osv-package: the project's own advisories not queried")
+		}
+		for i, p := range append([]string{own}, o.Similar...) {
+			if p == "" {
+				continue
+			}
+			ev, err := Advisories(ctx, o.OSV, p, own)
 			if err != nil {
 				note("advisories of %s: %v", p, err)
 				continue
+			}
+			if i == 0 {
+				for k := range ev {
+					ev[k].Project = o.Module
+				}
 			}
 			r.Evidence = append(r.Evidence, ev...)
 		}

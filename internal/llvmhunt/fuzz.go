@@ -173,7 +173,7 @@ func fuzz(ws contract.Workspace, src, key string, fn llvmfe.Func, opts Options) 
 		return &fuzzResult{Skipped: err.Error()}, nil
 	}
 	args := append(append(append([]string{"-g", "-O1"}, opts.sanitizers(true)...), opts.CFlags...), "-w", harness)
-	build := exec.Command("clang", append(append(args, objs...), "-o", bin, "-lm")...)
+	build := exec.Command("clang", append(append(append(args, objs...), "-o", bin, "-lm"), opts.LDFlags...)...)
 	if out, err := build.CombinedOutput(); err != nil {
 		return &fuzzResult{Skipped: "build failed: " + firstLine(string(out))}, nil
 	}

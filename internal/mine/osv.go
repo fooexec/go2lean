@@ -68,6 +68,11 @@ func Advisories(ctx context.Context, base, project, target string) ([]Evidence, 
 			if err != nil {
 				continue
 			}
+			if len(a.Fix) == 0 && len(a.GitFixed) == 0 && len(a.Upstream) > 0 {
+				// A distribution's entry: the fix and the details are in
+				// the record it tracks.
+				withUpstream(ctx, base, a)
+			}
 			ev = append(ev, fromAdvisory(a, project, project == target))
 		}
 		if r.Next == "" {
@@ -78,11 +83,61 @@ func Advisories(ctx context.Context, base, project, target string) ([]Evidence, 
 	return ev, nil
 }
 
+// distro is an ecosystem of a Linux distribution's packages.
+var distro = regexp.MustCompile(`^(Debian|Ubuntu|Alpine|Red Hat|Rocky Linux|AlmaLinux|SUSE|openSUSE|Mageia|Wolfi|Chainguard)\b`)
+
 // fixCommit finds a commit hash in a fix reference (a GitHub commit URL).
 var fixCommit = regexp.MustCompile(`/commit/([0-9a-f]{7,40})\b`)
 
+// withUpstream adds to a the fix commits, references and details of the
+// records it is derived from (a DEBIAN-CVE entry's CVE record).
+func withUpstream(ctx context.Context, base string, a *advisory.Advisory) {
+	for _, id := range a.Upstream {
+		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		req, err := http.NewRequestWithContext(rctx, "GET", strings.TrimSuffix(base, "/")+"/v1/vulns/"+id, nil)
+		if err != nil {
+			cancel()
+			continue
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancel()
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		cancel()
+		u, err := advisory.Parse(b)
+		if resp.StatusCode != 200 || err != nil {
+			continue
+		}
+		if len(a.Upstream) == 1 {
+			// The CVE is the reference; the distribution's id an alias.
+			a.Aliases = append(a.Aliases, a.ID)
+			a.ID = u.ID
+		} else if !contains(a.Aliases, u.ID) {
+			a.Aliases = append(a.Aliases, u.ID)
+		}
+		a.Fix = append(a.Fix, u.Fix...)
+		a.GitFixed = append(a.GitFixed, u.GitFixed...)
+		a.Reference = append(a.Reference, u.Reference...)
+		if len(u.Details) > len(a.Details) {
+			a.Details = u.Details
+		}
+		if a.Summary == "" {
+			a.Summary = u.Summary
+		}
+	}
+}
+
 func fromAdvisory(a *advisory.Advisory, project string, own bool) Evidence {
-	e := Evidence{Kind: KindAdvisory, Ref: a.ID, Aliases: a.Aliases, Title: a.Summary, Text: clip(a.Text(), maxText), Project: project}
+	title := a.Summary
+	if title == "" {
+		if ss := sentences(a.Details); len(ss) > 0 {
+			title = clip(ss[0], 200)
+		}
+	}
+	e := Evidence{Kind: KindAdvisory, Ref: a.ID, Aliases: a.Aliases, Title: title, Text: clip(a.Text(), maxText), Project: project}
 	if !own {
 		return e
 	}
@@ -92,7 +147,18 @@ func fromAdvisory(a *advisory.Advisory, project string, own bool) Evidence {
 			return e
 		}
 	}
+	for _, c := range a.GitFixed {
+		if regexp.MustCompile(`^[0-9a-f]{7,40}$`).MatchString(c) {
+			e.After, e.Before = c, c+"^"
+			return e
+		}
+	}
 	for _, p := range a.Packages {
+		if distro.MatchString(p.Ecosystem) {
+			// A distribution's package version (8.4.1-1): no revision of
+			// the project.
+			continue
+		}
 		if len(p.Fixed) > 0 {
 			e.After = p.Fixed[0]
 			return e
