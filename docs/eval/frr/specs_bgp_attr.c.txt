@@ -1,0 +1,397 @@
+/* Written by go2lean agent: specs for bgp_attr.c. */
+#include "/tmp/claude-0/-home-user-go2lean/ee7cf21a-6213-5368-bb25-e23bc663a0ba/scratchpad/frr-src/frr/bgpd/bgp_attr.c"
+
+#include <stdint.h>
+#include <string.h>
+#include "vty.h"
+#include "privs.h"
+#include "bgpd/bgp_open.h"
+#include "bgpd/bgp_nexthop.h"
+#include "bgpd/bgp_network.h"
+
+/* Globals that FRR's tests/bgpd/test_mp_attr.c defines and bgpd expects. */
+struct event_loop *master;
+static struct bgp *bgp;
+static as_t asn = 100;
+
+static struct peer *g_peer;
+static struct interface g_ifp;
+
+#define SPEC_PREFIX 35
+
+/* One-time bgpd set-up (BGP master, default instance, a peer with an input stream). */
+static void spec_setup(void)
+{
+	static int done;
+	int i, j;
+
+	if (done)
+		return;
+	done = 1;
+
+	qobj_init();
+	cmd_init(0);
+	bgp_vty_init();
+	master = event_master_create("go2lean spec");
+	bgp_master_init(master, BGP_SOCKET_SNDBUF_SIZE, list_new());
+	vrf_init(NULL, NULL, NULL, NULL);
+	bgp_option_set(BGP_OPT_NO_LISTEN);
+	bgp_attr_init();
+	bgp_labels_init();
+
+	if (bgp_get(&bgp, &asn, NULL, BGP_INSTANCE_TYPE_DEFAULT, NULL, ASNOTATION_PLAIN) < 0)
+		return;
+
+	g_peer = peer_create_accept(bgp, NULL);
+	if (!g_peer)
+		return;
+	g_peer->host = (char *)"foo";
+	g_peer->connection->status = Established;
+	g_peer->connection->curr = stream_new(BGP_MAX_PACKET_SIZE);
+
+	g_ifp.ifindex = 0;
+	g_peer->nexthop.ifp = &g_ifp;
+
+	for (i = AFI_IP; i < AFI_MAX; i++)
+		for (j = SAFI_UNICAST; j < SAFI_MAX; j++) {
+			g_peer->afc[i][j] = 1;
+			g_peer->afc_adv[i][j] = 1;
+		}
+}
+
+/* Put the attribute value (and optional bytes following it in the UPDATE) in the input stream. */
+static uint8_t *spec_load_stream(const uint8_t *d, size_t n, const uint8_t *tail, size_t tn)
+{
+	struct stream *s = g_peer->connection->curr;
+
+	stream_reset(s);
+	stream_put(s, NULL, SPEC_PREFIX);
+	stream_set_getp(s, SPEC_PREFIX);
+	if (n)
+		stream_write(s, d, n);
+	if (tn)
+		stream_write(s, tail, tn);
+	return BGP_INPUT_PNT(g_peer->connection);
+}
+
+/*
+ * candidate c013
+ * The IPv4 next hop of MP_REACH_NLRI gets the same martian check as NEXT_HOP:
+ * the accept/reject decision of bgp_mp_reach_parse() must equal that of
+ * bgp_attr_nexthop_valid() for the same address (next hop length 4 and VPN 12).
+ */
+__attribute__((annotate("go2lean:spec"))) int
+spec_mpreach_martian_nexthop(uint8_t nh_sel, uint8_t vpn, uint8_t allow)
+{
+	static const uint8_t tab[12][4] = {
+		{ 0, 0, 0, 0 },	      { 127, 0, 0, 1 },	  { 127, 255, 255, 254 },
+		{ 224, 0, 0, 1 },     { 239, 255, 255, 250 }, { 240, 0, 0, 1 },
+		{ 255, 255, 255, 255 }, { 10, 0, 0, 1 },	  { 192, 0, 2, 1 },
+		{ 8, 8, 8, 8 },	      { 1, 1, 1, 1 },	  { 172, 16, 5, 4 } };
+	uint8_t buf[40];
+	size_t n = 0;
+	int i, ret, exp_withdraw;
+	struct attr attr = {};
+	struct attr ref = {};
+	struct bgp_nlri nlri = {};
+	struct bgp_attr_parser_args args;
+	struct in_addr addr;
+	uint8_t *startp;
+
+	spec_setup();
+	if (!g_peer)
+		return 1;
+
+	nh_sel = nh_sel % 12;
+	vpn = vpn & 1;
+	allow = allow & 1;
+
+	buf[n++] = 0;
+	buf[n++] = 1;			/* AFI IPv4 */
+	buf[n++] = vpn ? 128 : 1;	/* SAFI MPLS-VPN or unicast */
+	buf[n++] = vpn ? 12 : 4;	/* next hop length */
+	if (vpn)
+		for (i = 0; i < 8; i++)
+			buf[n++] = 0;	/* RD */
+	for (i = 0; i < 4; i++)
+		buf[n++] = tab[nh_sel][i];
+	buf[n++] = 0;			/* SNPA */
+	buf[n++] = 8;			/* NLRI: 10.0.0.0/8 */
+	buf[n++] = 10;
+
+	bgp->allow_martian = allow;
+
+	memcpy(&addr, tab[nh_sel], 4);
+	ref.nexthop = addr;
+	exp_withdraw = (bgp_attr_nexthop_valid(g_peer, &ref) == BGP_ATTR_PARSE_WITHDRAW);
+
+	startp = spec_load_stream(buf, n, NULL, 0);
+	memset(&args, 0, sizeof(args));
+	args.connection = g_peer->connection;
+	args.length = n;
+	args.total = n;
+	args.attr = &attr;
+	args.type = BGP_ATTR_MP_REACH_NLRI;
+	args.flags = BGP_ATTR_FLAG_OPTIONAL;
+	args.startp = startp;
+
+	ret = bgp_mp_reach_parse(&args, &nlri);
+
+	bgp->allow_martian = 0;
+
+	if (exp_withdraw)
+		return ret == BGP_ATTR_PARSE_WITHDRAW;
+	return ret == BGP_ATTR_PARSE_PROCEED;
+}
+
+/* Reference validator: every TLV (4 byte header + value) fits, nothing is left over. */
+static int nhc_tlvs_ok(const uint8_t *p, size_t len)
+{
+	size_t rem = len;
+
+	while (rem >= 4) {
+		size_t dl = ((size_t)p[2] << 8) | p[3];
+
+		if (4 + dl > rem)
+			return 0;
+		p += 4 + dl;
+		rem -= 4 + dl;
+	}
+	return rem == 0;
+}
+
+/*
+ * candidate c005
+ * bgp_attr_nhc() must check that each TLV including its 4 byte header fits in
+ * the remaining attribute length. A malformed NHC attribute is treated as
+ * withdraw, leaves no NHC behind and does not read beyond the attribute
+ * (bytes of the rest of the UPDATE follow it in the stream).
+ */
+__attribute__((annotate("go2lean:spec"))) int
+spec_nhc_tlv_bounds(uint8_t fix, uint8_t ntlv, uint8_t vlen, uint8_t over, uint8_t trail,
+		    uint8_t extra)
+{
+	static const uint8_t fixed[8] = { 0, 1, 1, 4, 10, 0, 0, 1 };
+	uint8_t a[64];
+	uint8_t filler[16];
+	size_t n = 0;
+	unsigned int i, j;
+	int valid, ret, ok = 1;
+	struct attr attr = {};
+	struct bgp_attr_parser_args args;
+	uint8_t *startp;
+	struct bgp_nhc *nh;
+
+	spec_setup();
+	if (!g_peer)
+		return 1;
+
+	fix = fix % 9;
+	ntlv = ntlv % 4;
+	vlen = vlen % 5;
+	over = over % 9;
+	trail = trail % 4;
+	extra = extra % 16;
+
+	for (i = 0; i < fix; i++)
+		a[n++] = fixed[i];
+
+	if (fix == 8) {
+		for (i = 0; i < ntlv; i++) {
+			unsigned int dl = vlen + (i == (unsigned int)ntlv - 1 ? over : 0);
+
+			a[n++] = 0;
+			a[n++] = 100 + i;	/* characteristic code */
+			a[n++] = (dl >> 8) & 0xff;
+			a[n++] = dl & 0xff;
+			for (j = 0; j < vlen; j++)
+				a[n++] = 0x41;
+		}
+		for (i = 0; i < trail; i++)
+			a[n++] = 0x42;
+	}
+
+	valid = (fix == 8) && nhc_tlvs_ok(a + 8, n - 8);
+
+	memset(filler, 0, sizeof(filler));
+	startp = spec_load_stream(a, n, filler, extra);
+
+	memset(&args, 0, sizeof(args));
+	args.connection = g_peer->connection;
+	args.length = n;
+	args.total = n;
+	args.attr = &attr;
+	args.type = BGP_ATTR_NHC;
+	args.flags = BGP_ATTR_FLAG_OPTIONAL | BGP_ATTR_FLAG_TRANS | BGP_ATTR_FLAG_PARTIAL;
+	args.startp = startp;
+
+	ret = bgp_attr_nhc(&args);
+
+	if (valid) {
+		nh = bgp_attr_get_nhc(&attr);
+		ok = (ret == BGP_ATTR_PARSE_PROCEED) && nh != NULL;
+		if (nh)
+			bgp_nhc_unintern(&nh);
+	} else {
+		ok = (ret == BGP_ATTR_PARSE_WITHDRAW) && bgp_attr_get_nhc(&attr) == NULL;
+	}
+
+	/* the read pointer ends at the end of the attribute, never beyond */
+	if (stream_get_getp(g_peer->connection->curr) != SPEC_PREFIX + n)
+		ok = 0;
+
+	return ok;
+}
+
+static int c7_chain_matches(const struct bgp_attr_encap_subtlv *c, int n, const uint8_t *ty,
+			    const uint8_t *ln, const uint8_t *val)
+{
+	int i, j;
+
+	for (i = 0; i < n; i++, c = c->next) {
+		if (!c)
+			return 0;
+		if (c->type != ty[i] || c->length != ln[i])
+			return 0;
+		for (j = 0; j < ln[i]; j++)
+			if (c->value[j] != (uint8_t)(val[i] + j))
+				return 0;
+	}
+	return c == NULL;
+}
+
+static int c7_intern(struct attr *w, int n, const uint8_t *ty, const uint8_t *ln,
+		     const uint8_t *val, struct attr **out)
+{
+	int had = w->encap_subtlvs != NULL;
+	struct attr *r = bgp_attr_intern(w);
+
+	*out = r;
+	if (had)
+		return c7_chain_matches(r->encap_subtlvs, n, ty, ln, val);
+	return r->encap_subtlvs == NULL;
+}
+
+/*
+ * candidate c007
+ * Interning the attributes of one UPDATE (per-prefix copies for the Loc-RIB and
+ * the parsed attribute itself for Adj-RIB-In, with the reuse cache anchored at
+ * the parsed attribute) must return attributes whose Tunnel Encapsulation
+ * sub-TLVs equal the received ones and are referenced once per holder:
+ * releasing every interned attribute must not touch freed memory and must
+ * leave no attribute behind.
+ */
+__attribute__((annotate("go2lean:spec"))) int
+spec_attr_intern_encap_refs(uint8_t adj_first, uint8_t ncopies, uint8_t nsub, uint8_t t0,
+			    uint8_t t1, uint8_t chg, uint8_t rev)
+{
+	uint8_t ty[2], ln[2], val[2];
+	struct bgp_attr_encap_subtlv *head = NULL, *tail = NULL;
+	struct attr P;
+	struct attr *res[4];
+	int had[4];
+	int nres = 0, ok = 1, i, nc, ns, k;
+	unsigned long base;
+
+	spec_setup();
+	if (!g_peer)
+		return 1;
+
+	ns = 1 + (nsub % 2);
+	nc = 1 + (ncopies % 3);
+	adj_first &= 1;
+	chg &= 1;
+	rev &= 1;
+
+	ty[0] = 1 + (t0 % 4);
+	ln[0] = 1 + ((t0 >> 2) % 3);
+	val[0] = 0x10 + (t0 >> 4);
+	ty[1] = 1 + (t1 % 4);
+	ln[1] = (t1 >> 2) % 3;
+	val[1] = 0x50 + (t1 >> 4);
+
+	for (i = 0; i < ns; i++) {
+		struct bgp_attr_encap_subtlv *tlv;
+		int j;
+
+		tlv = XCALLOC(MTYPE_ENCAP_TLV, sizeof(struct bgp_attr_encap_subtlv) + ln[i]);
+		tlv->type = ty[i];
+		tlv->length = ln[i];
+		for (j = 0; j < ln[i]; j++)
+			tlv->value[j] = val[i] + j;
+		tlv->next = NULL;
+		if (tail)
+			tail->next = tlv;
+		else
+			head = tlv;
+		tail = tlv;
+	}
+
+	base = attr_count();
+
+	/* the parsed attribute, self-anchored for the intern reuse cache */
+	memset(&P, 0, sizeof(P));
+	P.origin = BGP_ORIGIN_IGP;
+	bgp_attr_set(&P, BGP_ATTR_ORIGIN);
+	P.aspath = aspath_empty(bgp->asnotation);
+	bgp_attr_set(&P, BGP_ATTR_AS_PATH);
+	P.encap_subtlvs = encap_intern(head, ENCAP_SUBTLV_TYPE);
+	P.encap_tunneltype = BGP_ENCAP_TYPE_VXLAN;
+	bgp_attr_set(&P, BGP_ATTR_ENCAP);
+	P.attr_intern_reuse.parsed_attr = &P;
+
+	if (!adj_first) {
+		for (i = 0; i < nc; i++) {
+			struct attr W = P;
+
+			if (chg && (i & 1))
+				W.local_pref = 100 + i;
+			had[nres] = W.encap_subtlvs != NULL;
+			ok &= c7_intern(&W, ns, ty, ln, val, &res[nres]);
+			nres++;
+		}
+	}
+
+	{
+		/* Adj-RIB-In: intern the parsed attribute itself */
+		struct bgp_attr_encap_subtlv *keep = P.encap_subtlvs;
+
+		had[nres] = P.encap_subtlvs != NULL;
+		ok &= c7_intern(&P, ns, ty, ln, val, &res[nres]);
+		nres++;
+		if (keep && !P.encap_subtlvs)
+			encap_unintern(&keep, ENCAP_SUBTLV_TYPE);
+	}
+
+	if (adj_first) {
+		for (i = 0; i < nc; i++) {
+			struct attr W = P;
+
+			if (chg && (i & 1))
+				W.local_pref = 100 + i;
+			had[nres] = W.encap_subtlvs != NULL;
+			ok &= c7_intern(&W, ns, ty, ln, val, &res[nres]);
+			nres++;
+		}
+	}
+
+	for (k = 0; k < nres; k++) {
+		int idx = rev ? nres - 1 - k : k;
+		struct attr *r = res[idx];
+
+		if (had[idx])
+			ok &= c7_chain_matches(r->encap_subtlvs, ns, ty, ln, val);
+		else
+			ok &= (r->encap_subtlvs == NULL);
+		bgp_attr_unintern_clear_reuse(&P, &r);
+	}
+
+	aspath_unintern(&P.aspath);
+	if (P.encap_subtlvs)
+		encap_unintern(&P.encap_subtlvs, ENCAP_SUBTLV_TYPE);
+
+	if (attr_count() != base)
+		ok = 0;
+
+	return ok;
+}
