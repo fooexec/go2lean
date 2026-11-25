@@ -70,6 +70,9 @@ type Options struct {
 	// objects (-L, -l, -Wl,-rpath): the libraries the code calls into
 	// that are not given as C files.
 	LDFlags []string
+	// MaxLen bounds the elements of a generated buffer (0: the
+	// frontend's 8).
+	MaxLen int
 }
 
 // libObjects compiles the library's files once per sanitizer set and
@@ -198,7 +201,7 @@ func Run(root string, ws contract.Workspace, src string, opts Options, log io.Wr
 			}
 		}
 	}
-	model, err := llvmfe.Load(bc, llvmfe.Options{Types: types})
+	model, err := llvmfe.Load(bc, llvmfe.Options{Types: types, MaxBuf: opts.MaxLen})
 	if err != nil {
 		return err
 	}
