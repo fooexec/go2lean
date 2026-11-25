@@ -113,6 +113,11 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 	if err != nil {
 		return err
 	}
+	// The source must build with the flags given: otherwise every spec
+	// fails on the source's own errors, and the agent repairs blind.
+	if diag := clangCheck(src, opts.CFlags...); diag != "" && strings.HasSuffix(src, ".c") {
+		return fmt.Errorf("agent: %s does not compile with the -cflags given (a define the project's build passes?):\n%s", filepath.Base(src), firstLines(diag, 10))
+	}
 	// stb_image.h is 278 KB; larger sources are cut.
 	const maxSource = 320000
 	shown := string(code)
