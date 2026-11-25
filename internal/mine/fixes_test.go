@@ -2,6 +2,7 @@ package mine
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,9 @@ func TestResolveFixes(t *testing.T) {
 	ev = resolveFixes(dir, "frr", ev)
 	if ev[0].After != merge || ev[0].Before != merge+"^1" {
 		t.Errorf("CVE-1: %s..%s, want the merge %s", ev[0].Before, ev[0].After, merge)
+	}
+	if len(ev[0].Paths) != 1 || ev[0].Paths[0] != "bgpd/attr.c" || !strings.Contains(ev[0].Text, "+int parse(void) { return 1; }") {
+		t.Errorf("CVE-1 lacks its fix: paths %v, text %q", ev[0].Paths, ev[0].Text)
 	}
 	if ev[1].After != "" {
 		t.Errorf("CVE-2: %q, want no revision (the release changes no source)", ev[1].After)

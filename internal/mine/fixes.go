@@ -52,6 +52,17 @@ func resolveFixes(dir, module string, ev []Evidence) []Evidence {
 				break
 			}
 		}
+		if e.After != "" {
+			// The fix itself: the functions it changes are what a spec
+			// drafted from the advisory should drive, and its diff says
+			// what kind of check was missing (a bound, a semantic rule).
+			// An advisory's text often names neither.
+			files := sourceFiles(dir, e.Before, e.After)
+			e.Paths = files
+			if diff, err := git(dir, append([]string{"diff", "--unified=3", e.Before, e.After, "--"}, files...)...); err == nil && len(diff) > 0 {
+				e.Text = clip(e.Text+"\n\nThe fix ("+short(e.After)+"):\n"+clip(string(diff), maxDiff), maxText)
+			}
+		}
 	}
 	return ev
 }
@@ -77,14 +88,28 @@ func mergeOf(dir string, n int) string {
 // changesSource: the diff from before to after changes source files (Go or
 // C) outside the tests.
 func changesSource(dir, before, after string) bool {
+	return len(sourceFiles(dir, before, after)) > 0
+}
+
+// sourceFiles are the source files (Go or C, not tests) the diff from
+// before to after changes.
+func sourceFiles(dir, before, after string) []string {
 	out, err := git(dir, "diff", "--name-only", before, after)
 	if err != nil {
-		return false
+		return nil
 	}
+	var fs []string
 	for _, p := range strings.Split(string(out), "\n") {
 		if (strings.HasSuffix(p, ".go") && !strings.HasSuffix(p, "_test.go")) || (isCSource(p) && !cTestPath(p)) {
-			return true
+			fs = append(fs, p)
 		}
 	}
-	return false
+	return fs
+}
+
+func short(h string) string {
+	if len(h) > 12 {
+		return h[:12]
+	}
+	return h
 }
