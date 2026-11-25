@@ -192,6 +192,38 @@ Four results needed triage and were not defects:
   timeout or out-of-memory input that replays fast in a fresh process as
   spurious rather than inconclusive.
 
+### pim6d / MLD (PIM_IPV=6)
+
+A fourth pass built a second harness for the IPv6 daemon: a `PIM_IPV=6`
+model over `pim6_mld.c`, linked with a `libpim6.a` assembled from the
+pim6d objects. The set-up mirrors the IGMP one through `gm_ifp_update`,
+which runs `gm_start` to make the per-interface `gm_if` once the interface
+is operative, has a PIM instance, holds a mroute VIF index and has MLD
+enabled. This sandbox has no IPv6 stack (`AF_INET6` sockets return
+`EAFNOSUPPORT`), so the mandatory PIM-register socket in
+`pim_instance_init` is stubbed to a placeholder fd — the MLD receive
+parsers never send — and the model is compiled with `-D_GNU_SOURCE` so the
+pktinfo structs are complete.
+
+The ICMPv6 checksum paths held: `gm_rx_process` rejecting a corrupt
+checksum and accepting a valid one computed over the IPv6 pseudo-header
+(23M and 50M runs), and the checksum of a query pim6d sends (138M). Two
+MLDv2 report-handler properties also held — an `(S,G)` un-join keeps the
+`(*,G)` entry, and a Done/query sequence survives a later query (7M and
+10M).
+
+Two `gm_handle_v2_report` specs were reported violated, both spec
+over-reaches with no memory error (no sanitizer report; the model
+violation was reproduced but is not a defect). They reimplement the MLDv2
+report state machine as instantaneous set membership — a `BLOCK_OLD_SOURCES`
+or `CHANGE_TO_INCLUDE` record drops a source at once — whereas RFC 3810
+§7.4 has the router lower that source's timer and send a group-and-source
+query, keeping the `(S,G)` in an expiring JOIN state until it ages out.
+FRR does exactly that (the `GM_SG_JOIN_EXPIRING` state exists for it), so a
+positive subscriber the spec expects gone is still present, and the spec's
+structural invariant and per-source counts trip. A third spec timed out on
+accumulated between-runs state (the artefact class above).
+
 One property was violated on today's code and the replay confirmed it, a
 conformance deviation rather than a memory error:
 
@@ -216,11 +248,11 @@ conformance deviation rather than a memory error:
 - Confirm the Register-Stop wildcard deviation with the maintainers. The
   priority-2 pimd receive paths that fit the IPv4 harness are now covered
   (assert metric, Candidate-RP, BSM fragment, group-address byte order,
-  AutoRP holdtime, BSR hash), all held. Remaining: the pim6d/MLD paths
-  (need a `PIM_IPV=6` build for the ICMPv6 pseudo-header and MLDv2
-  candidates) and the (S,G)/upstream-state candidates (need real mroute
-  and upcall state the unconnected-zebra harness cannot model), then the
-  other daemons (isisd, ospf6d, ldpd, bfdd), each needing its own harness.
+  AutoRP holdtime, BSR hash), as are the pim6d/MLD ICMPv6-checksum and
+  MLDv2 receive paths under the new `PIM_IPV=6` harness, all held.
+  Remaining: the `(S,G)`/upstream-state candidates (need real mroute and
+  upcall state the unconnected-zebra harness cannot model), then the other
+  daemons (isisd, ospf6d, ldpd, bfdd), each needing its own harness.
 - A binary line: FRR as distributions and vendors ship it (CVE-2023-38802
   also affected Pica8 PICOS), through an AArch64 semantics in Lean
   (Google DeepMind's AlphaProof Code, Lean 4.35.0 like go2lean's).
