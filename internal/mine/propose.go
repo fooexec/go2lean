@@ -73,6 +73,19 @@ func Functions(dir string) (map[string][]string, map[string]string, error) {
 			}
 		}
 	})
+	if err == nil {
+		err = cSources(dir, func(rel string, src []byte) {
+			if !strings.HasSuffix(rel, ".c") {
+				return
+			}
+			pkg := filepath.ToSlash(filepath.Dir(rel))
+			for _, f := range cFunctions(src) {
+				if !contains(funcs[pkg], f) {
+					funcs[pkg] = append(funcs[pkg], f)
+				}
+			}
+		})
+	}
 	for p := range funcs {
 		sort.Strings(funcs[p])
 	}
@@ -126,6 +139,7 @@ func Propose(ctx context.Context, llm Completer, r *Report, dir string) (*Propos
 			known[Target{p, f}] = true
 		}
 	}
+	lang := Language(dir)
 	byRef := map[string]Evidence{}
 	for _, e := range r.Evidence {
 		byRef[e.Ref] = e
@@ -134,7 +148,7 @@ func Propose(ctx context.Context, llm Completer, r *Report, dir string) (*Propos
 	seen := map[string]bool{}
 	for start := 0; start < len(r.Evidence); start += batch {
 		items := r.Evidence[start:min(start+batch, len(r.Evidence))]
-		resp, err := llm.Complete(ctx, proposeSystem, proposePrompt(r.Module, items, funcs, docs))
+		resp, err := llm.Complete(ctx, systemFor(proposeSystem, lang), proposePrompt(r.Module, items, funcs, docs))
 		if err != nil {
 			return out, fmt.Errorf("propose: batch %d: %w", start/batch+1, err)
 		}
@@ -445,4 +459,19 @@ func evidenceRef(ref string, byRef map[string]Evidence) string {
 		}
 	}
 	return ref
+}
+
+// systemFor states the prompt for the project's language: a C project's
+// specs are C functions, replayed under the sanitizers.
+func systemFor(prompt, lang string) string {
+	if lang == "Go" {
+		return prompt
+	}
+	r := strings.NewReplacer(
+		"about a Go project", "about a "+lang+" project",
+		"as a Go function (a spec)", "as a "+lang+" function (a spec)",
+		"replays every violation as a real test", "replays every violation as a real program under AddressSanitizer and UndefinedBehaviorSanitizer",
+		`{"package": "<package directory>", "func": "<Name or Type.Method>"}`, `{"package": "<source directory>", "func": "<function name>"}`,
+	)
+	return r.Replace(prompt)
 }
