@@ -241,6 +241,67 @@ conformance deviation rather than a memory error:
   longstanding deviation (predates the 2022 `rpf_addr` rework), on `master`
   at HEAD. Recorded as a draft for maintainer confirmation, not filed.
 
+## Sibling variants across bgpd, ospfd and isisd (2026-11-26)
+
+`propose -siblings` (the fix's rule turned onto the functions it did not
+reach, #343) was run on each daemon's advisories and fix-like commits, and
+the agent wrote specs for the siblings. Three harnesses drive them:
+
+- **bgpd** reuses the attribute set-up of FRR's `test_mp_attr.c` (the BGP
+  master, a bgp instance, a peer with an input stream), linked with
+  `libbgp.a`.
+- **ospfd** (new) sets up as `test_ospf_sr_ext_lsa.c` /
+  `test_ospf_opaque_show.c` do — the OSPF master, an instance, the opaque
+  registry from `ospf_opaque_init`, the TED, and a received LSA with its
+  `area` set — linked with `libfrrospf.a`, with `master` and `ospfd_privs`
+  from a stub.
+- **isisd** (new) feeds a byte buffer to `isis_unpack_tlvs` from a fresh
+  stream, linked with `libisis.a`, with `master`, `isisd_privs` and
+  `isis_sock_init` from a stub as `tests/isisd/test_common.c` does.
+
+**bgpd held across the board.** The receive-path parsers — classic and
+MP_REACH/MP_UNREACH NLRI, labeled-unicast and VPN labels, FlowSpec
+operator/bitmask/rules decoders, OPEN and dynamic capabilities, the
+NOTIFICATION decoders (including the Cease/Hard-Reset path of
+CVE-2026-1xxxx), EVPN type-2/3/5, the nested-TLV attributes (NHC, Tunnel
+Encap, Prefix-SID, AIGP, BGP-LS) and the Unreachability SAFI NLRI — all
+held under tens to hundreds of millions of fuzzer runs. The confirmed
+violations were all spec errors, not bgpd defects: the recurring one is an
+RFC 7606 spec that assigns *attribute-discard* to attributes the RFC
+makes *treat-as-withdraw* (AGGREGATOR, AS4_AGGREGATOR), so bgpd's correct
+treat-as-withdraw trips the spec; others reimplement a parser's exact
+stream consumption or a capability block's exact tiling and over-reach a
+degenerate but valid input (an empty capability block, a trailing
+zero-length option). No memory error in any bgpd run.
+
+**ospfd's opaque-LSA display and Segment-Routing paths held** — the
+Router-Information and SR-Algorithm decode and show, the Extended
+Prefix/Link show, the grace-LSA show, and the Router/Network/Summary LSA
+`ospf_lsa_examin` length checks (17M–160M runs each). The TE *parse* path
+did not: it turned up issues reported to the maintainers through FRR's
+security process, whose details are withheld here until they are fixed.
+(The SR-database structural-invariant specs that tripped are spec
+over-reaches — they model `get_ext_prefix_sid`'s `tlv_fits`/`TLV_SIZE`
+padding slightly wrong — with no memory error.)
+
+**isisd**: the TLV round trip of FRR's own `test_fuzz_isis_tlv` (unpack →
+copy → pack → unpack, formatted output must match), run under libFuzzer
+instead of the fixed corpus, and the sub-TLV-area walks. Two correctness
+deviations, both drafts for maintainer confirmation, not filed, no memory
+error:
+
+- A **zero-length known sub-TLV** inside an extended IP-reachability entry
+  (Prefix-SID, length 0) is accepted but leaves an empty sub-TLV container
+  that the re-pack drops, so the round trip differs; FRR's own fuzz test
+  asserts on it.
+- The **Flex-Algo Definition sub-sub-TLV loop** skips a trailing
+  zero-length sub-sub-TLV (an off-by-one in its bound), so an unknown one
+  does not set `unsupported_subtlv` and the FAD is used where RFC 9350
+  §5.1 says it must be ignored.
+
+The ASLA-sub-TLV, Router-Capability and extended-reachability sub-TLV walks
+the fixes did not reach held (5M–8M runs).
+
 ## Next
 
 - Calibrate the 18 advisories whose fix no longer reverses onto today's
@@ -251,8 +312,11 @@ conformance deviation rather than a memory error:
   AutoRP holdtime, BSR hash), as are the pim6d/MLD ICMPv6-checksum and
   MLDv2 receive paths under the new `PIM_IPV=6` harness, all held.
   Remaining: the `(S,G)`/upstream-state candidates (need real mroute and
-  upcall state the unconnected-zebra harness cannot model), then the other
-  daemons (isisd, ospf6d, ldpd, bfdd), each needing its own harness.
+  upcall state the unconnected-zebra harness cannot model).
+- bgpd, ospfd and isisd now have sibling-variant harnesses (above). Next
+  are ospf6d, ldpd and bfdd, each needing its own set-up, and the ospfd
+  TE-parse and isisd zero-length-sub-TLV drafts to be confirmed with the
+  maintainers.
 - A binary line: FRR as distributions and vendors ship it (CVE-2023-38802
   also affected Pica8 PICOS), through an AArch64 semantics in Lean
   (Google DeepMind's AlphaProof Code, Lean 4.35.0 like go2lean's).
