@@ -175,7 +175,7 @@ func RunC(ctx context.Context, root string, ws contract.Workspace, src string, l
 		os.WriteFile(filepath.Join(agentDir, CSpecFile), []byte(header+spec+"\n"), 0o644)
 		fmt.Fprintf(out, "== search and replay of the specs (%s)\n", specPath)
 		log.Reset()
-		so := llvmhunt.Options{Trials: 2000, Seed: 42, Fuel: 20000, Engine: "all", ExhaustLen: 3, Init: -1, SpecsOnly: true, Fuzz: opts.FuzzTime, Memory: opts.Memory, Lib: opts.Lib, CFlags: opts.CFlags, LDFlags: opts.LDFlags, MaxLen: opts.MaxLen}
+		so := cSearchOptions(opts)
 		runErr = llvmhunt.Run(root, ws, specPath, so, io.MultiWriter(out, &log))
 		if runErr != nil {
 			fmt.Fprintf(out, "  error: %v\n", runErr)
@@ -236,4 +236,25 @@ func firstLines(s string, n int) string {
 		lines = append(lines[:n], fmt.Sprintf("... (%d more lines)", len(lines)-n))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// cSearchOptions is the LLVM-line search a C spec file gets: the agent's
+// -trials, -seed, -engine and -exhaust-len (their defaults are the values
+// this line always used), and the C line's own fuel.
+func cSearchOptions(opts Options) llvmhunt.Options {
+	so := llvmhunt.Options{Trials: 2000, Seed: 42, Fuel: 20000, Engine: "all", ExhaustLen: 3, Init: -1, SpecsOnly: true,
+		Fuzz: opts.FuzzTime, Memory: opts.Memory, Lib: opts.Lib, CFlags: opts.CFlags, LDFlags: opts.LDFlags, MaxLen: opts.MaxLen}
+	if opts.Search.Trials > 0 {
+		so.Trials = opts.Search.Trials
+	}
+	if opts.Search.Seed != 0 {
+		so.Seed = opts.Search.Seed
+	}
+	if opts.Search.Engine != "" {
+		so.Engine = string(opts.Search.Engine)
+	}
+	if opts.Search.ExhaustLen > 0 {
+		so.ExhaustLen = opts.Search.ExhaustLen
+	}
+	return so
 }

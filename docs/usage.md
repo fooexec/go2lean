@@ -757,7 +757,12 @@ fuzzer; `-cflags` are passed to every compilation. A violation whose
 undefined behaviour is in a spec's own body (its arithmetic on its
 parameters) is the spec's error, `ub_in_spec`, not a finding; the agent
 gets those reports and one round to fix the specs. `-fuzztime` also runs
-libFuzzer on the specs the model search did not settle. It repairs the file until
+libFuzzer on the specs the model search did not settle. `-trials`,
+`-seed`, `-engine` and `-exhaust-len` set the model search as on the Go
+line (defaults 2000, 42, `all`, 3). When the specs need a daemon's own
+set-up that the model cannot run (every trial "stuck" in the set-up
+helper), the fuzzer is what checks them, and `-trials 20 -engine random`
+saves the search's time and memory. It repairs the file until
 clang accepts it, searches only the specs (`go2lean llvm -specs-only`), and
 writes its report to `out/agent/<key>/report.md`. It needs a build with the
 LLVM tag. `scripts/llvm-regress.sh <ws>` runs every C
